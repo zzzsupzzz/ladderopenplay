@@ -319,12 +319,16 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
           <option value="4">4 in a row max</option>
         </select>
       </div>
-      <div style="display:flex;flex-direction:column;justify-content:flex-end">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.73rem;color:var(--mu);font-weight:600;letter-spacing:.06em;margin-bottom:6px">
-          <input type="checkbox" id="court6-toggle" style="width:15px;height:15px;accent-color:var(--cy)"/>
-          6-PLAYER COURT GROUPS
-        </label>
-        <div style="font-size:.63rem;color:var(--m2);line-height:1.4">6 per court: 4 play, 2 rotate courtside. Same skill band — no top vs bottom mixing.</div>
+      <div>
+        <label>COURT GROUP SIZE</label>
+        <select id="court-group-size" class="inp" onchange="updateGroupSizeHint();renderRoster()">
+          <option value="4">Standard — 4 per court (no bench)</option>
+          <option value="5">5 per court — 4 play, 1 rotates</option>
+          <option value="6" selected>6 per court — 4 play, 2 rotate ✓ recommended</option>
+          <option value="7">7 per court — 4 play, 3 rotate</option>
+          <option value="8">8 per court — 4 play, 4 rotate</option>
+        </select>
+        <div id="group-size-hint" style="font-size:.63rem;color:var(--m2);line-height:1.5;margin-top:4px"></div>
       </div>
     </div>
     <label>NUMBER OF COURTS</label>
@@ -461,10 +465,11 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     </div>
     <p style="font-size:.68rem;color:var(--mu);margin-top:4px">Type to filter or scroll the list. <strong style="color:var(--tx)">Read-only</strong> — nothing here can be changed.</p>
     <div class="dv" style="margin:10px 0 8px"></div>
-    <label>VIEW STATS FOR SESSION</label>
-    <select id="pv-sess-filter" class="inp" onchange="renderPlayerView()" style="margin-bottom:4px">
-      <option value="">All sessions (overall)</option>
+    <label>FILTER SESSION HISTORY</label>
+    <select id="pv-sess-filter" class="inp" onchange="renderPlayerView()" style="margin-bottom:2px">
+      <option value="">All sessions</option>
     </select>
+    <div style="font-size:.62rem;color:var(--m2);margin-bottom:4px">Pick a session to show only that session's results below</div>
   </div>
   <div id="pv-content"></div>
 </div>
@@ -859,8 +864,8 @@ const MM={
   },
 
   generate(courts){
-    const use6=S.session.court6Mode||false;
-    const groupSize=use6?6:4;
+    const groupSize=S.session.courtGroupSize||4; // 4=standard, 5-8=group rotation mode
+    const useGroups=groupSize>4;
 
     const pool=S.session.activePlayers
       .map(id=>{const p=gp(id),sp=gsp(id);return(p&&sp&&sp.status!=='left')?{...p,sr:sp.sRating,sw:sp.wins||0,sl:sp.losses||0,g:sp.matchesPlayed}:null;})
@@ -872,40 +877,36 @@ const MM={
       });
 
     let sitOuts=[];
-    let courtBench={}; // court index → array of IDs sitting courtside (6-player mode)
     let rawMatches=[];
 
-    if(use6){
-      // 6-player mode: group into bands of 6 by rating, 4 play 2 rotate per court
-      // Leftover players (not fitting a group of 6) go to global sit-out
-      const numGroups=Math.min(courts,Math.floor(pool.length/4)); // at least 4 per court needed
-      const playersPerGroup=Math.ceil(pool.length/numGroups);
-      // Distribute into groups of ~6 (top 6, next 6, etc.)
+    if(useGroups){
+      // Group mode: divide players into bands of groupSize by rating
+      // Within each band: 4 play, rest rotate courtside (no cross-band mixing)
+      const numGroups=Math.min(courts,Math.floor(pool.length/4));
+      if(numGroups===0){sitOuts=pool.map(p=>p.id);sitOuts.forEach(id=>{S.session.sitOutHx[id]=(S.session.sitOutHx[id]||0)+1;});return{matches:[],sitOuts};}
+
+      // Distribute pool evenly across available courts (up to groupSize per court)
+      const baseGroup=Math.floor(pool.length/numGroups);
+      const extras=pool.length%numGroups;
+      let idx=0;
       for(let g=0;g<numGroups;g++){
-        const start=g*playersPerGroup;
-        const groupRaw=pool.slice(start,Math.min(start+playersPerGroup,pool.length));
-        if(groupRaw.length<4){
-          // Too few — push to global sit-out
-          groupRaw.forEach(p=>sitOuts.push(p.id));
-          continue;
-        }
-        // Pick 2 to rotate courtside (if group has 6+)
-        const excess6=Math.max(0,groupRaw.length-4);
-        const bench=excess6>0?this._pickSitOuts(groupRaw,excess6):[];
+        const sz=Math.min(baseGroup+(g<extras?1:0),groupSize); // cap at groupSize
+        const groupRaw=pool.slice(idx,idx+sz);idx+=sz;
+        if(groupRaw.length<4){groupRaw.forEach(p=>sitOuts.push(p.id));continue;}
+        // Within group: pick bench (those who sit courtside)
+        const benchCount=Math.max(0,groupRaw.length-4);
+        const bench=benchCount>0?this._pickSitOuts(groupRaw,benchCount):[];
         bench.forEach(id=>{S.session.sitOutHx[id]=(S.session.sitOutHx[id]||0)+1;});
-        courtBench[g]=bench;
         const playing4=groupRaw.filter(p=>!bench.includes(p.id)).slice(0,4);
         const{t1,t2}=this.bestPair(playing4);
         rawMatches.push({id:uid(),t1:[t1[0].id,t1[1].id],t2:[t2[0].id,t2[1].id],s1:null,s2:null,status:'pending',eloDeltas:null,court:0,bench});
-        // Update streaks for this group
         this.updateStreaks(bench,groupRaw.map(p=>p.id));
       }
-      // Any leftover players beyond numGroups×playersPerGroup go to session sit-out
-      const covered=numGroups*playersPerGroup;
-      pool.slice(covered).forEach(p=>sitOuts.push(p.id));
+      // Any overflow players beyond distributed groups → global sit-out
+      pool.slice(idx).forEach(p=>sitOuts.push(p.id));
       sitOuts.forEach(id=>{S.session.sitOutHx[id]=(S.session.sitOutHx[id]||0)+1;});
     } else {
-      // Standard 4-player mode
+      // Standard 4-player mode — no court groups
       sitOuts=this.calcSitOuts(pool,courts);
       sitOuts.forEach(id=>{S.session.sitOutHx[id]=(S.session.sitOutHx[id]||0)+1;});
       this.updateStreaks(sitOuts,pool.map(p=>p.id));
@@ -978,10 +979,10 @@ function startSession(){
   S.roundMin=parseInt(document.getElementById('round-dur').value)||15;
   const name=document.getElementById('sess-name').value.trim()||`Open Play — ${fmtDate()}`;
   const maxConsecPlay=parseInt(document.getElementById('max-consec')?.value)||99;
-  const court6Mode=document.getElementById('court6-toggle')?.checked||false;
+  const courtGroupSize=parseInt(document.getElementById('court-group-size')?.value)||4;
   S.session={
     id:uid(),name,date:new Date().toISOString(),courts:S.courts,roundMin:S.roundMin,
-    maxConsecPlay,court6Mode,
+    maxConsecPlay,courtGroupSize,
     sessionStart:Date.now(),
     activePlayers:[...arr],
     players:arr.map(id=>{const p=gp(id);return{id,name:p.name,tag:p.tag||'',sRating:p.rating,startRating:p.rating,wins:0,losses:0,ties:0,matchesPlayed:0,ptsFor:0,ptsAgainst:0,status:'active'};}),
@@ -1276,12 +1277,32 @@ function renderRoster(){
   }
   const players=arr.map(gp).filter(Boolean).sort((a,b)=>b.rating-a.rating);
   document.getElementById('roster-list').innerHTML=players.map(p=>`<div class="prow click chk" onclick="toggleCheckIn('${p.id}')"><div class="pnc"><div class="pn">${p.name}${tagHtml(p)}</div></div><div class="pr" style="color:var(--gr)">${Math.round(p.rating)}</div><div style="color:var(--gr)">✓</div></div>`).join('');
-  const need=S.courts*4,avg=Math.round(arr.reduce((s,id)=>s+(gp(id)?.rating||0),0)/arr.length);
-  document.getElementById('roster-stats').innerHTML=`<span class="sc"><b>${arr.length}</b> Players</span><span class="sc"><b>${S.courts}</b> Court${S.courts>1?'s':''}</span><span class="sc"><b>${Math.min(need,arr.length)}</b> Playing R1</span><span class="sc"><b>${avg}</b> Avg RTG</span>`;
+  const grpSz=parseInt(document.getElementById('court-group-size')?.value)||4;
+  const useGroups=grpSz>4;
+  const avg=Math.round(arr.reduce((s,id)=>s+(gp(id)?.rating||0),0)/arr.length);
+  let playingR1,hintText;
+  if(useGroups){
+    // In group mode: up to grpSz*courts in the mix, the rest sit globally
+    const inMix=Math.min(arr.length,grpSz*S.courts);
+    const globalSits=Math.max(0,arr.length-inMix);
+    // Within each court group: min(grpSz,actual) players, 4 play, rest bench
+    const benchPerCourt=Math.max(0,Math.min(grpSz,Math.ceil(inMix/S.courts))-4);
+    playingR1=Math.min(arr.length,S.courts*4);
+    if(globalSits>0)
+      hintText=`${inMix} in court groups (${benchPerCourt} bench/court), ${globalSits} sit out`;
+    else
+      hintText=`All ${arr.length} in court groups · ${benchPerCourt} rotating courtside per court`;
+  }else{
+    const need=S.courts*4;
+    playingR1=Math.min(need,arr.length);
+    const so=Math.max(0,arr.length-need);
+    hintText=so?`${so} player${so>1?'s':''} sit out round 1`:'Everyone plays round 1!';
+  }
+  document.getElementById('roster-stats').innerHTML=`<span class="sc"><b>${arr.length}</b> Players</span><span class="sc"><b>${S.courts}</b> Court${S.courts>1?'s':''}</span><span class="sc"><b>${playingR1}</b> Playing R1</span><span class="sc"><b>${avg}</b> Avg RTG</span>`;
   const act=S.session?.status==='active',btn=document.getElementById('start-btn');
   if(act){btn.disabled=true;btn.textContent='✅ Session Running';document.getElementById('start-hint').textContent='Go to Live tab.';}
   else if(arr.length<4){btn.disabled=true;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=`Need ${4-arr.length} more.`;}
-  else{btn.disabled=false;btn.textContent='🚀 Start Session';const so=Math.max(0,arr.length-need);document.getElementById('start-hint').textContent=so?`${so} player${so>1?'s':''} sit out round 1`:'Everyone plays round 1!';}
+  else{btn.disabled=false;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=hintText;}
 }
 
 /* ── RENDER: LIVE ────────────────────────────────── */
@@ -1445,14 +1466,88 @@ function deleteMatch(matchId){
     });
 }
 
+function updateGroupSizeHint(){
+  const sel=document.getElementById('court-group-size');
+  const hint=document.getElementById('group-size-hint');
+  if(!sel||!hint)return;
+  const sz=parseInt(sel.value)||4;
+  const courts=S.courts||1;
+  const msgs={
+    4:`Standard: ${courts*4} play, extras sit globally. Good for small groups.`,
+    5:`${courts*5} in the mix: 4 play, 1 rotates per court. Short break rhythm.`,
+    6:`${courts*6} in the mix: 4 play, 2 rotate per court. ✓ Best for most groups — play 2–3 straight, then a short break.`,
+    7:`${courts*7} in the mix: 4 play, 3 rotate per court. Longer bench wait than 6. For 14 players, 6-per-court (12 active + 2 global sits) is better.`,
+    8:`${courts*8} in the mix: 4 play, 4 rotate per court. High bench time — each player waits ~50% of rounds.`,
+  };
+  hint.textContent=msgs[sz]||'';
+}
+
+/* ── ALL-TIME RATING RECALCULATION ───────────────── */
+function recalcAllTimeRatings(){
+  // Recompute S.db ratings/stats from remaining archived sessions + active session
+  // Method: for each player, base = startRating of earliest appearance,
+  //         then add net delta (sRating - startRating) per remaining session in order.
+  const sessions=[...S.archive].sort((a,b)=>new Date(a.date)-new Date(b.date));
+
+  // Find each player's base rating (their rating before any session)
+  const playerBase={};
+  sessions.forEach(sess=>{
+    sess.players.forEach(sp=>{
+      if(!(sp.id in playerBase))playerBase[sp.id]=sp.startRating;
+    });
+  });
+  // Also cover players only in active session
+  if(S.session){
+    S.session.players.forEach(sp=>{
+      if(!(sp.id in playerBase))playerBase[sp.id]=sp.startRating;
+    });
+  }
+
+  // Reset db stats for known players
+  S.db.forEach(p=>{
+    if(p.id in playerBase){
+      p.rating=playerBase[p.id];
+      p.wins=0;p.losses=0;p.ties=0;p.gamesPlayed=0;
+    }
+  });
+
+  // Replay archived sessions: add net ELO delta + aggregate W/L
+  sessions.forEach(sess=>{
+    sess.players.forEach(sp=>{
+      const dbP=S.db.find(p=>p.id===sp.id);if(!dbP)return;
+      const delta=Math.round(sp.sRating-sp.startRating);
+      dbP.rating=Math.max(400,dbP.rating+delta);
+      dbP.wins=(dbP.wins||0)+(sp.wins||0);
+      dbP.losses=(dbP.losses||0)+(sp.losses||0);
+      dbP.ties=(dbP.ties||0)+(sp.ties||0);
+      dbP.gamesPlayed=(dbP.gamesPlayed||0)+(sp.matchesPlayed||0);
+    });
+  });
+
+  // Layer the active session on top if running
+  if(S.session?.status==='active'){
+    S.session.players.forEach(sp=>{
+      const dbP=S.db.find(p=>p.id===sp.id);if(!dbP)return;
+      // sp.startRating = what was in db when session started
+      // After recalc above, dbP.rating = rating BEFORE current session
+      // So we only add the active session's in-progress delta
+      const activeDelta=Math.round(sp.sRating-sp.startRating);
+      dbP.rating=Math.max(400,dbP.rating+activeDelta);
+    });
+  }
+}
+
 function deleteArchiveSess(sessId){
   const sess=S.archive.find(a=>a.id===sessId);if(!sess)return;
   showCfm(
-    `Delete archived session <strong>${esc(sess.name)}</strong>?<br/><span style="font-size:.73rem;color:var(--or)">⚠ All-time ratings for those matches are NOT reversed (complex history). This only removes the record.</span>`,
-    'Delete Record','bd2',()=>{
+    `Delete <strong>${esc(sess.name)}</strong>?<br/><span style="font-size:.73rem;color:var(--mu)">All-time ratings and player stats will be fully recalculated from remaining sessions.</span>`,
+    'Delete & Recalculate','bd2',()=>{
       S.archive=S.archive.filter(a=>a.id!==sessId);
-      STORE.save();renderArchive();updatePvSessFilter();
-      toast('Session record deleted','warn');
+      recalcAllTimeRatings();
+      STORE.save();
+      renderAllTime();renderArchive();renderStandings();updatePvSessFilter();
+      if(S.session)renderLive();
+      toast(`"${sess.name}" deleted — ratings recalculated ✓`,'ok');
     });
 }
 
@@ -1532,7 +1627,7 @@ function updatePvSelect(){
 function updatePvSessFilter(){
   const sf=document.getElementById('pv-sess-filter');if(!sf)return;
   const cur=sf.value;
-  let opts='<option value="">All sessions (overall)</option>';
+  let opts='<option value="">All sessions</option>';
   if(S.session&&S.session.status==='active')opts+=`<option value="__current__">📍 Current: ${esc(S.session.name)}</option>`;
   S.archive.forEach(sess=>{
     const d=new Date(sess.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
@@ -1699,11 +1794,11 @@ function renderPlayerView(){
         </div>
       </div>
     </div>`;
-    // Gather all sessions
+    // Gather all sessions (overall view)
     if(S.session)addMatchesFromSess(S.session.rounds,S.session.name+' (today)',S.session.date,null);
     S.archive.forEach(sess=>addMatchesFromSess(sess.rounds,sess.name,sess.date,sess.players));
   } else {
-    // Specific session view
+    // Specific session view (from dropdown filter)
     let targetSess=null,targetPlayers=null,sessIsLive=false;
     if(sessFilter==='__current__'&&S.session){targetSess=S.session;targetPlayers=null;sessIsLive=true;}
     else{const a=S.archive.find(x=>x.id===sessFilter);if(a){targetSess=a;targetPlayers=a.players;}}
@@ -1738,17 +1833,44 @@ function renderPlayerView(){
     }
   }
 
-  const histHtml=pastMatches.length?`<div class="card">
-    <div class="ct" style="margin-bottom:8px">📜 ${sessFilter?'Session':'Recent'} Match History</div>
-    ${pastMatches.slice(0,40).map(m=>{
+  // Build clickable per-session cards (grouping matches by session name+date)
+  const sessBuckets=[];
+  pastMatches.forEach(m=>{
+    let b=sessBuckets.find(x=>x.name===m.sessName&&x.date===m.date);
+    if(!b){b={name:m.sessName,date:m.date,matches:[]};sessBuckets.push(b);}
+    b.matches.push(m);
+  });
+
+  function renderSessBucket(b,expanded){
+    const agg=b.matches.reduce((acc,m)=>{if(m.won)acc.w++;else if(m.tie)acc.t++;else acc.l++;return acc;},{w:0,l:0,t:0});
+    const rec=`${agg.w}W/${agg.l}L${agg.t?'/'+agg.t+'T':''}`;
+    const d=new Date(b.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+    const matchRows=b.matches.map(m=>{
       const col=m.won?'var(--gr)':m.tie?'var(--go)':'var(--re)';
-      return `<div class="prow" style="cursor:default;margin-bottom:3px">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:.95rem;color:${col};min-width:40px">${m.s1}–${m.s2}</div>
-        <div class="pnc"><div class="pn">${m.won?'WIN':m.tie?'TIE':'LOSS'} · ${m.sessName} R${m.round}</div><div class="pst">w/ ${m.partner} vs ${m.opps.join(' & ')}</div></div>
-        <div style="font-size:.69rem;color:var(--mu)">${new Date(m.date).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>
+      return `<div class="hm" style="gap:8px;padding:8px 12px">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;color:${col};min-width:42px">${m.s1}–${m.s2}</div>
+        <div class="pnc"><div class="pn" style="font-size:.79rem">${m.won?'✓ WIN':m.tie?'🤝 TIE':'✗ LOSS'} &nbsp;·&nbsp; R${m.round}</div><div class="pst">w/ ${esc(m.partner)} vs ${m.opps.map(esc).join(' & ')}</div></div>
       </div>`;
-    }).join('')}
-  </div>`:'<div class="card" style="text-align:center;padding:22px;color:var(--mu)">No match history found for this selection.</div>';
+    }).join('');
+    const bid='pvb-'+btoa(b.name+b.date).replace(/[^a-zA-Z0-9]/g,'').slice(0,12);
+    return `<div class="hr" style="margin-bottom:5px">
+      <div class="hrhd" onclick="const d=document.getElementById('${bid}');d.classList.toggle('open');this.querySelector('.pv-arr').textContent=d.classList.contains('open')?'▾':'▸'">
+        <div>
+          <div style="font-weight:700;font-size:.81rem;color:var(--tx)">${esc(b.name)}</div>
+          <div style="font-size:.67rem;color:var(--mu);margin-top:1px">${d} &nbsp;·&nbsp; ${b.matches.length} game${b.matches.length!==1?'s':''} &nbsp;·&nbsp; <span style="color:${agg.w>agg.l?'var(--gr)':agg.l>agg.w?'var(--re)':'var(--mu)'}">${rec}</span></div>
+        </div>
+        <span class="pv-arr" style="color:var(--mu);font-size:.75rem">${expanded?'▾':'▸'}</span>
+      </div>
+      <div class="hr-body${expanded?' open':''}" id="${bid}">${matchRows}</div>
+    </div>`;
+  }
+
+  const histHtml=sessBuckets.length
+    ?`<div class="card" style="padding-bottom:6px">
+        <div class="ct" style="margin-bottom:10px">📜 Session History <span style="font-size:.68rem;color:var(--mu);font-weight:400">${sessBuckets.length} session${sessBuckets.length!==1?'s':''}</span></div>
+        ${sessBuckets.map((b,i)=>renderSessBucket(b,i===0)).join('')}
+      </div>`
+    :'<div class="card" style="text-align:center;padding:22px;color:var(--mu)">No match history found.</div>';
 
   el.innerHTML=`<div class="pv-hero">
     <div class="pv-name">${p.name}${p.tag?`<span class="ptag">${p.tag}</span>`:''}</div>
@@ -2304,7 +2426,7 @@ function seedExampleData(){
 function doEndSession(){
   if(!S.session){toast('No active session','err');return;}
   showCfm(`End <strong>${esc(S.session.name)}</strong>?<br/><span style="font-size:.74rem;color:var(--mu)">Ratings saved to database.</span>`,'🏁 End Session','bp',()=>{
-    S.session.players.forEach(sp=>{const p=gp(sp.id);if(!p)return;p.rating=sp.sRating;p.wins+=sp.wins;p.losses+=sp.losses;p.ties=(p.ties||0)+sp.ties;p.gamesPlayed=(p.gamesPlayed||0)+sp.matchesPlayed;});
+    // Archive the completed session first
     const arch={id:S.session.id,name:S.session.name,date:S.session.date,
       players:S.session.players.map(sp=>{const p=gp(sp.id)||{};return{id:sp.id,name:sp.name||p.name||'?',tag:sp.tag||p.tag||'',sRating:sp.sRating,startRating:sp.startRating,wins:sp.wins,losses:sp.losses,ties:sp.ties,matchesPlayed:sp.matchesPlayed,ptsFor:sp.ptsFor,ptsAgainst:sp.ptsAgainst};}),
       rounds:JSON.parse(JSON.stringify(S.session.rounds))};
@@ -2312,10 +2434,12 @@ function doEndSession(){
     const top=[...arch.players].sort((a,b)=>b.sRating-a.sRating).slice(0,3);
     const totalM=arch.rounds.reduce((s,r)=>s+r.matches.filter(m=>m.status==='done').length,0);
     const n=S.session.name;S.checkedIn.clear();S.session=null;
+    // Recalculate all-time ratings from full archive history (consistent with deleteArchiveSess)
+    recalcAllTimeRatings();
     STORE.save();stopTimer();stopElapsed();
     // Reset progress bar
     const pb=document.getElementById('prog-bar');if(pb)pb.style.width='0%';
-    updateHeader();renderDB();renderRoster();renderAllTime();renderHistory();renderArchive();
+    updateHeader();renderDB();renderRoster();renderAllTime();renderHistory();renderArchive();updatePvSessFilter();
     openModal(`<div class="modal-title" style="text-align:center">🏆 Session Complete!</div>
       <div style="text-align:center;margin-bottom:12px;color:var(--mu);font-size:.76rem">${esc(n)}<br/>${arch.rounds.length} rounds · ${totalM} matches · ${arch.players.length} players</div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:.86rem;color:var(--mu);letter-spacing:.5px;margin-bottom:6px">🥇 TOP PERFORMERS</div>
@@ -2523,7 +2647,7 @@ function isPlayerModeUrl(){
 function init(){
   STORE.load();
 
-  initCourtPills('cpills-setup',n=>{S.courts=n;renderRoster();});
+  initCourtPills('cpills-setup',n=>{S.courts=n;renderRoster();updateGroupSizeHint();});
   initCourtPills('cpills-live',n=>{
     S.courts=n;if(S.session){S.session.courts=n;STORE.save();}
     toast(`Courts → ${n} (next round)`,'ok');
@@ -2541,6 +2665,7 @@ function init(){
   renderDB();renderRoster();renderAllTime();renderHistory();renderArchive();updateHeader();
   updatePinStatus();
   updatePvSessFilter();
+  updateGroupSizeHint();
 
   // Check for ?sync= parameter — loads shared state from another device
   checkSyncParam();
