@@ -17,6 +17,11 @@
 .prob-wrap{margin-top:7px}.prob-lbl{font-size:.63rem;color:var(--m2);margin-bottom:3px;text-align:center}
 .prob-bar{height:5px;border-radius:3px;background:var(--s3);overflow:hidden}
 .prob-fill{height:100%;background:linear-gradient(90deg,var(--cy),var(--pu));transition:width .3s}
+/* V16 — Firebase loading overlay */
+#fb-loading{position:fixed;inset:0;background:var(--bg);z-index:8500;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px}
+#fb-loading.hidden{display:none}
+.fb-spinner{width:36px;height:36px;border:3px solid var(--s3);border-top-color:var(--gr);border-radius:50%;animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 /* V16 — Admin PIN overlay */
 #admin-lock{position:fixed;inset:0;background:rgba(7,16,26,.97);z-index:9000;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:24px}
 #admin-lock.open{display:flex}
@@ -233,6 +238,14 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 <meta name="theme-color" content="#07101a"/>
 </head>
 <body>
+
+<!-- FIREBASE LOADING OVERLAY -->
+<div id="fb-loading">
+  <div class="fb-spinner"></div>
+  <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:2px;color:var(--gr)">LOADING…</div>
+  <div id="fb-loading-sub" style="font-size:.72rem;color:var(--mu)">Connecting to Firebase</div>
+  <button id="fb-retry-btn" class="btn bs sm" style="display:none;margin-top:4px" onclick="SYNC.ready=false;SYNC.autoConnect()">🔄 Retry</button>
+</div>
 
 <!-- ADMIN PIN LOCK OVERLAY -->
 <div id="admin-lock">
@@ -505,14 +518,11 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 //  • Pickles & Ladders icon embedded
 // ================================================================
 
-const S={db:[],checkedIn:new Set(),session:null,archive:[],courts:1,roundMin:15,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
-const KEY={db:'pb16_db',sess:'pb16_sess',arch:'pb16_arch'};
-const ADMIN_KEY='pb16_admin_pin';
+const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,roundMin:15,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
+// Firebase config stored locally (describes HOW to connect, not app data)
 const SYNC_CFG_KEY='pb16_sync_cfg';
-// Migrate saved config from V15 if V16 key not yet written
-(()=>{try{if(!localStorage.getItem('pb16_sync_cfg')&&localStorage.getItem('pb15_sync_cfg')){localStorage.setItem('pb16_sync_cfg',localStorage.getItem('pb15_sync_cfg'));}}catch(e){}})();
 let ADMIN_UNLOCKED=false;
-// Unique device ID — prevents echoing own writes back
+// DEVICE_ID stays local — prevents echoing own Firebase writes back
 const DEVICE_ID=localStorage.getItem('pb16_did')||(()=>{const d=Math.random().toString(36).slice(2,10);localStorage.setItem('pb16_did',d);return d;})();
 
 /* ── FIREBASE REAL-TIME SYNC ──────────────────────── */
@@ -572,10 +582,15 @@ const SYNC={
       this.ref=db.ref(`pb_ladder/${roomId}`);
       // Remove any existing listener before adding new one
       if(this._unsubscribe){try{this._unsubscribe();}catch(e){}}
+      let _firstLoad=true;
       const listener=this.ref.on('value',(snap)=>{
         const data=snap.val();
-        if(!data||data._by===DEVICE_ID)return;
-        this._applyRemote(data);
+        const isOwn=data&&data._by===DEVICE_ID;
+        // Always apply on first load (even if we last pushed); skip own echoes after that
+        if(!_firstLoad&&isOwn){return;}
+        const wasFirst=_firstLoad;
+        _firstLoad=false;
+        this._applyRemote(data,wasFirst);
       },(err)=>{
         this.ready=false;this._updateBadge();
         toast(`Sync disconnected: ${err.message}`,'warn');
@@ -596,16 +611,24 @@ const SYNC={
   push(){
     if(!this.ready||!this.ref)return;
     try{
-      this.ref.set({db:S.db,session:S.session?JSON.parse(JSON.stringify(S.session)):null,
-        archive:S.archive,_by:DEVICE_ID,_ts:Date.now()});
+      this.ref.set({
+        db:S.db,
+        session:S.session?JSON.parse(JSON.stringify(S.session)):null,
+        archive:S.archive,
+        adminPin:S.adminPin||'',
+        _by:DEVICE_ID,
+        _ts:Date.now()
+      });
     }catch(e){}
   },
 
-  _applyRemote(data){
+  _applyRemote(data, isFirstLoad=false){
     try{
-      S.db=data.db||[];
-      S.session=data.session||null;
-      S.archive=data.archive||[];
+      const remote=data||{};
+      S.db=remote.db||[];
+      S.session=remote.session||null;
+      S.archive=remote.archive||[];
+      if(typeof remote.adminPin!=='undefined') S.adminPin=remote.adminPin;
       if(S.session){
         S.session.soStreak=S.session.soStreak||{};S.session.plStreak=S.session.plStreak||{};
         S.session.sitOutHx=S.session.sitOutHx||{};S.session.partnerHx=S.session.partnerHx||{};
@@ -614,12 +637,16 @@ const SYNC={
         S.checkedIn.clear();
         S.session.activePlayers?.forEach(id=>S.checkedIn.add(id));
       }else{S.checkedIn.clear();}
-      // Persist locally too
-      try{localStorage.setItem(KEY.db,JSON.stringify(S.db));}catch(e){}
-      try{if(S.session)localStorage.setItem(KEY.sess,JSON.stringify(S.session));else localStorage.removeItem(KEY.sess);}catch(e){}
-      try{localStorage.setItem(KEY.arch,JSON.stringify(S.archive));}catch(e){}
+
+      // Seed example data on a brand-new empty room (first device, not player mode)
+      if(S.db.length===0&&S.archive.length===0&&!isPlayerModeUrl()&&!PLAYER_MODE){
+        seedExampleData();
+        this.push(); // push seed data to Firebase so other devices see it
+      }
+
       // Re-render everything
-      updatePvSelect();updatePvSessFilter();renderDB();renderRoster();renderAllTime();renderHistory();renderArchive();updateHeader();
+      updatePvSelect();updatePvSessFilter();renderDB();renderRoster();renderAllTime();
+      renderHistory();renderArchive();updateHeader();updatePinStatus();updateGroupSizeHint();
       if(!PLAYER_MODE){
         if(S.session?.status==='active'){
           S.courts=S.session.courts||1;
@@ -628,8 +655,16 @@ const SYNC={
         }else{renderLive();}
       }
       if(isActiveTab('player'))renderPlayerView();
-      toast('🔄 Synced from another device','ok');
-    }catch(e){}
+
+      // Hide loading overlay on first load; show sync toast on subsequent remote updates
+      if(isFirstLoad){
+        const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
+        if(S.session?.status==='active'&&!PLAYER_MODE){switchTab('live');startElapsed();updateProgress();}
+        checkAdminAccess();
+      }else{
+        toast('🔄 Synced from another device','ok');
+      }
+    }catch(e){console.error('_applyRemote error',e);}
   },
 
   _updateBadge(state=''){
@@ -664,41 +699,41 @@ const SYNC={
     const roomId=saved?.roomId||DEFAULT_ROOM;
     const ok=await this.connect(cfg,roomId);
     if(!ok){
-      // Silently retry once after 4s (handles transient network blips on load)
+      // Update loading overlay to show error + retry
+      const sub=document.getElementById('fb-loading-sub');
+      if(sub)sub.textContent='Connection failed — check your internet connection';
+      const rb=document.getElementById('fb-retry-btn');
+      if(rb)rb.style.display='inline-flex';
+      // Silently retry once after 4s
       setTimeout(async()=>{
-        if(!this.ready)await this.connect(cfg,roomId);
+        if(!this.ready){
+          if(sub)sub.textContent='Retrying…';
+          if(rb)rb.style.display='none';
+          await this.connect(cfg,roomId);
+          if(!this.ready){
+            if(sub)sub.textContent='Still failing — tap Retry or check WiFi';
+            if(rb)rb.style.display='inline-flex';
+          }
+        }
       },4000);
     }
   }
 };
 
-/* ── STORAGE ─────────────────────────────────────── */
-let _bc=null; // BroadcastChannel for same-browser tab sync
+/* ── STORAGE — Firebase only, no localStorage for app data ── */
+let _bc=null; // BroadcastChannel for same-browser instant tab sync
 
 const STORE={
   save(){
-    try{localStorage.setItem(KEY.db,JSON.stringify(S.db));}catch(e){}
-    try{if(S.session)localStorage.setItem(KEY.sess,JSON.stringify(S.session));else localStorage.removeItem(KEY.sess);}catch(e){}
-    try{localStorage.setItem(KEY.arch,JSON.stringify(S.archive));}catch(e){}
-    // Same-browser tab sync via BroadcastChannel
+    // Push to Firebase (single source of truth)
+    SYNC.push();
+    // Also broadcast to other tabs in same browser instantly (no localStorage needed)
     if(!PLAYER_MODE){
       try{
         if(!_bc&&typeof BroadcastChannel!=='undefined')_bc=new BroadcastChannel('pb_ladder_v16');
-        if(_bc)_bc.postMessage({type:'STATE',db:S.db,session:S.session?JSON.parse(JSON.stringify(S.session)):null,archive:S.archive});
+        if(_bc)_bc.postMessage({type:'STATE',db:S.db,session:S.session?JSON.parse(JSON.stringify(S.session)):null,archive:S.archive,adminPin:S.adminPin});
       }catch(e){}
-      // Cross-device real-time sync via Firebase
-      SYNC.push();
     }
-  },
-  load(){
-    // V15: reads only pb15_* keys — no migration from older versions
-    try{const d=localStorage.getItem(KEY.db);if(d)S.db=JSON.parse(d);}catch(e){S.db=[];}
-    try{const s=localStorage.getItem(KEY.sess);if(s){S.session=JSON.parse(s);
-      S.session.soStreak=S.session.soStreak||{};S.session.plStreak=S.session.plStreak||{};
-      S.session.sitOutHx=S.session.sitOutHx||{};S.session.partnerHx=S.session.partnerHx||{};S.session.oppHx=S.session.oppHx||{};
-      if(S.session.roundMin)S.roundMin=S.session.roundMin;
-      S.session?.activePlayers?.forEach(id=>S.checkedIn.add(id));}}catch(e){S.session=null;}
-    try{const a=localStorage.getItem(KEY.arch);if(a)S.archive=JSON.parse(a);}catch(e){S.archive=[];}
   }
 };
 
@@ -1956,18 +1991,11 @@ function initPlayerMode(){
       bcListener.onmessage=(e)=>{
         if(e.data?.type!=='STATE')return;
         try{
-          const prevSelectedId=document.getElementById('pv-select')?.value||'';
-          S.db=e.data.db||[];
-          S.session=e.data.session||null;
-          S.archive=e.data.archive||[];
-          if(S.session){
-            S.session.soStreak=S.session.soStreak||{};S.session.plStreak=S.session.plStreak||{};
-            S.session.sitOutHx=S.session.sitOutHx||{};S.session.partnerHx=S.session.partnerHx||{};S.session.oppHx=S.session.oppHx||{};
-          }
-          updatePvSelect();
+          const prevId=document.getElementById('pv-select')?.value||'';
+          // Apply the broadcast state (no Firebase round-trip needed for same-browser tab)
+          SYNC._applyRemote(e.data,false);
           const sel=document.getElementById('pv-select');
-          if(sel&&prevSelectedId&&S.db.find(p=>p.id===prevSelectedId)){sel.value=prevSelectedId;}
-          renderPlayerView();
+          if(sel&&prevId&&S.db.find(p=>p.id===prevId)){sel.value=prevId;renderPlayerView();}
         }catch(err){}
       };
     }
@@ -2130,7 +2158,7 @@ function checkSyncParam(){
           S.session.activePlayers?.forEach(id=>S.checkedIn.add(id));
         }
         S.archive=payload.archive||[];
-        STORE.save();
+        STORE.save(); // pushes to Firebase — becomes the new single source of truth
         updatePvSelect();updatePvSessFilter();renderDB();renderRoster();renderAllTime();renderHistory();renderArchive();updateHeader();
         if(S.session?.status==='active'){
           S.courts=S.session.courts||1;
@@ -2524,10 +2552,12 @@ function initCourtPills(containerId,onSel){
 }
 
 /* ── ADMIN PIN SYSTEM ────────────────────────────── */
+// PIN lives in S.adminPin → persisted to Firebase via STORE.save()
+// All admin devices share the same PIN automatically
 let _pinBuffer='';
 
-function getAdminPin(){return localStorage.getItem(ADMIN_KEY)||'';}
-function setAdminPin(pin){if(pin)localStorage.setItem(ADMIN_KEY,pin);else localStorage.removeItem(ADMIN_KEY);}
+function getAdminPin(){return S.adminPin||'';}
+function setAdminPin(pin){S.adminPin=pin||'';STORE.save();}
 
 function _updatePinDots(){
   for(let i=0;i<4;i++){
@@ -2645,8 +2675,7 @@ function isPlayerModeUrl(){
 }
 
 function init(){
-  STORE.load();
-
+  // Wire up UI controls (no data yet — Firebase delivers it)
   initCourtPills('cpills-setup',n=>{S.courts=n;renderRoster();updateGroupSizeHint();});
   initCourtPills('cpills-live',n=>{
     S.courts=n;if(S.session){S.session.courts=n;STORE.save();}
@@ -2656,38 +2685,15 @@ function init(){
   document.querySelectorAll('.tb').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.tab)));
   document.getElementById('cfm-bg').addEventListener('click',function(e){if(e.target===this)document.getElementById('cfm-no').click();});
 
-  // CRITICAL: Only seed example data in organiser mode.
-  if(!isPlayerModeUrl()){
-    seedExampleData();
-  }
-
-  updatePvSelect();
-  renderDB();renderRoster();renderAllTime();renderHistory();renderArchive();updateHeader();
-  updatePinStatus();
-  updatePvSessFilter();
-  updateGroupSizeHint();
-
-  // Check for ?sync= parameter — loads shared state from another device
-  checkSyncParam();
-
-  // Auto-connect to Firebase if previously configured
-  SYNC.autoConnect();
-  SYNC._updateBadge();
-
-  // initPlayerMode LAST — needs updatePvSelect() already done
+  // initPlayerMode early so PLAYER_MODE flag is set before Firebase arrives
   initPlayerMode();
 
-  if(!PLAYER_MODE && S.session?.status==='active'){
-    S.courts=S.session.courts||1;
-    syncCourtPills('cpills-setup',S.courts);
-    syncCourtPills('cpills-live',S.courts);
-    renderLive();switchTab('live');
-    startElapsed();updateProgress();
-    toast(`Resumed: ${S.session.name}`,'ok');
-  }
+  // Connect to Firebase — _applyRemote() handles first render + hides loading overlay
+  SYNC._updateBadge('connecting');
+  SYNC.autoConnect();
 
-  // Admin PIN check LAST — shows overlay on top of everything
-  checkAdminAccess();
+  // checkSyncParam: URL-based sync (secondary path — pushes to Firebase after loading)
+  checkSyncParam();
 }
 
 document.addEventListener('DOMContentLoaded',init);
