@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>🏓 Pickleball Ladder V15</title>
+<title>🏓 Pickleball Ladder V16</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
@@ -17,6 +17,23 @@
 .prob-wrap{margin-top:7px}.prob-lbl{font-size:.63rem;color:var(--m2);margin-bottom:3px;text-align:center}
 .prob-bar{height:5px;border-radius:3px;background:var(--s3);overflow:hidden}
 .prob-fill{height:100%;background:linear-gradient(90deg,var(--cy),var(--pu));transition:width .3s}
+/* V16 — Admin PIN overlay */
+#admin-lock{position:fixed;inset:0;background:rgba(7,16,26,.97);z-index:9000;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:24px}
+#admin-lock.open{display:flex}
+.lock-box{background:var(--sf);border:1px solid var(--bd);border-radius:var(--rl);padding:28px 22px;max-width:340px;width:100%;text-align:center}
+.lock-title{font-family:'Bebas Neue',sans-serif;font-size:1.4rem;letter-spacing:1px;color:var(--gr);margin-bottom:8px}
+.lock-sub{font-size:.76rem;color:var(--mu);margin-bottom:14px;line-height:1.55}
+.pin-dots{display:flex;gap:10px;justify-content:center;margin-bottom:16px}
+.pin-dot{width:14px;height:14px;border-radius:50%;background:var(--s3);border:2px solid var(--bd);transition:all .15s}
+.pin-dot.filled{background:var(--gr);border-color:var(--gr)}
+.pin-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:220px;margin:0 auto}
+.pin-key{background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:14px 6px;font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--tx);cursor:pointer;transition:all .12s;user-select:none}
+.pin-key:hover{background:var(--s3);border-color:var(--m2)}
+.pin-key:active{transform:scale(.93)}
+.pin-key.del{font-size:.85rem;color:var(--mu)}
+/* V16 — delete buttons in history */
+.del-btn{background:none;border:none;cursor:pointer;font-size:.72rem;color:var(--re);opacity:.5;padding:2px 5px;border-radius:5px;font-family:'DM Sans',sans-serif;font-weight:600;transition:opacity .12s}
+.del-btn:hover{opacity:1;background:rgba(248,113,113,.1)}
 @media print{
   #hdr,#pm-banner,#tabnav,#prog-wrap,#toasts,#modal-bg,#cfm-bg,
   .btn,.sedit,.swap-btn,.qs-row,.qs,.prob-wrap,.elo-chips{display:none!important}
@@ -217,6 +234,35 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 </head>
 <body>
 
+<!-- ADMIN PIN LOCK OVERLAY -->
+<div id="admin-lock">
+  <div class="lock-box">
+    <div class="lock-title">🔒 Admin Access</div>
+    <div class="lock-sub" id="lock-sub">Enter your admin PIN to continue.</div>
+    <div class="pin-dots" id="pin-dots">
+      <div class="pin-dot" id="pd0"></div>
+      <div class="pin-dot" id="pd1"></div>
+      <div class="pin-dot" id="pd2"></div>
+      <div class="pin-dot" id="pd3"></div>
+    </div>
+    <div class="pin-pad">
+      <div class="pin-key" onclick="pinKey('1')">1</div>
+      <div class="pin-key" onclick="pinKey('2')">2</div>
+      <div class="pin-key" onclick="pinKey('3')">3</div>
+      <div class="pin-key" onclick="pinKey('4')">4</div>
+      <div class="pin-key" onclick="pinKey('5')">5</div>
+      <div class="pin-key" onclick="pinKey('6')">6</div>
+      <div class="pin-key" onclick="pinKey('7')">7</div>
+      <div class="pin-key" onclick="pinKey('8')">8</div>
+      <div class="pin-key" onclick="pinKey('9')">9</div>
+      <div class="pin-key" style="grid-column:1" onclick="pinSkip()" id="pin-skip-btn" style="display:none">SKIP</div>
+      <div class="pin-key" onclick="pinKey('0')">0</div>
+      <div class="pin-key del" onclick="pinDel()">⌫</div>
+    </div>
+    <div style="margin-top:14px;font-size:.68rem;color:var(--m2)">Shared with co-admins · Players use the Player Link</div>
+  </div>
+</div>
+
 <header id="hdr">
   <div class="hlogo">
     <span style="font-size:1.4rem;line-height:1">🏓</span>
@@ -230,6 +276,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <button id="share-btn" onclick="openShareModal()" style="font-size:.69rem;font-weight:600;padding:4px 9px;border-radius:20px;background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.3);color:var(--pu);cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">📱 Share</button>
     <span id="sync-badge" onclick="openSyncModal()" title="Live sync settings">⚪ Sync Off</span>
     <span id="hbadge">SETUP</span>
+    <button id="lock-btn" onclick="lockAdmin()" title="Lock admin" style="display:none;background:none;border:none;cursor:pointer;font-size:1rem;color:var(--mu);padding:2px 4px" title="Lock admin access">🔒</button>
   </div>
 </header>
 
@@ -262,11 +309,39 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
       <div><label>ROUND DURATION (MIN)</label><input id="round-dur" class="inp" type="number" value="15" min="5" max="90"/></div>
     </div>
     <div class="dv"></div>
+    <div class="g2" style="margin-bottom:10px">
+      <div>
+        <label>MAX CONSECUTIVE PLAY (rounds)</label>
+        <select id="max-consec" class="inp">
+          <option value="99">Unlimited</option>
+          <option value="2">2 in a row max</option>
+          <option value="3" selected>3 in a row max</option>
+          <option value="4">4 in a row max</option>
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;justify-content:flex-end">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.73rem;color:var(--mu);font-weight:600;letter-spacing:.06em;margin-bottom:6px">
+          <input type="checkbox" id="court6-toggle" style="width:15px;height:15px;accent-color:var(--cy)"/>
+          6-PLAYER COURT GROUPS
+        </label>
+        <div style="font-size:.63rem;color:var(--m2);line-height:1.4">6 per court: 4 play, 2 rotate courtside. Same skill band — no top vs bottom mixing.</div>
+      </div>
+    </div>
     <label>NUMBER OF COURTS</label>
     <div class="cpills" id="cpills-setup">
       <div class="cpill sel" data-c="1">1</div><div class="cpill" data-c="2">2</div>
       <div class="cpill" data-c="3">3</div><div class="cpill" data-c="4">4</div>
       <div class="cpill" data-c="5">5</div><div class="cpill" data-c="6">6</div>
+    </div>
+  </div>
+
+  <div class="card" id="admin-pin-card">
+    <div class="ct">🔐 Admin PIN
+      <button class="btn bg2 sm" style="margin-left:auto" onclick="openPinSetupModal()">Change PIN</button>
+    </div>
+    <div style="font-size:.75rem;color:var(--mu);line-height:1.55">
+      Set a 4-digit PIN to protect admin access. Share with co-admins. Players use the 📱 Player Link — they never need the PIN.<br/>
+      <span id="pin-status" style="color:var(--go);font-weight:600"></span>
     </div>
   </div>
 
@@ -385,6 +460,11 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
       </select>
     </div>
     <p style="font-size:.68rem;color:var(--mu);margin-top:4px">Type to filter or scroll the list. <strong style="color:var(--tx)">Read-only</strong> — nothing here can be changed.</p>
+    <div class="dv" style="margin:10px 0 8px"></div>
+    <label>VIEW STATS FOR SESSION</label>
+    <select id="pv-sess-filter" class="inp" onchange="renderPlayerView()" style="margin-bottom:4px">
+      <option value="">All sessions (overall)</option>
+    </select>
   </div>
   <div id="pv-content"></div>
 </div>
@@ -421,10 +501,14 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 // ================================================================
 
 const S={db:[],checkedIn:new Set(),session:null,archive:[],courts:1,roundMin:15,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
-const KEY={db:'pb15_db',sess:'pb15_sess',arch:'pb15_arch'};
-const SYNC_CFG_KEY='pb15_sync_cfg';
+const KEY={db:'pb16_db',sess:'pb16_sess',arch:'pb16_arch'};
+const ADMIN_KEY='pb16_admin_pin';
+const SYNC_CFG_KEY='pb16_sync_cfg';
+// Migrate saved config from V15 if V16 key not yet written
+(()=>{try{if(!localStorage.getItem('pb16_sync_cfg')&&localStorage.getItem('pb15_sync_cfg')){localStorage.setItem('pb16_sync_cfg',localStorage.getItem('pb15_sync_cfg'));}}catch(e){}})();
+let ADMIN_UNLOCKED=false;
 // Unique device ID — prevents echoing own writes back
-const DEVICE_ID=localStorage.getItem('pb15_did')||(()=>{const d=Math.random().toString(36).slice(2,10);localStorage.setItem('pb15_did',d);return d;})();
+const DEVICE_ID=localStorage.getItem('pb16_did')||(()=>{const d=Math.random().toString(36).slice(2,10);localStorage.setItem('pb16_did',d);return d;})();
 
 /* ── FIREBASE REAL-TIME SYNC ──────────────────────── */
 const SYNC={
@@ -445,29 +529,51 @@ const SYNC={
 
   _loadScript(src){
     return new Promise((res,rej)=>{
-      if(document.querySelector(`script[src="${src}"]`)){res();return;}
-      const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s);
+      // If already in DOM AND firebase global exists, skip reload
+      if(document.querySelector(`script[src="${src}"]`)&&window.firebase){res();return;}
+      // Remove stale tag if firebase isn't ready (avoids silent failures on reload)
+      const old=document.querySelector(`script[src="${src}"]`);
+      if(old&&!window.firebase)old.remove();
+      const s=document.createElement('script');s.src=src;
+      s.onload=()=>res();
+      s.onerror=()=>rej(new Error(`Failed to load: ${src}`));
+      document.head.appendChild(s);
     });
   },
 
   async connect(cfg,roomId){
     this._updateBadge('connecting');
     try{
-      // Load Firebase compat SDK (v9 compat works as a simple script tag)
       await this._loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
       await this._loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js');
-      // Init or reuse existing app
-      const app=window.firebase.apps.length
-        ?window.firebase.apps[0]
-        :window.firebase.initializeApp(cfg);
+      if(!window.firebase)throw new Error('Firebase SDK failed to load');
+      // Use a named app ('pb16') so re-initialization is safe across page reloads
+      // and doesn't conflict with any other Firebase app on the page
+      let app;
+      const APP_NAME='pb16';
+      const existingApp=window.firebase.apps.find(a=>a.name===APP_NAME);
+      if(existingApp){
+        // Delete and reinitialize to pick up any config changes
+        try{await existingApp.delete();}catch(e){}
+      }
+      app=window.firebase.initializeApp(cfg,APP_NAME);
       const db=window.firebase.database(app);
+      // Verify connectivity with a short timeout before committing
+      await new Promise((res,rej)=>{
+        const t=setTimeout(()=>rej(new Error('Connection timeout — check internet or Firebase config')),8000);
+        db.ref('.info/connected').once('value',snap=>{clearTimeout(t);res(snap.val());}).catch(e=>{clearTimeout(t);rej(e);});
+      });
       this.roomId=roomId;
       this.ref=db.ref(`pb_ladder/${roomId}`);
-      // Listen for remote changes
+      // Remove any existing listener before adding new one
+      if(this._unsubscribe){try{this._unsubscribe();}catch(e){}}
       const listener=this.ref.on('value',(snap)=>{
         const data=snap.val();
-        if(!data||data._by===DEVICE_ID)return; // ignore own push
+        if(!data||data._by===DEVICE_ID)return;
         this._applyRemote(data);
+      },(err)=>{
+        this.ready=false;this._updateBadge();
+        toast(`Sync disconnected: ${err.message}`,'warn');
       });
       this._unsubscribe=()=>this.ref.off('value',listener);
       this.ready=true;
@@ -476,6 +582,7 @@ const SYNC={
       toast(`🟢 Live sync ON — Room ${roomId}`,'ok');
       return true;
     }catch(e){
+      this.ready=false;this._updateBadge();
       toast(`Sync failed: ${e.message||e}`,'err');
       return false;
     }
@@ -507,7 +614,7 @@ const SYNC={
       try{if(S.session)localStorage.setItem(KEY.sess,JSON.stringify(S.session));else localStorage.removeItem(KEY.sess);}catch(e){}
       try{localStorage.setItem(KEY.arch,JSON.stringify(S.archive));}catch(e){}
       // Re-render everything
-      updatePvSelect();renderDB();renderRoster();renderAllTime();renderHistory();renderArchive();updateHeader();
+      updatePvSelect();updatePvSessFilter();renderDB();renderRoster();renderAllTime();renderHistory();renderArchive();updateHeader();
       if(!PLAYER_MODE){
         if(S.session?.status==='active'){
           S.courts=S.session.courts||1;
@@ -536,12 +643,12 @@ const SYNC={
   },
 
   async autoConnect(){
-    // Use saved config first (allows override), fall back to embedded default
+    if(this.ready)return; // already connected — don't double-init
     const saved=this.getConfig();
     const DEFAULT_CFG={
       apiKey:'AIzaSyCntwgc62wfRackl_sGFpp7FZiXmJvIhYI',
       authDomain:'ladder-open-play.firebaseapp.com',
-      databaseURL:'https://ladder-open-play-default-rtdb.asia-southeast1.firebasedatabase.app',
+      databaseURL:'https://ladder-open-play-default-rtdb.firebaseio.com',
       projectId:'ladder-open-play',
       storageBucket:'ladder-open-play.firebasestorage.app',
       messagingSenderId:'669188671832',
@@ -550,7 +657,13 @@ const SYNC={
     const DEFAULT_ROOM='SYRxAPL';
     const cfg=saved?.apiKey?saved:DEFAULT_CFG;
     const roomId=saved?.roomId||DEFAULT_ROOM;
-    await this.connect(cfg,roomId);
+    const ok=await this.connect(cfg,roomId);
+    if(!ok){
+      // Silently retry once after 4s (handles transient network blips on load)
+      setTimeout(async()=>{
+        if(!this.ready)await this.connect(cfg,roomId);
+      },4000);
+    }
   }
 };
 
@@ -565,7 +678,7 @@ const STORE={
     // Same-browser tab sync via BroadcastChannel
     if(!PLAYER_MODE){
       try{
-        if(!_bc&&typeof BroadcastChannel!=='undefined')_bc=new BroadcastChannel('pb_ladder_v15');
+        if(!_bc&&typeof BroadcastChannel!=='undefined')_bc=new BroadcastChannel('pb_ladder_v16');
         if(_bc)_bc.postMessage({type:'STATE',db:S.db,session:S.session?JSON.parse(JSON.stringify(S.session)):null,archive:S.archive});
       }catch(e){}
       // Cross-device real-time sync via Firebase
@@ -699,31 +812,44 @@ const MM={
 
   // Consecutive sit-out cap: max 2 consecutive sit-outs, then must play 2 consecutive
   // Primary fairness: equalise total games played within session
-  calcSitOuts(pool,courts){
-    const need=courts*4;
-    if(pool.length<=need)return[];
-    const excess=pool.length-need;
-
-    // Players forced to play (sat 2+ consecutive rounds AND not yet played 2 in a row)
-    const mustPlayIds=new Set(pool.filter(p=>{
+  // Returns sorted eligible sit-out IDs from a given sub-pool
+  // mustSit = set of IDs forced to sit (consec play cap hit)
+  // mustPlay = set of IDs forced to play (consec sit cap hit)
+  _pickSitOuts(subpool, excess){
+    const maxConsec=S.session.maxConsecPlay||99;
+    // Force-sit: hit consec play cap and not yet played mandatory rest
+    const mustSitIds=new Set(subpool.filter(p=>{
+      const pl=S.session.plStreak[p.id]||0;
+      const so=S.session.soStreak[p.id]||0;
+      return maxConsec<99&&pl>=maxConsec&&so<1;
+    }).map(p=>p.id));
+    // Force-play: sat 2+ consecutive rounds and not yet played 2 in a row
+    const mustPlayIds=new Set(subpool.filter(p=>{
       const so=S.session.soStreak[p.id]||0;
       const pl=S.session.plStreak[p.id]||0;
       return so>=2&&pl<2;
     }).map(p=>p.id));
 
-    const eligible=pool.filter(p=>!mustPlayIds.has(p.id));
-    if(eligible.length<=excess) return eligible.map(p=>p.id);
+    const forcedSit=subpool.filter(p=>mustSitIds.has(p.id)&&!mustPlayIds.has(p.id)).map(p=>p.id);
+    if(forcedSit.length>=excess)return forcedSit.slice(0,excess);
 
-    return eligible.sort((a,b)=>{
-      // 1. More games played → sit first (equalises total game count)
-      const ga=gsp(a.id)?.matchesPlayed||0, gb=gsp(b.id)?.matchesPlayed||0;
-      if(ga!==gb) return gb-ga;
-      // 2. Fewer total sit-outs → sit now (long-run fairness)
+    const remaining=subpool.filter(p=>!mustPlayIds.has(p.id)&&!mustSitIds.has(p.id));
+    const stillNeed=excess-forcedSit.length;
+    const extra=remaining.sort((a,b)=>{
+      const ga=gsp(a.id)?.matchesPlayed||0,gb=gsp(b.id)?.matchesPlayed||0;
+      if(ga!==gb)return gb-ga;
       const sa=S.session.sitOutHx[a.id]||0,sb=S.session.sitOutHx[b.id]||0;
-      if(sa!==sb) return sa-sb;
-      // 3. Stable: no rating bias — everyone sits equally regardless of skill
+      if(sa!==sb)return sa-sb;
       return 0;
-    }).slice(0,excess).map(p=>p.id);
+    }).slice(0,stillNeed).map(p=>p.id);
+    return [...forcedSit,...extra];
+  },
+
+  calcSitOuts(pool,courts){
+    const need=courts*4;
+    if(pool.length<=need)return[];
+    const excess=pool.length-need;
+    return this._pickSitOuts(pool,excess);
   },
 
   updateStreaks(sitOutIds,allIds){
@@ -733,33 +859,64 @@ const MM={
   },
 
   generate(courts){
+    const use6=S.session.court6Mode||false;
+    const groupSize=use6?6:4;
+
     const pool=S.session.activePlayers
       .map(id=>{const p=gp(id),sp=gsp(id);return(p&&sp&&sp.status!=='left')?{...p,sr:sp.sRating,sw:sp.wins||0,sl:sp.losses||0,g:sp.matchesPlayed}:null;})
       .filter(Boolean)
-      // Sort by session-performance-adjusted rating:
-      //   sRating = ELO after each round (main signal)
-      //   + (sessWins - sessLosses) × 8 = session momentum bonus
-      //     This helps new strong players rise faster before ELO fully catches up.
-      //     A 2-0 player gets +16 effective pts; a 0-2 gets -16.
-      //     After R3-4, ELO dominates and the bonus becomes negligible.
-      //   ± 5pt jitter = prevents identical groupings every round
       .sort((a,b)=>{
         const ar=(a.sr+(a.sw-a.sl)*8)+(Math.random()*10-5);
         const br=(b.sr+(b.sw-b.sl)*8)+(Math.random()*10-5);
         return br-ar;
       });
 
-    const sitOuts=this.calcSitOuts(pool,courts);
-    sitOuts.forEach(id=>{S.session.sitOutHx[id]=(S.session.sitOutHx[id]||0)+1;});
-    this.updateStreaks(sitOuts,pool.map(p=>p.id));
+    let sitOuts=[];
+    let courtBench={}; // court index → array of IDs sitting courtside (6-player mode)
+    let rawMatches=[];
 
-    const playing=pool.filter(p=>!sitOuts.includes(p.id));
-    const nc=Math.floor(playing.length/4);
-    const rawMatches=[];
-    for(let c=0;c<nc;c++){
-      const{t1,t2}=this.bestPair(playing.slice(c*4,c*4+4));
-      rawMatches.push({id:uid(),t1:[t1[0].id,t1[1].id],t2:[t2[0].id,t2[1].id],s1:null,s2:null,status:'pending',eloDeltas:null,court:0});
+    if(use6){
+      // 6-player mode: group into bands of 6 by rating, 4 play 2 rotate per court
+      // Leftover players (not fitting a group of 6) go to global sit-out
+      const numGroups=Math.min(courts,Math.floor(pool.length/4)); // at least 4 per court needed
+      const playersPerGroup=Math.ceil(pool.length/numGroups);
+      // Distribute into groups of ~6 (top 6, next 6, etc.)
+      for(let g=0;g<numGroups;g++){
+        const start=g*playersPerGroup;
+        const groupRaw=pool.slice(start,Math.min(start+playersPerGroup,pool.length));
+        if(groupRaw.length<4){
+          // Too few — push to global sit-out
+          groupRaw.forEach(p=>sitOuts.push(p.id));
+          continue;
+        }
+        // Pick 2 to rotate courtside (if group has 6+)
+        const excess6=Math.max(0,groupRaw.length-4);
+        const bench=excess6>0?this._pickSitOuts(groupRaw,excess6):[];
+        bench.forEach(id=>{S.session.sitOutHx[id]=(S.session.sitOutHx[id]||0)+1;});
+        courtBench[g]=bench;
+        const playing4=groupRaw.filter(p=>!bench.includes(p.id)).slice(0,4);
+        const{t1,t2}=this.bestPair(playing4);
+        rawMatches.push({id:uid(),t1:[t1[0].id,t1[1].id],t2:[t2[0].id,t2[1].id],s1:null,s2:null,status:'pending',eloDeltas:null,court:0,bench});
+        // Update streaks for this group
+        this.updateStreaks(bench,groupRaw.map(p=>p.id));
+      }
+      // Any leftover players beyond numGroups×playersPerGroup go to session sit-out
+      const covered=numGroups*playersPerGroup;
+      pool.slice(covered).forEach(p=>sitOuts.push(p.id));
+      sitOuts.forEach(id=>{S.session.sitOutHx[id]=(S.session.sitOutHx[id]||0)+1;});
+    } else {
+      // Standard 4-player mode
+      sitOuts=this.calcSitOuts(pool,courts);
+      sitOuts.forEach(id=>{S.session.sitOutHx[id]=(S.session.sitOutHx[id]||0)+1;});
+      this.updateStreaks(sitOuts,pool.map(p=>p.id));
+      const playing=pool.filter(p=>!sitOuts.includes(p.id));
+      const nc=Math.floor(playing.length/4);
+      for(let c=0;c<nc;c++){
+        const{t1,t2}=this.bestPair(playing.slice(c*4,c*4+4));
+        rawMatches.push({id:uid(),t1:[t1[0].id,t1[1].id],t2:[t2[0].id,t2[1].id],s1:null,s2:null,status:'pending',eloDeltas:null,court:0,bench:[]});
+      }
     }
+
     const matches=this.assignCourts(rawMatches);
     return{matches,sitOuts};
   },
@@ -820,8 +977,11 @@ function startSession(){
   const arr=[...S.checkedIn];if(arr.length<4){toast('Need at least 4 players','err');return;}
   S.roundMin=parseInt(document.getElementById('round-dur').value)||15;
   const name=document.getElementById('sess-name').value.trim()||`Open Play — ${fmtDate()}`;
+  const maxConsecPlay=parseInt(document.getElementById('max-consec')?.value)||99;
+  const court6Mode=document.getElementById('court6-toggle')?.checked||false;
   S.session={
     id:uid(),name,date:new Date().toISOString(),courts:S.courts,roundMin:S.roundMin,
+    maxConsecPlay,court6Mode,
     sessionStart:Date.now(),
     activePlayers:[...arr],
     players:arr.map(id=>{const p=gp(id);return{id,name:p.name,tag:p.tag||'',sRating:p.rating,startRating:p.rating,wins:0,losses:0,ties:0,matchesPlayed:0,ptsFor:0,ptsAgainst:0,status:'active'};}),
@@ -1182,6 +1342,12 @@ function renderCourt(m,totalCourts){
     <div class="qs-row" id="qs-${m.id}"></div>${probBar}
     <button class="btn bp" style="width:100%;margin-top:8px" onclick="submitScore('${m.id}')">✓ Submit Score</button>`;
 
+  // Bench players (6-player court mode) — rotating courtside
+  const benchHtml=(m.bench&&m.bench.length)
+    ?`<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--bd);font-size:.67rem;color:var(--mu);text-align:center">
+        <span style="color:var(--cy);font-weight:700">⏳ UP NEXT: </span>${m.bench.map(id=>{const bp=gp(id);return`<strong style="color:var(--tx)">${bp?plainName(bp):'?'}</strong>`;}).join(' & ')}
+      </div>`:'';
+
   return `<div class="court-card ${done?'done':''} ${feat?'featured':''}">
     <div class="chead">
       <span class="clbl ${feat?'featured-lbl':''}">COURT ${m.court}${feat?' ⭐':''}</span>
@@ -1196,7 +1362,7 @@ function renderCourt(m,totalCourts){
         <div class="vs-lbl">VS</div>
         <div class="team ${t2w?'win':t1w?'lose':''}">${pRow(t2[0],2,0)}${pRow(t2[1],2,1)}<div class="team-avg">Avg ${a2}</div></div>
       </div>
-      ${scoreSection}
+      ${scoreSection}${benchHtml}
     </div>
   </div>`;
 }
@@ -1222,20 +1388,87 @@ function renderAllTime(){
   el.innerHTML=`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th>RECORD</th><th>RTG</th></tr></thead><tbody>${players.map((p,i)=>{const wr=p.gamesPlayed>0?Math.round((p.wins/p.gamesPlayed)*100)+'%':'—';return`<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.79rem">${p.name}${tagHtml(p)}</td><td style="font-size:.72rem;color:var(--mu)">${p.gamesPlayed}G · ${wr}</td><td><span class="rv">${Math.round(p.rating)}</span></td></tr>`;}).join('')}</tbody></table>`;
 }
 
+/* ── ELO RECALCULATION ───────────────────────────── */
+function recalcSessionELO(){
+  if(!S.session)return;
+  // Reset all session players to start-of-session rating
+  S.session.players.forEach(sp=>{
+    sp.sRating=sp.startRating;sp.wins=0;sp.losses=0;sp.ties=0;
+    sp.matchesPlayed=0;sp.ptsFor=0;sp.ptsAgainst=0;
+  });
+  // Replay all done matches in round order
+  S.session.rounds.forEach(r=>{
+    r.matches.forEach(m=>{
+      if(m.status!=='done')return;
+      m.eloDeltas=ELO.calcIds(m.t1,m.t2,m.s1,m.s2);
+      [...m.t1,...m.t2].forEach((id,i)=>{
+        const sp=gsp(id);if(!sp)return;
+        sp.sRating=Math.max(400,sp.sRating+m.eloDeltas[i]);
+        sp.matchesPlayed++;
+        if(i<2){sp.ptsFor+=m.s1;sp.ptsAgainst+=m.s2;}else{sp.ptsFor+=m.s2;sp.ptsAgainst+=m.s1;}
+        if(m.s1===m.s2)sp.ties=(sp.ties||0)+1;
+        else if((i<2&&m.s1>m.s2)||(i>=2&&m.s2>m.s1))sp.wins++;
+        else sp.losses++;
+      });
+    });
+  });
+}
+
+function deleteRound(roundNum){
+  if(!S.session)return;
+  showCfm(
+    `Delete <strong>Round ${roundNum}</strong> and recalculate all ratings?<br/><span style="font-size:.73rem;color:var(--mu)">This rewrites session standings from scratch. Cannot be undone.</span>`,
+    'Delete & Recalc','bd2',()=>{
+      S.session.rounds=S.session.rounds.filter(r=>r.number!==roundNum);
+      // Re-number subsequent rounds
+      S.session.rounds.forEach((r,i)=>{r.number=i+1;});
+      S.session.round=S.session.rounds.length;
+      recalcSessionELO();
+      STORE.save();renderLive();renderHistory();renderStandings();
+      toast(`Round ${roundNum} deleted — ratings recalculated ✓`,'ok');
+    });
+}
+
+function deleteMatch(matchId){
+  if(!S.session)return;
+  let targetRnd=null;
+  S.session.rounds.forEach(r=>{if(r.matches.some(m=>m.id===matchId))targetRnd=r;});
+  if(!targetRnd)return;
+  showCfm(
+    `Delete this match result and recalculate ratings?<br/><span style="font-size:.73rem;color:var(--mu)">The match slot stays but score is cleared. Cannot be undone.</span>`,
+    'Delete & Recalc','bd2',()=>{
+      const m=targetRnd.matches.find(x=>x.id===matchId);
+      if(m){m.s1=null;m.s2=null;m.status='pending';m.eloDeltas=null;}
+      recalcSessionELO();
+      STORE.save();renderLive();renderHistory();renderStandings();
+      toast('Match result cleared — ratings recalculated ✓','ok');
+    });
+}
+
+function deleteArchiveSess(sessId){
+  const sess=S.archive.find(a=>a.id===sessId);if(!sess)return;
+  showCfm(
+    `Delete archived session <strong>${esc(sess.name)}</strong>?<br/><span style="font-size:.73rem;color:var(--or)">⚠ All-time ratings for those matches are NOT reversed (complex history). This only removes the record.</span>`,
+    'Delete Record','bd2',()=>{
+      S.archive=S.archive.filter(a=>a.id!==sessId);
+      STORE.save();renderArchive();updatePvSessFilter();
+      toast('Session record deleted','warn');
+    });
+}
+
 /* ── RENDER: HISTORY ─────────────────────────────── */
 function renderHistory(){
   const el=document.getElementById('history-wrap');
   if(!S.session||!S.session.rounds.length){el.innerHTML=`<div class="empty">No rounds yet this session.</div>`;return;}
-  // Helper: get name from session players first (works for late-join players before session ends)
   const gn=id=>{const sp=gsp(id);if(sp?.name)return esc(sp.name+(sp.tag?` ${sp.tag}`:''));return esc(gp(id)?.name||'?');};
   el.innerHTML=[...S.session.rounds].reverse().map(r=>{
     const ms=r.matches.map(m=>{
       const t1n=m.t1.map(gn).join(' & '),t2n=m.t2.map(gn).join(' & ');
       const sc=m.status==='done'?`${m.s1}–${m.s2}`:'—',tie=m.status==='done'&&m.s1===m.s2,t1w=m.status==='done'&&m.s1>m.s2;
-      return `<div class="hm"><div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div><div class="hscore" style="${tie?'color:var(--go)':''}">${sc}</div><div style="flex:1;text-align:right;font-weight:${!t1w&&m.status==='done'&&!tie?700:400};color:${!t1w&&m.status==='done'&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div><button class="sedit" style="width:auto" onclick="openEditScore('${m.id}')">✏️</button></div>`;
+      return `<div class="hm"><div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div><div class="hscore" style="${tie?'color:var(--go)':''}">${sc}</div><div style="flex:1;text-align:right;font-weight:${!t1w&&m.status==='done'&&!tie?700:400};color:${!t1w&&m.status==='done'&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div><button class="sedit" style="width:auto" onclick="openEditScore('${m.id}')">✏️</button>${m.status==='done'?`<button class="del-btn" title="Delete this match result" onclick="deleteMatch('${m.id}')">🗑</button>`:''}</div>`;
     }).join('');
     const sos=r.sitOuts?.length?` · 💤 ${r.sitOuts.map(gn).join(', ')}`:' ';
-    return `<div class="hr"><div class="hrhd" onclick="this.nextElementSibling.classList.toggle('open')"><span>ROUND ${r.number}</span><span>${new Date(r.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}${sos} ▾</span></div><div class="hr-body open">${ms}</div></div>`;
+    return `<div class="hr"><div class="hrhd" onclick="this.nextElementSibling.classList.toggle('open')"><span>ROUND ${r.number}</span><span>${new Date(r.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}${sos}&nbsp;<button class="del-btn" title="Delete round" onclick="event.stopPropagation();deleteRound(${r.number})" style="font-size:.65rem;vertical-align:middle">🗑</button> ▾</span></div><div class="hr-body open">${ms}</div></div>`;
   }).join('');
 }
 
@@ -1276,6 +1509,9 @@ function renderArchive(){
         <table class="stbl" style="margin-bottom:14px"><thead><tr><th>#</th><th>PLAYER</th><th>W/L</th><th>PD</th><th>Δ RTG</th><th>FINAL</th></tr></thead><tbody>${stdRows}</tbody></table>
         <div class="ct" style="margin-bottom:8px">📜 Match Log <span style="font-size:.68rem;color:var(--mu);font-weight:400">(click round header to collapse)</span></div>
         ${matchHistory}
+        <div style="margin-top:14px;border-top:1px solid var(--bd);padding-top:10px">
+          <button class="btn bd2 sm" onclick="deleteArchiveSess('${sess.id}')">🗑 Delete This Session Record</button>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -1289,8 +1525,21 @@ function updatePvSelect(){
   const sorted=[...S.db].sort((a,b)=>a.name.localeCompare(b.name));
   const filtered=q?sorted.filter(p=>plainName(p).toLowerCase().includes(q)):sorted;
   sel.innerHTML='<option value="">— Choose player —</option>'+filtered.map(p=>`<option value="${p.id}">${plainName(p)}</option>`).join('');
-  // Restore selection if still in filtered list
   if(cur&&filtered.find(p=>p.id===cur))sel.value=cur;
+  updatePvSessFilter();
+}
+
+function updatePvSessFilter(){
+  const sf=document.getElementById('pv-sess-filter');if(!sf)return;
+  const cur=sf.value;
+  let opts='<option value="">All sessions (overall)</option>';
+  if(S.session&&S.session.status==='active')opts+=`<option value="__current__">📍 Current: ${esc(S.session.name)}</option>`;
+  S.archive.forEach(sess=>{
+    const d=new Date(sess.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    opts+=`<option value="${sess.id}">${esc(sess.name)} — ${d}</option>`;
+  });
+  sf.innerHTML=opts;
+  if(cur&&(cur==='__current__'||S.archive.find(a=>a.id===cur)))sf.value=cur;
 }
 
 function filterPvSearch(){
@@ -1374,91 +1623,124 @@ function renderPlayerView(){
     }
   }
 
-  // Session standing
+  // Determine session filter
+  const sfEl=document.getElementById('pv-sess-filter');
+  const sessFilter=sfEl?.value||'';
+
+  // Collect matches for the selected session filter
+  const pastMatches=[];
+  function addMatchesFromSess(rounds,sessName,sessDate,sessPlayerList){
+    (rounds||[]).forEach(r=>{
+      r.matches.forEach(m=>{
+        if(!(m.t1.includes(id)||m.t2.includes(id))||m.status!=='done')return;
+        const inT1=m.t1.includes(id);
+        const myTeam=inT1?m.t1:m.t2,oppTeam=inT1?m.t2:m.t1;
+        let partnerName,oppsNames;
+        if(sessPlayerList){
+          const partnerSp=sessPlayerList.find(x=>x.id===myTeam.find(y=>y!==id));
+          partnerName=partnerSp?.name||'?';
+          oppsNames=oppTeam.map(oid=>{const x=sessPlayerList.find(s=>s.id===oid);return x?.name||'?';});
+        }else{
+          const partnerP=gp(myTeam.find(y=>y!==id));partnerName=partnerP?plainName(partnerP):'?';
+          oppsNames=oppTeam.map(oid=>{const x=gp(oid);return x?plainName(x):'?';});
+        }
+        const won=(inT1&&m.s1>m.s2)||(!inT1&&m.s2>m.s1),tie=m.s1===m.s2;
+        pastMatches.push({date:sessDate,sessName,round:r.number,
+          s1:inT1?m.s1:m.s2,s2:inT1?m.s2:m.s1,won,tie,partner:partnerName,opps:oppsNames});
+      });
+    });
+  }
+
+  // Session standing block — per session or overall
   let sessStandHtml='';
-  if(S.session&&sp){
-    const sorted=[...S.session.players].sort((a,b)=>b.sRating-a.sRating);
-    const rank=sorted.findIndex(x=>x.id===id)+1;
-    const d=sp.sRating-sp.startRating,pd=sp.ptsFor-sp.ptsAgainst;
-    sessStandHtml=`<div class="card">
-      <div class="ct" style="margin-bottom:8px">📊 This Session</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+  let careerHtml='';
+
+  if(!sessFilter){
+    // Overall view
+    if(S.session&&sp){
+      const sorted=[...S.session.players].sort((a,b)=>b.sRating-a.sRating);
+      const rank=sorted.findIndex(x=>x.id===id)+1;
+      const d=sp.sRating-sp.startRating,pd=sp.ptsFor-sp.ptsAgainst;
+      sessStandHtml=`<div class="card">
+        <div class="ct" style="margin-bottom:8px">📊 This Session</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
+            <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">RANK</div>
+            <div style="font-family:'Bebas Neue',sans-serif;font-size:1.8rem;color:var(--go)">#${rank}</div>
+            <div style="font-size:.67rem;color:var(--mu)">of ${S.session.players.length}</div>
+          </div>
+          <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
+            <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">RECORD</div>
+            <div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--tx)">${sp.wins}W / ${sp.losses}L${sp.ties?'/'+sp.ties+'T':''}</div>
+          </div>
+          <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
+            <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">RATING Δ</div>
+            <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:${d>=0?'var(--gr)':'var(--re)'}">${d>=0?'+':''}${d}</div>
+            <div style="font-size:.67rem;color:var(--mu)">PD: ${pd>=0?'+':''}${pd}</div>
+          </div>
+        </div>
+      </div>`;
+    }
+    const wr=p.gamesPlayed>0?Math.round((p.wins/p.gamesPlayed)*100):'—';
+    careerHtml=`<div class="card">
+      <div class="ct" style="margin-bottom:8px">🏆 Career Stats</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
         <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
-          <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">RANK</div>
-          <div style="font-family:'Bebas Neue',sans-serif;font-size:1.8rem;color:var(--go)">#${rank}</div>
-          <div style="font-size:.67rem;color:var(--mu)">of ${S.session.players.length}</div>
+          <div style="font-size:.67rem;color:var(--mu);margin-bottom:3px">ALL-TIME RATING</div>
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:var(--gr)">${Math.round(p.rating)}</div>
         </div>
         <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
-          <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">RECORD</div>
-          <div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--tx)">${sp.wins}W / ${sp.losses}L${sp.ties?'/'+sp.ties+'T':''}</div>
+          <div style="font-size:.67rem;color:var(--mu);margin-bottom:3px">GAMES PLAYED</div>
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:var(--cy)">${p.gamesPlayed}</div>
         </div>
         <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
-          <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">RATING Δ</div>
-          <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:${d>=0?'var(--gr)':'var(--re)'}">${d>=0?'+':''}${d}</div>
-          <div style="font-size:.67rem;color:var(--mu)">PD: ${pd>=0?'+':''}${pd}</div>
+          <div style="font-size:.67rem;color:var(--mu);margin-bottom:3px">WIN RATE</div>
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:var(--go)">${wr}${typeof wr==='number'?'%':''}</div>
         </div>
       </div>
     </div>`;
-  }
+    // Gather all sessions
+    if(S.session)addMatchesFromSess(S.session.rounds,S.session.name+' (today)',S.session.date,null);
+    S.archive.forEach(sess=>addMatchesFromSess(sess.rounds,sess.name,sess.date,sess.players));
+  } else {
+    // Specific session view
+    let targetSess=null,targetPlayers=null,sessIsLive=false;
+    if(sessFilter==='__current__'&&S.session){targetSess=S.session;targetPlayers=null;sessIsLive=true;}
+    else{const a=S.archive.find(x=>x.id===sessFilter);if(a){targetSess=a;targetPlayers=a.players;}}
 
-  // Career stats
-  const wr=p.gamesPlayed>0?Math.round((p.wins/p.gamesPlayed)*100):'—';
-  const careerHtml=`<div class="card">
-    <div class="ct" style="margin-bottom:8px">🏆 Career Stats</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
-        <div style="font-size:.67rem;color:var(--mu);margin-bottom:3px">ALL-TIME RATING</div>
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:var(--gr)">${Math.round(p.rating)}</div>
-      </div>
-      <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
-        <div style="font-size:.67rem;color:var(--mu);margin-bottom:3px">GAMES PLAYED</div>
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:var(--cy)">${p.gamesPlayed}</div>
-      </div>
-      <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
-        <div style="font-size:.67rem;color:var(--mu);margin-bottom:3px">WIN RATE</div>
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:var(--go)">${wr}${typeof wr==='number'?'%':''}</div>
-      </div>
-    </div>
-  </div>`;
-
-  // Match history — current session FIRST, then archive
-  const pastMatches=[];
-  if(S.session){
-    S.session.rounds.forEach(r=>{
-      r.matches.forEach(m=>{
-        if((m.t1.includes(id)||m.t2.includes(id))&&m.status==='done'){
-          const inT1=m.t1.includes(id);
-          const myTeam=inT1?m.t1:m.t2,oppTeam=inT1?m.t2:m.t1;
-          const partner=gp(myTeam.find(x=>x!==id));
-          const opps=oppTeam.map(gp);
-          const won=(inT1&&m.s1>m.s2)||(!inT1&&m.s2>m.s1),tie=m.s1===m.s2;
-          pastMatches.push({date:S.session.date,sessName:S.session.name+' (today)',round:r.number,
-            s1:inT1?m.s1:m.s2,s2:inT1?m.s2:m.s1,won,tie,
-            partner:partner?plainName(partner):'?',opps:opps.map(x=>x?plainName(x):'?')});
-        }
-      });
-    });
+    if(targetSess){
+      const tsp=sessIsLive?gsp(id):targetSess.players?.find(x=>x.id===id);
+      if(tsp){
+        const tSorted=[...(sessIsLive?S.session.players:targetSess.players)].sort((a,b)=>b.sRating-a.sRating);
+        const tRank=tSorted.findIndex(x=>x.id===id)+1;
+        const td=tsp.sRating-tsp.startRating,tpd=(tsp.ptsFor||0)-(tsp.ptsAgainst||0);
+        sessStandHtml=`<div class="card">
+          <div class="ct" style="margin-bottom:8px">📊 ${esc(targetSess.name)}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
+              <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">FINAL RANK</div>
+              <div style="font-family:'Bebas Neue',sans-serif;font-size:1.8rem;color:var(--go)">#${tRank}</div>
+              <div style="font-size:.67rem;color:var(--mu)">of ${tSorted.length}</div>
+            </div>
+            <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
+              <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">RECORD</div>
+              <div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--tx)">${tsp.wins}W / ${tsp.losses}L${tsp.ties?'/'+tsp.ties+'T':''}</div>
+            </div>
+            <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
+              <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">RATING Δ</div>
+              <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:${td>=0?'var(--gr)':'var(--re)'}">${td>=0?'+':''}${td}</div>
+              <div style="font-size:.67rem;color:var(--mu)">PD: ${tpd>=0?'+':''}${tpd}</div>
+            </div>
+          </div>
+        </div>`;
+      }
+      addMatchesFromSess(targetSess.rounds,targetSess.name,targetSess.date,targetPlayers);
+    }
   }
-  S.archive.forEach(sess=>{
-    sess.rounds.forEach(r=>{
-      r.matches.forEach(m=>{
-        if((m.t1.includes(id)||m.t2.includes(id))&&m.status==='done'){
-          const inT1=m.t1.includes(id);
-          const myTeam=inT1?m.t1:m.t2,oppTeam=inT1?m.t2:m.t1;
-          const partner=sess.players.find(x=>myTeam.find(y=>y!==id)===x.id);
-          const opps=oppTeam.map(oid=>sess.players.find(x=>x.id===oid));
-          const won=(inT1&&m.s1>m.s2)||(!inT1&&m.s2>m.s1),tie=m.s1===m.s2;
-          pastMatches.push({date:sess.date,sessName:sess.name,round:r.number,
-            s1:inT1?m.s1:m.s2,s2:inT1?m.s2:m.s1,won,tie,
-            partner:partner?.name||'?',opps:opps.map(x=>x?.name||'?')});
-        }
-      });
-    });
-  });
 
   const histHtml=pastMatches.length?`<div class="card">
-    <div class="ct" style="margin-bottom:8px">📜 Recent Match History</div>
-    ${pastMatches.slice(0,25).map(m=>{
+    <div class="ct" style="margin-bottom:8px">📜 ${sessFilter?'Session':'Recent'} Match History</div>
+    ${pastMatches.slice(0,40).map(m=>{
       const col=m.won?'var(--gr)':m.tie?'var(--go)':'var(--re)';
       return `<div class="prow" style="cursor:default;margin-bottom:3px">
         <div style="font-family:'Bebas Neue',sans-serif;font-size:.95rem;color:${col};min-width:40px">${m.s1}–${m.s2}</div>
@@ -1466,7 +1748,7 @@ function renderPlayerView(){
         <div style="font-size:.69rem;color:var(--mu)">${new Date(m.date).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>
       </div>`;
     }).join('')}
-  </div>`:'';
+  </div>`:'<div class="card" style="text-align:center;padding:22px;color:var(--mu)">No match history found for this selection.</div>';
 
   el.innerHTML=`<div class="pv-hero">
     <div class="pv-name">${p.name}${p.tag?`<span class="ptag">${p.tag}</span>`:''}</div>
@@ -1548,7 +1830,7 @@ function initPlayerMode(){
   // Listen for live state from organizer tab (same browser, same origin)
   try{
     if(typeof BroadcastChannel!=='undefined'){
-      const bcListener=new BroadcastChannel('pb_ladder_v12');
+      const bcListener=new BroadcastChannel('pb_ladder_v16');
       bcListener.onmessage=(e)=>{
         if(e.data?.type!=='STATE')return;
         try{
@@ -1594,7 +1876,7 @@ function openSyncModal(){
     <div style="background:rgba(251,191,36,.07);border:1px solid rgba(251,191,36,.25);border-radius:var(--ra);padding:10px;margin-bottom:12px;font-size:.73rem;color:var(--go)">
       ⏳ Connecting to Firebase… Please wait or check your internet connection.
     </div>
-    <button class="btn bp" style="width:100%;margin-bottom:6px" onclick="closeModal();SYNC.autoConnect()">
+    <button class="btn bp" style="width:100%;margin-bottom:6px" onclick="closeModal();SYNC.ready=false;SYNC.autoConnect()">
       🔄 Retry Connection
     </button>`}
 
@@ -1727,7 +2009,7 @@ function checkSyncParam(){
         }
         S.archive=payload.archive||[];
         STORE.save();
-        updatePvSelect();renderDB();renderRoster();renderAllTime();renderHistory();renderArchive();updateHeader();
+        updatePvSelect();updatePvSessFilter();renderDB();renderRoster();renderAllTime();renderHistory();renderArchive();updateHeader();
         if(S.session?.status==='active'){
           S.courts=S.session.courts||1;
           syncCourtPills('cpills-setup',S.courts);syncCourtPills('cpills-live',S.courts);
@@ -2117,7 +2399,121 @@ function initCourtPills(containerId,onSel){
   });
 }
 
-/* ── INIT ────────────────────────────────────────── */
+/* ── ADMIN PIN SYSTEM ────────────────────────────── */
+let _pinBuffer='';
+
+function getAdminPin(){return localStorage.getItem(ADMIN_KEY)||'';}
+function setAdminPin(pin){if(pin)localStorage.setItem(ADMIN_KEY,pin);else localStorage.removeItem(ADMIN_KEY);}
+
+function _updatePinDots(){
+  for(let i=0;i<4;i++){
+    const d=document.getElementById(`pd${i}`);
+    if(d)d.classList.toggle('filled',i<_pinBuffer.length);
+  }
+}
+
+function pinKey(k){
+  if(_pinBuffer.length>=4)return;
+  _pinBuffer+=k;
+  _updatePinDots();
+  if(_pinBuffer.length===4)setTimeout(_checkPin,180);
+}
+function pinDel(){if(_pinBuffer.length>0){_pinBuffer=_pinBuffer.slice(0,-1);_updatePinDots();}}
+
+function _checkPin(){
+  const stored=getAdminPin();
+  if(!stored){
+    // First time: setting the PIN
+    if(!window._pinStage){
+      window._pinStage='confirm';window._pinFirst=_pinBuffer;_pinBuffer='';
+      document.getElementById('lock-sub').textContent='Re-enter PIN to confirm.';
+      _updatePinDots();return;
+    }
+    if(_pinBuffer===window._pinFirst){
+      setAdminPin(_pinBuffer);window._pinStage=null;window._pinFirst=null;
+      _unlockAdmin();toast('Admin PIN set ✓','ok');
+    }else{
+      _pinBuffer='';window._pinStage=null;window._pinFirst=null;
+      document.getElementById('lock-sub').textContent='PINs didn\'t match. Try again.';
+      _updatePinDots();
+    }
+  }else{
+    if(_pinBuffer===stored){_unlockAdmin();}
+    else{
+      _pinBuffer='';document.getElementById('lock-sub').textContent='Wrong PIN. Try again.';
+      document.getElementById('lock-sub').style.color='var(--re)';
+      _updatePinDots();
+      setTimeout(()=>{const s=document.getElementById('lock-sub');if(s){s.textContent='Enter your admin PIN to continue.';s.style.color='';}},1800);
+    }
+  }
+}
+
+function _unlockAdmin(){
+  ADMIN_UNLOCKED=true;_pinBuffer='';_updatePinDots();
+  document.getElementById('admin-lock').classList.remove('open');
+  const lb=document.getElementById('lock-btn');if(lb)lb.style.display='inline-block';
+  updatePinStatus();
+}
+
+function lockAdmin(){
+  if(!getAdminPin()){toast('Set a PIN first (Setup tab → Admin PIN)','warn');return;}
+  ADMIN_UNLOCKED=false;
+  document.getElementById('admin-lock').classList.add('open');
+  document.getElementById('lock-sub').textContent='Enter your admin PIN to continue.';
+  document.getElementById('lock-sub').style.color='';
+  _pinBuffer='';_updatePinDots();
+  const lb=document.getElementById('lock-btn');if(lb)lb.style.display='none';
+}
+
+function checkAdminAccess(){
+  if(PLAYER_MODE)return; // player mode never needs PIN
+  const pin=getAdminPin();
+  if(!pin){
+    // No PIN set yet — show setup prompt
+    ADMIN_UNLOCKED=true; // open by default until PIN is configured
+    const lb=document.getElementById('lock-btn');if(lb)lb.style.display='none';
+    return;
+  }
+  // PIN set — require unlock
+  document.getElementById('lock-sub').textContent='Enter your admin PIN to continue.';
+  document.getElementById('admin-lock').classList.add('open');
+}
+
+function updatePinStatus(){
+  const el=document.getElementById('pin-status');if(!el)return;
+  const pin=getAdminPin();
+  el.textContent=pin?'✓ PIN is set — admin access protected':'No PIN set — admin is open to anyone';
+  el.style.color=pin?'var(--gr)':'var(--or)';
+}
+
+function openPinSetupModal(){
+  const pin=getAdminPin();
+  openModal(`<div class="modal-title">🔐 Admin PIN Setup</div>
+    <p style="font-size:.76rem;color:var(--mu);margin-bottom:12px;line-height:1.55">
+      ${pin?'Change or remove your 4-digit admin PIN. Share with co-admins only.':'Set a 4-digit PIN. You\'ll need it every time you open the app (unless you stay unlocked).'}
+    </p>
+    <label>NEW PIN (4 digits)</label>
+    <input id="new-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:8px;letter-spacing:6px;text-align:center;font-size:1.2rem"/>
+    <label>CONFIRM PIN</label>
+    <input id="conf-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:12px;letter-spacing:6px;text-align:center;font-size:1.2rem"/>
+    <div style="display:flex;gap:7px;flex-wrap:wrap">
+      <button class="btn bp" style="flex:2" onclick="_savePinModal()">Set PIN</button>
+      ${pin?`<button class="btn bd2 sm" onclick="showCfm('Remove admin PIN? Anyone can access admin mode.','Remove PIN','bd2',()=>{setAdminPin('');ADMIN_UNLOCKED=true;closeModal();updatePinStatus();toast('PIN removed','warn');})">Remove</button>`:''}
+      <button class="btn bg2 sm" onclick="closeModal()">Cancel</button>
+    </div>`);
+}
+
+function _savePinModal(){
+  const p1=(document.getElementById('new-pin')?.value||'').trim();
+  const p2=(document.getElementById('conf-pin')?.value||'').trim();
+  if(!/^\d{4}$/.test(p1)){toast('PIN must be exactly 4 digits','err');return;}
+  if(p1!==p2){toast('PINs do not match','err');return;}
+  setAdminPin(p1);closeModal();updatePinStatus();toast('Admin PIN updated ✓','ok');
+}
+
+function pinSkip(){_unlockAdmin();}
+
+
 function isPlayerModeUrl(){
   // Check URL before PLAYER_MODE is set — used to guard seedExampleData
   const params=new URLSearchParams(window.location.search);
@@ -2137,14 +2533,14 @@ function init(){
   document.getElementById('cfm-bg').addEventListener('click',function(e){if(e.target===this)document.getElementById('cfm-no').click();});
 
   // CRITICAL: Only seed example data in organiser mode.
-  // In player mode, seedExampleData() would fill the player's browser with
-  // the SYR example dataset, replacing the real session data they should see.
   if(!isPlayerModeUrl()){
     seedExampleData();
   }
 
   updatePvSelect();
   renderDB();renderRoster();renderAllTime();renderHistory();renderArchive();updateHeader();
+  updatePinStatus();
+  updatePvSessFilter();
 
   // Check for ?sync= parameter — loads shared state from another device
   checkSyncParam();
@@ -2164,6 +2560,9 @@ function init(){
     startElapsed();updateProgress();
     toast(`Resumed: ${S.session.name}`,'ok');
   }
+
+  // Admin PIN check LAST — shows overlay on top of everything
+  checkAdminAccess();
 }
 
 document.addEventListener('DOMContentLoaded',init);
