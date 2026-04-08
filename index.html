@@ -1333,9 +1333,9 @@ function renderLive(){
 
   // Sit outs
   const sc=document.getElementById('sitout-card'),sl=document.getElementById('sitout-list');
-  if(rnd.sitOuts.length){
+  if(rnd.sitOuts?.length){
     sc.style.display='block';
-    sl.innerHTML=rnd.sitOuts.map(id=>{
+    sl.innerHTML=(rnd.sitOuts||[]).map(id=>{
       const p=gp(id),cnt=S.session.sitOutHx[id]||0,streak=S.session.soStreak[id]||0;
       const warn=streak>=2;
       return `<div class="so-chip ${warn?'so-warn':''}">${p?.name||'?'}${tagHtml(p)}<span class="so-n${warn?' warn':''}">${cnt}x${streak>1?` (${streak} straight)`:''}${warn?' — MUST PLAY NEXT':''}</span></div>`;
@@ -2062,46 +2062,26 @@ async function doConnectSync(){
 function openShareModal(){
   const base=window.location.href.split('#')[0].split('?')[0];
   const shareUrl=base+'?view=player';
-  const safeUrl=shareUrl.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
-  const isHttps=window.location.protocol==='https:';
-
-  // Build compact sync code = base64(JSON of current state)
-  const syncPayload={db:S.db,session:S.session,archive:S.archive,ts:Date.now()};
-  let syncCode='';
-  try{syncCode=btoa(unescape(encodeURIComponent(JSON.stringify(syncPayload)))).replace(/=/g,'');}catch(e){}
-  const syncUrl=syncCode?`${base}?sync=${syncCode}`:'';
-
-  openModal(`<div class="modal-title">📱 Share & Sync</div>
+  openModal(`<div class="modal-title">📱 Share Player Link</div>
 
     <div style="background:rgba(52,217,116,.07);border:1px solid rgba(52,217,116,.2);border-radius:var(--ra);padding:10px;margin-bottom:12px;font-size:.74rem;color:var(--mu)">
-      Players open the link to see their match, rank &amp; stats — read-only.
+      Players open the link on <strong style="color:var(--tx)">any device</strong> to see their match, rank &amp; stats — read-only. Live data via Firebase.
     </div>
 
-    <p style="font-weight:600;font-size:.76rem;color:var(--tx);margin-bottom:5px">📲 Player View (same browser/device)</p>
+    <p style="font-weight:600;font-size:.76rem;color:var(--tx);margin-bottom:5px">📲 Player View Link</p>
     <input id="share-url-inp" class="inp" readonly style="font-family:monospace;font-size:.69rem;margin-bottom:5px"/>
     <button class="btn bp" id="share-copy-btn" style="width:100%;margin-bottom:3px" onclick="copyShareLink()">📋 Copy Player Link</button>
     <p id="share-result" style="font-size:.71rem;min-height:16px;text-align:center;margin-bottom:12px;color:var(--mu)"></p>
 
-    <div class="dv"></div>
-    <p style="font-weight:600;font-size:.76rem;color:var(--tx);margin-bottom:4px">🔄 Sync to Another Device</p>
-    <p style="font-size:.72rem;color:var(--mu);margin-bottom:8px">Share this link to load the <strong style="color:var(--tx)">current session data</strong> on another device — laptop, phone, tablet. The other device will get all players, ratings and today's matches.</p>
-    ${syncUrl?`<input id="sync-url-inp" class="inp" readonly style="font-family:monospace;font-size:.67rem;margin-bottom:5px;word-break:break-all"/>
-    <button class="btn bc" style="width:100%;margin-bottom:3px" id="sync-copy-btn" onclick="copySyncLink()">🔄 Copy Sync Link</button>
-    <p id="sync-result" style="font-size:.71rem;min-height:16px;text-align:center;margin-bottom:6px;color:var(--mu)"></p>
-    <p style="font-size:.69rem;color:var(--mu)">⚠ Sync is a <strong>one-time snapshot</strong> — not live. Re-share after each round for the other device to stay current.</p>`
-    :'<p style="font-size:.72rem;color:var(--mu)">Start a session first to generate a sync link.</p>'}
-
-    ${isHttps?`<div class="dv"></div><div style="text-align:center;margin-top:8px">
+    <div class="dv"></div><div style="text-align:center;margin-top:8px">
       <div id="qr-div" style="display:inline-block;background:#fff;padding:8px;border-radius:8px;margin-bottom:4px"></div>
       <p style="font-size:.66rem;color:var(--mu)">QR → Player view</p>
-    </div>`:''}
+    </div>
   `);
 
   requestAnimationFrame(()=>{
     const inp=document.getElementById('share-url-inp');
     if(inp){inp.value=shareUrl;inp.addEventListener('click',()=>{inp.focus();inp.select();});}
-    const sinp=document.getElementById('sync-url-inp');
-    if(sinp&&syncUrl){sinp.value=syncUrl;sinp.addEventListener('click',()=>{sinp.focus();sinp.select();});}
     const qrEl=document.getElementById('qr-div');
     if(qrEl&&window.QRCode){
       try{new window.QRCode(qrEl,{text:shareUrl,width:110,height:110,colorDark:'#000',colorLight:'#fff',correctLevel:window.QRCode.CorrectLevel.L});}
@@ -2110,72 +2090,7 @@ function openShareModal(){
   });
 }
 
-function copySyncLink(){
-  const inp=document.getElementById('sync-url-inp');
-  const btn=document.getElementById('sync-copy-btn');
-  const result=document.getElementById('sync-result');
-  const text=inp?inp.value:'';
-  if(!text)return;
-  function ok(){
-    if(btn){btn.textContent='✓ Copied!';btn.style.background='var(--gd)';}
-    if(result){result.style.color='var(--gr)';result.textContent='✓ Copied! Open on the other device to sync.';}
-    setTimeout(()=>{if(btn){btn.textContent='🔄 Copy Sync Link';btn.style.background='';}},2500);
-  }
-  function fail(){
-    if(inp){inp.focus();inp.select();inp.setSelectionRange(0,99999);}
-    if(result){result.style.color='var(--or)';result.innerHTML='Select the link above and press <strong>Ctrl+C</strong>';}
-  }
-  if(navigator.clipboard&&typeof navigator.clipboard.writeText==='function'){
-    navigator.clipboard.writeText(text).then(ok).catch(()=>{
-      if(inp){inp.focus();inp.select();inp.setSelectionRange(0,99999);}
-      try{document.execCommand('copy')?ok():fail();}catch(e){fail();}
-    });return;
-  }
-  if(inp){inp.focus();inp.select();inp.setSelectionRange(0,99999);}
-  try{document.execCommand('copy')?ok():fail();}catch(e){fail();}
-}
 
-// Called on page load if ?sync= param present — loads shared state
-function checkSyncParam(){
-  const params=new URLSearchParams(window.location.search);
-  const syncCode=params.get('sync');
-  if(!syncCode||PLAYER_MODE)return;
-  try{
-    const decoded=decodeURIComponent(escape(atob(syncCode)));
-    const payload=JSON.parse(decoded);
-    if(!payload.db||!Array.isArray(payload.db))return;
-    // Only load if newer than existing data or no existing data
-    const age=Date.now()-(payload.ts||0);
-    if(age>24*60*60*1000)return; // ignore sync codes older than 24h
-    showCfm(
-      `📲 <strong>Sync data received!</strong><br/>
-      <span style="font-size:.76rem;color:var(--mu)">${payload.db.length} players · ${payload.archive?.length||0} archived sessions<br/>
-      From ${Math.round(age/60000)} min ago</span><br/>
-      <span style="font-size:.72rem;color:var(--or)">This will replace your current local data.</span>`,
-      'Load Sync Data','bc',
-      ()=>{
-        S.db=payload.db;
-        if(payload.session){
-          S.session=payload.session;
-          S.session.soStreak=S.session.soStreak||{};S.session.plStreak=S.session.plStreak||{};
-          S.session.sitOutHx=S.session.sitOutHx||{};S.session.partnerHx=S.session.partnerHx||{};S.session.oppHx=S.session.oppHx||{};
-          S.session.activePlayers?.forEach(id=>S.checkedIn.add(id));
-        }
-        S.archive=payload.archive||[];
-        STORE.save(); // pushes to Firebase — becomes the new single source of truth
-        updatePvSelect();updatePvSessFilter();renderDB();renderRoster();renderAllTime();renderHistory();renderArchive();updateHeader();
-        if(S.session?.status==='active'){
-          S.courts=S.session.courts||1;
-          syncCourtPills('cpills-setup',S.courts);syncCourtPills('cpills-live',S.courts);
-          renderLive();switchTab('live');startElapsed();updateProgress();
-        }
-        // Clean URL
-        window.history.replaceState({},'',window.location.href.split('?')[0]);
-        toast('✅ Synced! All data loaded.','ok');
-      }
-    );
-  }catch(e){}
-}
 
 function copyShareLink(){
   const inp=document.getElementById('share-url-inp');
@@ -2696,8 +2611,7 @@ function init(){
   SYNC._updateBadge('connecting');
   SYNC.autoConnect();
 
-  // checkSyncParam: URL-based sync (secondary path — pushes to Firebase after loading)
-  checkSyncParam();
+
 }
 
 document.addEventListener('DOMContentLoaded',init);
