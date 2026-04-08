@@ -322,27 +322,9 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
       <div><label>ROUND DURATION (MIN)</label><input id="round-dur" class="inp" type="number" value="15" min="5" max="90"/></div>
     </div>
     <div class="dv"></div>
-    <div class="g2" style="margin-bottom:10px">
-      <div>
-        <label>MAX CONSECUTIVE PLAY (rounds)</label>
-        <select id="max-consec" class="inp">
-          <option value="99">Unlimited</option>
-          <option value="2">2 in a row max</option>
-          <option value="3" selected>3 in a row max</option>
-          <option value="4">4 in a row max</option>
-        </select>
-      </div>
-      <div>
-        <label>COURT GROUP SIZE</label>
-        <select id="court-group-size" class="inp" onchange="updateGroupSizeHint();renderRoster()">
-          <option value="4">Standard — 4 per court (no bench)</option>
-          <option value="5">5 per court — 4 play, 1 rotates</option>
-          <option value="6" selected>6 per court — 4 play, 2 rotate ✓ recommended</option>
-          <option value="7">7 per court — 4 play, 3 rotate</option>
-          <option value="8">8 per court — 4 play, 4 rotate</option>
-        </select>
-        <div id="group-size-hint" style="font-size:.63rem;color:var(--m2);line-height:1.5;margin-top:4px"></div>
-      </div>
+    <div id="rotation-preview" style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px 12px;margin-bottom:10px;display:none">
+      <div style="font-size:.65rem;font-weight:700;color:var(--mu);letter-spacing:.06em;margin-bottom:5px">🔄 ROTATION (auto-calculated)</div>
+      <div id="rotation-desc" style="font-size:.78rem;color:var(--tx);line-height:1.6"></div>
     </div>
     <label>NUMBER OF COURTS</label>
     <div class="cpills" id="cpills-setup">
@@ -646,7 +628,7 @@ const SYNC={
 
       // Re-render everything
       updatePvSelect();updatePvSessFilter();renderDB();renderRoster();renderAllTime();
-      renderHistory();renderArchive();updateHeader();updatePinStatus();updateGroupSizeHint();
+      renderHistory();renderArchive();updateHeader();updatePinStatus();
       if(!PLAYER_MODE){
         if(S.session?.status==='active'){
           S.courts=S.session.courts||1;
@@ -688,8 +670,7 @@ const SYNC={
     const DEFAULT_CFG={
       apiKey:'AIzaSyCntwgc62wfRackl_sGFpp7FZiXmJvIhYI',
       authDomain:'ladder-open-play.firebaseapp.com',
-      //databaseURL:'https://ladder-open-play-default-rtdb.firebaseio.com',
-      databaseURL:'https://ladder-open-play-default-rtdb.asia-southeast1.firebasedatabase.app',
+      databaseURL:'https://ladder-open-play-default-rtdb.firebaseio.com',
       projectId:'ladder-open-play',
       storageBucket:'ladder-open-play.firebasestorage.app',
       messagingSenderId:'669188671832',
@@ -1014,8 +995,7 @@ function startSession(){
   const arr=[...S.checkedIn];if(arr.length<4){toast('Need at least 4 players','err');return;}
   S.roundMin=parseInt(document.getElementById('round-dur').value)||15;
   const name=document.getElementById('sess-name').value.trim()||`Open Play — ${fmtDate()}`;
-  const maxConsecPlay=parseInt(document.getElementById('max-consec')?.value)||99;
-  const courtGroupSize=parseInt(document.getElementById('court-group-size')?.value)||4;
+  const{courtGroupSize,maxConsecPlay}=calcRotation(arr.length,S.courts);
   S.session={
     id:uid(),name,date:new Date().toISOString(),courts:S.courts,roundMin:S.roundMin,
     maxConsecPlay,courtGroupSize,
@@ -1313,21 +1293,17 @@ function renderRoster(){
   }
   const players=arr.map(gp).filter(Boolean).sort((a,b)=>b.rating-a.rating);
   document.getElementById('roster-list').innerHTML=players.map(p=>`<div class="prow click chk" onclick="toggleCheckIn('${p.id}')"><div class="pnc"><div class="pn">${p.name}${tagHtml(p)}</div></div><div class="pr" style="color:var(--gr)">${Math.round(p.rating)}</div><div style="color:var(--gr)">✓</div></div>`).join('');
-  const grpSz=parseInt(document.getElementById('court-group-size')?.value)||4;
-  const useGroups=grpSz>4;
+  const{courtGroupSize,maxConsecPlay,useGroups}=calcRotation(arr.length,S.courts);
   const avg=Math.round(arr.reduce((s,id)=>s+(gp(id)?.rating||0),0)/arr.length);
   let playingR1,hintText;
   if(useGroups){
-    // In group mode: up to grpSz*courts in the mix, the rest sit globally
-    const inMix=Math.min(arr.length,grpSz*S.courts);
+    const inMix=Math.min(arr.length,courtGroupSize*S.courts);
     const globalSits=Math.max(0,arr.length-inMix);
-    // Within each court group: min(grpSz,actual) players, 4 play, rest bench
-    const benchPerCourt=Math.max(0,Math.min(grpSz,Math.ceil(inMix/S.courts))-4);
+    const benchPerCourt=courtGroupSize-4;
     playingR1=Math.min(arr.length,S.courts*4);
-    if(globalSits>0)
-      hintText=`${inMix} in court groups (${benchPerCourt} bench/court), ${globalSits} sit out`;
-    else
-      hintText=`All ${arr.length} in court groups · ${benchPerCourt} rotating courtside per court`;
+    hintText=globalSits
+      ?`${inMix} in groups (${benchPerCourt} bench/court), ${globalSits} sit out`
+      :`All ${arr.length} in groups · ${benchPerCourt} bench/court · max ${maxConsecPlay} straight`;
   }else{
     const need=S.courts*4;
     playingR1=Math.min(need,arr.length);
@@ -1339,6 +1315,7 @@ function renderRoster(){
   if(act){btn.disabled=true;btn.textContent='✅ Session Running';document.getElementById('start-hint').textContent='Go to Live tab.';}
   else if(arr.length<4){btn.disabled=true;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=`Need ${4-arr.length} more.`;}
   else{btn.disabled=false;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=hintText;}
+  updateRotationPreview();
 }
 
 /* ── RENDER: LIVE ────────────────────────────────── */
@@ -1502,20 +1479,45 @@ function deleteMatch(matchId){
     });
 }
 
-function updateGroupSizeHint(){
-  const sel=document.getElementById('court-group-size');
-  const hint=document.getElementById('group-size-hint');
-  if(!sel||!hint)return;
-  const sz=parseInt(sel.value)||4;
-  const courts=S.courts||1;
-  const msgs={
-    4:`Standard: ${courts*4} play, extras sit globally. Good for small groups.`,
-    5:`${courts*5} in the mix: 4 play, 1 rotates per court. Short break rhythm.`,
-    6:`${courts*6} in the mix: 4 play, 2 rotate per court. ✓ Best for most groups — play 2–3 straight, then a short break.`,
-    7:`${courts*7} in the mix: 4 play, 3 rotate per court. Longer bench wait than 6. For 14 players, 6-per-court (12 active + 2 global sits) is better.`,
-    8:`${courts*8} in the mix: 4 play, 4 rotate per court. High bench time — each player waits ~50% of rounds.`,
-  };
-  hint.textContent=msgs[sz]||'';
+/* ── ROTATION AUTO-CALCULATION ───────────────────── */
+// Given N players and C courts, returns the optimal group size and consecutive play cap.
+// courtGroupSize = how many players are assigned to each court (4 play, rest rotate courtside)
+// maxConsecPlay  = how many rounds in a row before a player must take a break
+function calcRotation(N, C){
+  if(!N||!C||N<4)return{courtGroupSize:4,maxConsecPlay:99,useGroups:false};
+  const raw=N/C;
+  if(raw<=4)return{courtGroupSize:4,maxConsecPlay:99,useGroups:false};
+  const courtGroupSize=Math.min(8,Math.round(raw));
+  // Target: 2-3 games straight then one break
+  // G=5 → 4/5 play each round → sits ~1 in 5 → play up to 4 consecutive is fine
+  // G=6 → 4/6 play → play 3 then break (sweet spot)
+  // G≥7 → 4/7+ play → play 2 then break (more bench time per round)
+  const maxConsecPlay=courtGroupSize<=5?4:courtGroupSize===6?3:2;
+  return{courtGroupSize,maxConsecPlay,useGroups:true};
+}
+
+function updateRotationPreview(){
+  const N=[...S.checkedIn].length;
+  const C=S.courts||1;
+  const box=document.getElementById('rotation-preview');
+  const desc=document.getElementById('rotation-desc');
+  if(!box||!desc)return;
+  if(N<4){box.style.display='none';return;}
+  const{courtGroupSize,maxConsecPlay,useGroups}=calcRotation(N,C);
+  box.style.display='block';
+  if(!useGroups){
+    const sitting=Math.max(0,N-C*4);
+    desc.innerHTML=`<span style="color:var(--cy)">Standard</span> — ${C*4} play per round${sitting?`, ${sitting} sit out`:', everyone plays'}.`;
+  }else{
+    const bench=courtGroupSize-4;
+    const inMix=Math.min(N,courtGroupSize*C);
+    const globalSits=Math.max(0,N-inMix);
+    const consecLabel=maxConsecPlay>=99?'unlimited':`max ${maxConsecPlay} in a row`;
+    desc.innerHTML=
+      `<span style="color:var(--cy)">${courtGroupSize} per court</span> — `+
+      `4 play, ${bench} rotate courtside${globalSits?`, ${globalSits} sit globally`:''}.`+
+      `<br><span style="color:var(--go)">Play ${consecLabel} before a break.</span>`;
+  }
 }
 
 /* ── ALL-TIME RATING RECALCULATION ───────────────── */
@@ -2677,7 +2679,7 @@ function isPlayerModeUrl(){
 
 function init(){
   // Wire up UI controls (no data yet — Firebase delivers it)
-  initCourtPills('cpills-setup',n=>{S.courts=n;renderRoster();updateGroupSizeHint();});
+  initCourtPills('cpills-setup',n=>{S.courts=n;renderRoster();updateRotationPreview();});
   initCourtPills('cpills-live',n=>{
     S.courts=n;if(S.session){S.session.courts=n;STORE.save();}
     toast(`Courts → ${n} (next round)`,'ok');
