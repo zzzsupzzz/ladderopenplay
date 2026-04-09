@@ -884,7 +884,40 @@ const ELO={
   }
 };
 
-/* ── MATCHMAKING ─────────────────────────────────── */
+/* ── EFFECTIVE RATING (session-blended) ──────────── */
+// Early rounds: trust all-time rating (we don't know today's form yet).
+// As rounds accumulate, shift toward session performance so people who are
+// playing above or below their historical level get re-sorted into appropriate courts.
+//
+// Blend formula:
+//   t = transition factor  (0 = all-time only, 1 = session only)
+//   t rises from 0 → 1 over TRANSITION_ROUNDS rounds
+//
+// Session performance signal = sRating (ELO-updated this session)
+//                             + perfBonus (amplified win/loss + point-diff signal)
+//   perfBonus amplifies the session signal beyond what ELO alone moves,
+//   so a 4-0 player this session gets meaningfully bumped into harder courts.
+//
+// Why keep all-time at all? Prevents wild over-reaction in rounds 1-2 where
+// one lucky win would shuffle the courts completely.
+function effectiveRating(id, round){
+  const TRANSITION_ROUNDS=4; // rounds 1-4 blend; round 5+ = full session weight
+  const p=gp(id),sp=gsp(id);
+  const allTime=p?.rating||1000;
+  if(!sp||!round||round<1)return allTime;
+  const t=Math.min(1,Math.max(0,(round-1)/TRANSITION_ROUNDS));
+  // Session ELO (already updated each match)
+  const sessElo=sp.sRating||allTime;
+  // Amplified session performance signal on top of ELO:
+  //   each net win adds 30pts of pressure, each net point adds 0.4
+  const wins=sp.wins||0,losses=sp.losses||0;
+  const pd=(sp.ptsFor||0)-(sp.ptsAgainst||0);
+  const perfBonus=(wins-losses)*30+pd*0.4;
+  const sessPerf=sessElo+perfBonus;
+  return allTime*(1-t)+sessPerf*t;
+}
+
+
 const MM={
   pc(a,b){return S.session?.partnerHx[a]?.[b]||0;},
   oc(a,b){return S.session?.oppHx[a]?.[b]||0;},
@@ -904,11 +937,13 @@ const MM={
     return[{t1:[a,b],t2:[c,d]},{t1:[a,c],t2:[b,d]},{t1:[a,d],t2:[b,c]}].sort((x,y)=>this.matchScore(x.t1,x.t2)-this.matchScore(y.t1,y.t2))[0];
   },
 
-  // Quality score for court assignment (higher = better matchup for featured court)
+  // Quality score for court assignment — uses effective rating so mid-session
+  // re-sorting into courts reflects current form, not just historical rating
   courtQuality(t1ids,t2ids){
-    const avg=ids=>ids.reduce((s,id)=>{const sp=gsp(id);return s+(sp?sp.sRating:(gp(id)?.rating||1000));},0)/ids.length;
+    const rnd=S.session?.round||0;
+    const avg=ids=>ids.reduce((s,id)=>s+effectiveRating(id,rnd),0)/ids.length;
     const a1=avg(t1ids),a2=avg(t2ids);
-    return -(Math.abs(a1-a2))*2+(a1+a2)*0.3; // balance is 2x more important than level
+    return -(Math.abs(a1-a2))*2+(a1+a2)*0.3;
   },
 
   // Middle-first court slot order for n courts (0-indexed)
@@ -992,13 +1027,13 @@ const MM={
     const groupSize=S.session.courtGroupSize||4;
     const useGroups=groupSize>4;
 
-    // Deterministic skill-descending sort — preserves ladder structure across courts.
-    // Top-rated players always assigned to group 0 (court 1), next to group 1, etc.
-    // Variety within a court comes from bench rotation + bestPair partner selection.
+    // Sort by effective rating — blends all-time with session performance.
+    // Early rounds: all-time dominates. Later rounds: session form takes over.
+    const rnd=S.session.round; // current round (before increment for next round)
     const pool=S.session.activePlayers
-      .map(id=>{const p=gp(id),sp=gsp(id);return(p&&sp&&sp.status!=='left')?{...p,sr:sp.sRating,sw:sp.wins||0,sl:sp.losses||0,g:sp.matchesPlayed}:null;})
+      .map(id=>{const p=gp(id),sp=gsp(id);return(p&&sp&&sp.status!=='left')?{...p,sr:effectiveRating(id,rnd),sw:sp.wins||0,sl:sp.losses||0,g:sp.matchesPlayed}:null;})
       .filter(Boolean)
-      .sort((a,b)=>(b.sr+(b.sw-b.sl)*8)-(a.sr+(a.sw-a.sl)*8));
+      .sort((a,b)=>b.sr-a.sr);
 
     let sitOuts=[];
     let rawMatches=[];
@@ -1537,12 +1572,12 @@ function buildNRP(){
   ${eligible.length?`<div style="font-size:.66rem;font-weight:700;color:var(--mu);margin-top:${mustPlay.length?'8px':'0'};margin-bottom:3px">ELIGIBLE TO BENCH</div><div class="nrp-row">${eligible.map(n=>chip(n,'nrp-bench')).join('')}</div>`:''}
   ${warming.length?`<div style="font-size:.66rem;font-weight:700;color:var(--cy);margin-top:8px;margin-bottom:3px">WARMING UP (will play)</div><div class="nrp-row">${warming.map(n=>chip(n,'nrp-play')).join('')}</div>`:''}`;
 }
-  const info=ids=>ids.map(id=>{const p=gp(id),sp=gsp(id);return{...p||{name:'?',tag:''},sr:sp?sp.sRating:p?.rating||1000};});
+function renderCourt(m,totalCourts){
+  const rnd=S.session?.round||0;
+  const info=ids=>ids.map(id=>{const p=gp(id),sp=gsp(id);return{...p||{name:'?',tag:''},sr:effectiveRating(id,rnd)};});
   const t1=info(m.t1),t2=info(m.t2);
   const a1=Math.round((t1[0].sr+t1[1].sr)/2),a2=Math.round((t2[0].sr+t2[1].sr)/2);
   const done=m.status==='done',tie=done&&m.s1===m.s2,t1w=done&&!tie&&m.s1>m.s2,t2w=done&&!tie&&m.s2>m.s1;
-  const mid=totalCourts>=3?Math.ceil(totalCourts/2):0;
-  const feat=totalCourts>=3&&m.court===mid;
 
   const pRow=(p,ti,pi)=>`<div style="display:flex;align-items:center;gap:4px;justify-content:center;margin-bottom:${pi===0?'3px':'0'}">
     <span style="font-size:.78rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;text-align:center">${esc(p.name)}${tagHtml(p)}</span>
