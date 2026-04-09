@@ -2735,7 +2735,8 @@ function _checkPin(){
 function _unlockAdmin(){
   ADMIN_UNLOCKED=true;_pinBuffer='';_updatePinDots();
   document.getElementById('admin-lock').classList.remove('open');
-  const lb=document.getElementById('lock-btn');if(lb)lb.style.display='inline-block';
+  const lb=document.getElementById('lock-btn');
+  if(lb)lb.style.display=getAdminPin()?'inline-block':'none';
   updatePinStatus();
 }
 
@@ -2752,14 +2753,13 @@ function lockAdmin(){
 function checkAdminAccess(){
   if(PLAYER_MODE)return; // player mode never needs PIN
   const pin=getAdminPin();
+  const sub=document.getElementById('lock-sub');
   if(!pin){
-    // No PIN set yet — show setup prompt
-    ADMIN_UNLOCKED=true; // open by default until PIN is configured
-    const lb=document.getElementById('lock-btn');if(lb)lb.style.display='none';
-    return;
+    // No PIN set yet — force creation before entering
+    if(sub)sub.textContent='Set a 4-digit PIN to protect admin access.';
+  }else{
+    if(sub){sub.textContent='Enter your admin PIN to continue.';sub.style.color='';}
   }
-  // PIN set — require unlock
-  document.getElementById('lock-sub').textContent='Enter your admin PIN to continue.';
   document.getElementById('admin-lock').classList.add('open');
 }
 
