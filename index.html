@@ -357,19 +357,13 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
       <div class="cpill" data-c="3">3</div><div class="cpill" data-c="4">4</div>
       <div class="cpill" data-c="5">5</div><div class="cpill" data-c="6">6</div>
     </div>
-    <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <div><label style="display:block">MAX PLAYERS PER COURT</label>
-        <input id="max-per-court" class="inp" type="number" value="6" min="4" max="10" style="width:70px"/>
-      </div>
-      <p style="font-size:.71rem;color:var(--mu);margin-top:16px">4 play · rest rotate bench &nbsp;·&nbsp; default 6</p>
-    </div>
     <div style="margin-top:10px">
-      <label>CONSECUTIVE GAMES BEFORE BREAK</label>
-      <div class="pn-pills">
-        <div class="pn-pill" id="pn-2" onclick="setPnOverride(2)">Min 2 after bench</div>
-        <div class="pn-pill" id="pn-3" onclick="setPnOverride(3)">Min 3 after bench</div>
+      <label>ROTATION RULES</label>
+      <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px;font-size:.74rem;color:var(--mu);line-height:1.7">
+        <span style="color:var(--gr);font-weight:700">Max 3 consecutive games</span> — everyone rotates out after 3 in a row, no exceptions.<br/>
+        <span style="color:var(--cy);font-weight:700">No back-to-back sits</span> — if you sat last round, you play next round.<br/>
+        <span style="color:var(--go);font-weight:700">Fair rotation</span> — sit-out order based on games played &amp; rest count, not skill level.
       </div>
-      <p id="pn-hint" style="font-size:.67rem;color:var(--mu);margin-top:5px"></p>
     </div>
   </div>
 
@@ -540,7 +534,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 //  • Pickles & Ladders icon embedded
 // ================================================================
 
-const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,roundMin:15,maxPerCourt:6,consecPlayOverride:null,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
+const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,roundMin:15,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
 // Per-court timers (not persisted — local UI state only)
 const CT={};let _ctTick=null;
 // Firebase config stored locally (describes HOW to connect, not app data)
@@ -685,7 +679,7 @@ const SYNC={
         const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
         if(S.session?.status==='active'&&!PLAYER_MODE){switchTab('live');startElapsed();updateProgress();}
         checkAdminAccess();
-        if(!PLAYER_MODE)updatePnPills();
+        if(!PLAYER_MODE)
       }else{
         toast('🔄 Synced from another device','ok');
       }
@@ -825,34 +819,6 @@ function clearAllCT(){
   Object.keys(CT).forEach(k=>delete CT[k]);
 }
 
-/* ── PLAY-N OVERRIDE ─────────────────────────────── */
-function setPnOverride(n){
-  S.consecPlayOverride=n;
-  updatePnPills();
-  updateRotationPreview();
-}
-function updatePnPills(){
-  const N=[...S.checkedIn].length,C=S.courts||1;
-  const maxPC=Math.max(4,Math.min(10,parseInt(document.getElementById('max-per-court')?.value)||S.maxPerCourt||6));
-  const{minPlayAfterSit,useGroups}=calcRotation(N,C,maxPC);
-  const suggested=useGroups?minPlayAfterSit:null;
-  const active=S.consecPlayOverride||suggested;
-  [2,3].forEach(n=>{
-    const el=document.getElementById(`pn-${n}`);if(!el)return;
-    el.classList.toggle('sel',active===n);
-    const tag=el.querySelector('.auto-tag');if(tag)tag.remove();
-    if(suggested===n&&!S.consecPlayOverride){
-      el.insertAdjacentHTML('beforeend','<span class="auto-tag">(suggested)</span>');
-    }
-  });
-  const hint=document.getElementById('pn-hint');
-  if(hint){
-    if(!useGroups)hint.textContent='Standard — everyone plays, no bench rotation.';
-    else if(S.consecPlayOverride)hint.textContent=`Override: play at least ${S.consecPlayOverride} after each bench. Top players may play more.`;
-    else hint.textContent=`Auto for ${N} players on ${C} court${C>1?'s':''}. Top players may naturally play 3+ in a row.`;
-  }
-}
-
 
 const ELO={
   K(id){const p=gp(id)||{gamesPlayed:0};const sp=gsp(id)||{matchesPlayed:0};const t=(p.gamesPlayed||0)+(sp.matchesPlayed||0);return t<15?40:t<40?28:18;},
@@ -901,7 +867,7 @@ const ELO={
 // Why keep all-time at all? Prevents wild over-reaction in rounds 1-2 where
 // one lucky win would shuffle the courts completely.
 function effectiveRating(id, round){
-  const TRANSITION_ROUNDS=4; // rounds 1-4 blend; round 5+ = full session weight
+  const TRANSITION_ROUNDS=2; // rounds 1-2 blend; round 3+ = full session weight
   const p=gp(id),sp=gsp(id);
   const allTime=p?.rating||1000;
   if(!sp||!round||round<1)return allTime;
@@ -912,7 +878,7 @@ function effectiveRating(id, round){
   //   each net win adds 30pts of pressure, each net point adds 0.4
   const wins=sp.wins||0,losses=sp.losses||0;
   const pd=(sp.ptsFor||0)-(sp.ptsAgainst||0);
-  const perfBonus=(wins-losses)*30+pd*0.4;
+  const perfBonus=Math.max(-150,Math.min(150,(wins-losses)*30+pd*0.4));
   const sessPerf=sessElo+perfBonus;
   return allTime*(1-t)+sessPerf*t;
 }
@@ -976,36 +942,54 @@ const MM={
   //   4. Lower session rating last (top players sit last among equal candidates)
   _pickSitOuts(subpool, excess){
     const minPlay=S.session.minPlayAfterSit||2;
+    const MAX_CONSEC=3; // hard cap — everyone must rest after 3 consecutive games, no exceptions
 
-    // Hard: just sat → must play next round
+    // Hard rule A: just sat → must play next (no back-to-back sits)
     const mustPlayIds=new Set(subpool.filter(p=>(S.session.soStreak[p.id]||0)>=1).map(p=>p.id));
 
-    // Candidates: everyone not in mustPlay
-    const candidates=subpool.filter(p=>!mustPlayIds.has(p.id));
+    // Hard rule B: hit the 3-game cap → must sit next (applies equally to everyone)
+    // If also in mustPlay (edge case: sat last round AND somehow at cap), mustPlay wins.
+    const overCapPool=subpool
+      .filter(p=>(S.session.plStreak[p.id]||0)>=MAX_CONSEC && !mustPlayIds.has(p.id))
+      .sort((a,b)=>{
+        // Among over-cap players, highest streak sits first; tiebreak by fewest sit-outs
+        const da=(S.session.plStreak[b.id]||0)-(S.session.plStreak[a.id]||0);
+        if(da!==0)return da;
+        return (S.session.sitOutHx[a.id]||0)-(S.session.sitOutHx[b.id]||0);
+      });
+
+    // Take as many forced sitters as needed (may be fewer than excess)
+    const forcedSits=overCapPool.slice(0,excess).map(p=>p.id);
+    const stillNeeded=excess-forcedSits.length;
+    if(stillNeeded<=0)return forcedSits;
+
+    // Voluntary candidates: not forced to sit, not forced to play
+    const usedIds=new Set([...forcedSits,...mustPlayIds]);
+    const candidates=subpool.filter(p=>!usedIds.has(p.id));
 
     candidates.sort((a,b)=>{
-      // 1. Most games played sits first
+      // 1. Most games played this session sits first (equalise court time)
       const ga=gsp(a.id)?.matchesPlayed||0,gb=gsp(b.id)?.matchesPlayed||0;
       if(ga!==gb)return gb-ga;
-      // 2. Fewest sit-outs sits next
+      // 2. Fewest sit-outs so far
       const sa=S.session.sitOutHx[a.id]||0,sb=S.session.sitOutHx[b.id]||0;
       if(sa!==sb)return sa-sb;
-      // 3. Has played enough since last sit (plStreak ≥ min) → eligible → sits before ineligible
+      // 3. Eligible (plStreak ≥ min since last sit) before ineligible
       const pa=S.session.plStreak[a.id]||0,pb=S.session.plStreak[b.id]||0;
       const ae=pa>=minPlay||(S.session.sitOutHx[a.id]||0)===0;
       const be=pb>=minPlay||(S.session.sitOutHx[b.id]||0)===0;
-      if(ae!==be)return ae?-1:1; // eligible sits before ineligible
-      // 4. Lower-rated sits before higher-rated (top players get priority to keep playing)
-      const ra=gsp(a.id)?.sRating||gp(a.id)?.rating||1000;
-      const rb=gsp(b.id)?.sRating||gp(b.id)?.rating||1000;
-      return ra-rb; // ascending: lower rated sits first
+      if(ae!==be)return ae?-1:1;
+      // 4. Longest current play streak sits first (spreads rest evenly, no rating bias)
+      return pb-pa;
     });
 
-    if(candidates.length>=excess)return candidates.slice(0,excess).map(p=>p.id);
+    const additionalSits=candidates.slice(0,stillNeeded).map(p=>p.id);
+    const totalSits=[...forcedSits,...additionalSits];
+    if(totalSits.length>=excess)return totalSits;
 
-    // Fallback: not enough candidates — relax mustPlay (better than deadlock)
-    // Prefer those with fewest sit-outs among the mustPlay group
-    const relaxed=[...candidates,...subpool.filter(p=>mustPlayIds.has(p.id))
+    // Fallback: still short — relax mustPlay (deadlock prevention)
+    const relaxed=[...totalSits,...subpool
+      .filter(p=>mustPlayIds.has(p.id)&&!new Set(totalSits).has(p.id))
       .sort((a,b)=>(S.session.sitOutHx[a.id]||0)-(S.session.sitOutHx[b.id]||0))];
     return relaxed.slice(0,excess).map(p=>p.id);
   },
@@ -1024,94 +1008,89 @@ const MM={
   },
 
   generate(courts){
-    const groupSize=S.session.courtGroupSize||4;
-    const useGroups=groupSize>4;
-
     // Sort by effective rating — blends all-time with session performance.
-    // Early rounds: all-time dominates. Later rounds: session form takes over.
-    const rnd=S.session.round; // current round (before increment for next round)
+    const rnd=S.session.round;
     const pool=S.session.activePlayers
       .map(id=>{const p=gp(id),sp=gsp(id);return(p&&sp&&sp.status!=='left')?{...p,sr:effectiveRating(id,rnd),sw:sp.wins||0,sl:sp.losses||0,g:sp.matchesPlayed}:null;})
       .filter(Boolean)
       .sort((a,b)=>b.sr-a.sr);
 
-    let sitOuts=[];
-    let rawMatches=[];
-
-    if(useGroups){
-      // maxInGroups = max players courts can absorb (groupSize players per court)
-      const maxInGroups=groupSize*courts;
-
-      // Step 1: If more players than courts can hold, pick global sit-outs FAIRLY
-      // (by streak/fairness — not just bottom-rated overflow)
-      let globalSitIds=[];
-      let groupPool=pool;
-      if(pool.length>maxInGroups){
-        const excess=pool.length-maxInGroups;
-        globalSitIds=this._pickSitOuts(pool,excess);
-        globalSitIds.forEach(id=>{S.session.sitOutHx[id]=(S.session.sitOutHx[id]||0)+1;});
-        this.updateStreaks(globalSitIds,globalSitIds);
-        const sitSet=new Set(globalSitIds);
-        groupPool=pool.filter(p=>!sitSet.has(p.id)); // remaining stay sorted by skill
-      }
-
-      // Step 2: Distribute groupPool into skill-ordered court groups (ladder bands)
-      const numGroups=Math.min(courts,Math.floor(groupPool.length/4));
-      if(numGroups===0){
-        // Not enough players for any court — everyone sits
-        groupPool.forEach(p=>{
-          globalSitIds.push(p.id);
-          S.session.sitOutHx[p.id]=(S.session.sitOutHx[p.id]||0)+1;
-        });
-        if(groupPool.length)this.updateStreaks(groupPool.map(p=>p.id),groupPool.map(p=>p.id));
-        return{matches:[],sitOuts:[...globalSitIds]};
-      }
-
-      // Evenly distribute: first (extras) groups get 1 extra player
-      const baseGroup=Math.floor(groupPool.length/numGroups);
-      const extras=groupPool.length%numGroups;
-      let idx=0;
-      for(let g=0;g<numGroups;g++){
-        const sz=baseGroup+(g<extras?1:0);
-        const groupRaw=groupPool.slice(idx,idx+sz);idx+=sz;
-        if(groupRaw.length<4){
-          groupRaw.forEach(p=>{globalSitIds.push(p.id);S.session.sitOutHx[p.id]=(S.session.sitOutHx[p.id]||0)+1;});
-          if(groupRaw.length)this.updateStreaks(groupRaw.map(p=>p.id),groupRaw.map(p=>p.id));
-          continue;
-        }
-        const benchCount=Math.max(0,groupRaw.length-4);
-        const bench=benchCount>0?this._pickSitOuts(groupRaw,benchCount):[];
-        bench.forEach(id=>{S.session.sitOutHx[id]=(S.session.sitOutHx[id]||0)+1;});
-        const playing4=groupRaw.filter(p=>!bench.includes(p.id)).slice(0,4);
-        const{t1,t2}=this.bestPair(playing4);
-        rawMatches.push({id:uid(),t1:[t1[0].id,t1[1].id],t2:[t2[0].id,t2[1].id],s1:null,s2:null,status:'pending',eloDeltas:null,court:0,bench});
-        this.updateStreaks(bench,groupRaw.map(p=>p.id));
-      }
-
-      // Edge case: any leftover players not assigned to a group
-      const overflow=groupPool.slice(idx);
-      overflow.forEach(p=>{
-        globalSitIds.push(p.id);
-        S.session.sitOutHx[p.id]=(S.session.sitOutHx[p.id]||0)+1;
-      });
-      if(overflow.length)this.updateStreaks(overflow.map(p=>p.id),overflow.map(p=>p.id));
-
-      sitOuts=[...globalSitIds];
-    } else {
-      // Standard 4-player mode — no court groups
-      sitOuts=this.calcSitOuts(pool,courts);
-      sitOuts.forEach(id=>{S.session.sitOutHx[id]=(S.session.sitOutHx[id]||0)+1;});
-      this.updateStreaks(sitOuts,pool.map(p=>p.id));
-      const playing=pool.filter(p=>!sitOuts.includes(p.id));
-      const nc=Math.floor(playing.length/4);
-      for(let c=0;c<nc;c++){
-        const{t1,t2}=this.bestPair(playing.slice(c*4,c*4+4));
-        rawMatches.push({id:uid(),t1:[t1[0].id,t1[1].id],t2:[t2[0].id,t2[1].id],s1:null,s2:null,status:'pending',eloDeltas:null,court:0,bench:[]});
-      }
+    let sitOuts=this.calcSitOuts(pool,courts);
+    sitOuts.forEach(id=>{S.session.sitOutHx[id]=(S.session.sitOutHx[id]||0)+1;});
+    this.updateStreaks(sitOuts,pool.map(p=>p.id));
+    const playing=pool.filter(p=>!sitOuts.includes(p.id));
+    const nc=Math.floor(playing.length/4);
+    const groups=this._groupForCourts(playing,nc);
+    const rawMatches=[];
+    for(let c=0;c<nc;c++){
+      const{t1,t2}=this.bestPair(groups[c]);
+      rawMatches.push({id:uid(),t1:[t1[0].id,t1[1].id],t2:[t2[0].id,t2[1].id],s1:null,s2:null,status:'pending',eloDeltas:null,court:0,bench:[]});
     }
 
     const matches=this.assignCourts(rawMatches);
     return{matches,sitOuts};
+  },
+
+  // Build optimal court groups balancing two goals:
+  //   1. Match quality  — keep cross-team and within-team skill gaps small (PRIMARY)
+  //   2. Partner variety — avoid repeating the same partner (SECONDARY)
+  //
+  // Quality always wins when the tradeoff is large.
+  // e.g. 3 strong + 1 weak in a group → algorithm accepts a repeat partner
+  //       rather than creating a lopsided match just for variety's sake.
+  _groupForCourts(playing, nc){
+    if(nc===1)return[playing.slice(0,4)];
+    const n=playing.length;
+
+    // Score a single group of 4 — lower is better.
+    // Finds best pairing within the group, then combines imbalance + repeat penalty.
+    const groupScore=g=>{
+      const{t1,t2}=this.bestPair(g);
+      const avg=arr=>arr.reduce((s,p)=>s+p.sr,0)/arr.length;
+      const a1=avg(t1),a2=avg(t2);
+      // Cross-team imbalance (raw ELO points) — main quality signal
+      const crossImb=Math.abs(a1-a2);
+      // Within-team gap — penalise "carry" pairings mildly
+      const t1gap=Math.abs(t1[0].sr-t1[1].sr);
+      const t2gap=Math.abs(t2[0].sr-t2[1].sr);
+      // Partner repeat penalty — mild, so quality always dominates for large imbalances
+      // A 200pt cross-team gap weighs ~100; one partner repeat weighs ~25.
+      // So a bad match (~200pt gap) = 4 repeated-partner slots → repeats yield quickly.
+      let repeatPenalty=0;
+      for(let i=0;i<g.length;i++)for(let j=i+1;j<g.length;j++)repeatPenalty+=this.pc(g[i].id,g[j].id);
+      return crossImb*0.5+(t1gap+t2gap)*0.15+repeatPenalty*25;
+    };
+
+    const totalScore=groups=>groups.reduce((t,g)=>t+groupScore(g),0);
+
+    // Strategy 1: sequential (top-4 together, next-4 together, …)
+    const makeSeq=()=>{const r=[];for(let c=0;c<nc;c++)r.push(playing.slice(c*4,(c+1)*4));return r;};
+
+    // Strategy 2: interleaved at a given offset — spreads skill across courts
+    const makeInterleaved=off=>{
+      const r=Array.from({length:nc},()=>[]);
+      for(let i=0;i<n;i++)r[(i+off)%nc].push(playing[i]);
+      return r;
+    };
+
+    // Strategy 3: snake — zigzag down the rated list
+    const makeSnake=()=>{
+      const r=Array.from({length:nc},()=>[]);
+      for(let i=0;i<n;i++){
+        const band=Math.floor(i/nc),pos=i%nc;
+        r[band%2===0?pos:nc-1-pos].push(playing[i]);
+      }
+      return r.every(g=>g.length===4)?r:null;
+    };
+
+    const candidates=[makeSeq()];
+    for(let off=0;off<nc;off++)candidates.push(makeInterleaved(off));
+    const snake=makeSnake();if(snake)candidates.push(snake);
+
+    const valid=candidates.filter(g=>g.every(gr=>gr.length===4));
+    if(!valid.length)return makeSeq();
+    valid.sort((a,b)=>totalScore(a)-totalScore(b));
+    return valid[0];
   },
 
   recHx(matches){
@@ -1170,12 +1149,10 @@ function startSession(){
   const arr=[...S.checkedIn];if(arr.length<4){toast('Need at least 4 players','err');return;}
   S.roundMin=parseInt(document.getElementById('round-dur').value)||15;
   const name=document.getElementById('sess-name').value.trim()||`Open Play — ${fmtDate()}`;
-  S.maxPerCourt=Math.max(4,Math.min(10,parseInt(document.getElementById('max-per-court')?.value)||6));
-  const{courtGroupSize,minPlayAfterSit:autoMin}=calcRotation(arr.length,S.courts,S.maxPerCourt);
-  const minPlayAfterSit=S.consecPlayOverride||autoMin;
+  const{minPlayAfterSit}=calcRotation(arr.length,S.courts);
   S.session={
     id:uid(),name,date:new Date().toISOString(),courts:S.courts,roundMin:S.roundMin,
-    minPlayAfterSit,courtGroupSize,maxPerCourt:S.maxPerCourt,
+    minPlayAfterSit,courtGroupSize:4,
     sessionStart:Date.now(),
     activePlayers:[...arr],
     players:arr.map(id=>{const p=gp(id);return{id,name:p.name,tag:p.tag||'',sRating:p.rating,startRating:p.rating,wins:0,losses:0,ties:0,matchesPlayed:0,ptsFor:0,ptsAgainst:0,status:'active'};}),
@@ -1477,32 +1454,18 @@ function renderRoster(){
   }
   const players=arr.map(gp).filter(Boolean).sort((a,b)=>b.rating-a.rating);
   document.getElementById('roster-list').innerHTML=players.map(p=>`<div class="prow click chk" onclick="toggleCheckIn('${p.id}')"><div class="pnc"><div class="pn">${p.name}${tagHtml(p)}</div></div><div class="pr" style="color:var(--gr)">${Math.round(p.rating)}</div><div style="color:var(--gr)">✓</div></div>`).join('');
-  const maxPC=Math.max(4,Math.min(10,parseInt(document.getElementById('max-per-court')?.value)||S.maxPerCourt||6));
-  const{courtGroupSize,minPlayAfterSit,useGroups}=calcRotation(arr.length,S.courts,maxPC);
-  const activeMin=S.consecPlayOverride||minPlayAfterSit;
   const avg=Math.round(arr.reduce((s,id)=>s+(gp(id)?.rating||0),0)/arr.length);
-  let playingR1,hintText;
-  if(useGroups){
-    const maxInGroups=courtGroupSize*S.courts;
-    const globalSits=Math.max(0,arr.length-maxInGroups);
-    const benchPerCourt=courtGroupSize-4;
-    playingR1=Math.min(arr.length,S.courts*4);
-    hintText=globalSits
-      ?`${maxInGroups} in groups (${benchPerCourt} bench/court), ${globalSits} sit out`
-      :`All ${arr.length} in groups · ${benchPerCourt} bench/court · min ${activeMin} plays after bench`;
-  }else{
-    const need=S.courts*4;
-    playingR1=Math.min(need,arr.length);
-    const so=Math.max(0,arr.length-need);
-    hintText=so?`${so} player${so>1?'s':''} sit out round 1`:'Everyone plays round 1!';
-  }
+  const need=S.courts*4;
+  const playingR1=Math.min(need,arr.length);
+  const so=Math.max(0,arr.length-need);
+  const hintText=so?`${so} player${so>1?'s':''} sit out round 1`:'Everyone plays round 1!';
   document.getElementById('roster-stats').innerHTML=`<span class="sc"><b>${arr.length}</b> Players</span><span class="sc"><b>${S.courts}</b> Court${S.courts>1?'s':''}</span><span class="sc"><b>${playingR1}</b> Playing R1</span><span class="sc"><b>${avg}</b> Avg RTG</span>`;
   const act=S.session?.status==='active',btn=document.getElementById('start-btn');
   if(act){btn.disabled=true;btn.textContent='✅ Session Running';document.getElementById('start-hint').textContent='Go to Live tab.';}
   else if(arr.length<4){btn.disabled=true;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=`Need ${4-arr.length} more.`;}
   else{btn.disabled=false;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=hintText;}
   updateRotationPreview();
-  if(!PLAYER_MODE)updatePnPills();
+  if(!PLAYER_MODE)
 }
 
 /* ── RENDER: LIVE ────────────────────────────────── */
@@ -1522,9 +1485,9 @@ function renderLive(){
   if(rnd.sitOuts?.length){
     sc.style.display='block';
     sl.innerHTML=(rnd.sitOuts||[]).map(id=>{
-      const p=gp(id),cnt=S.session.sitOutHx[id]||0,streak=S.session.soStreak[id]||0;
-      const warn=streak>=2;
-      return `<div class="so-chip ${warn?'so-warn':''}">${p?.name||'?'}${tagHtml(p)}<span class="so-n${warn?' warn':''}">${cnt}x${streak>1?` (${streak} straight)`:''}${warn?' — MUST PLAY NEXT':''}</span></div>`;
+      const p=gp(id),cnt=S.session.sitOutHx[id]||0,soSt=S.session.soStreak[id]||0;
+      const warn=soSt>=1;
+      return `<div class="so-chip ${warn?'so-warn':''}">${p?.name||'?'}${tagHtml(p)}<span class="so-n${warn?' warn':''}">${cnt}x${warn?' — PLAYS NEXT':''}</span></div>`;
     }).join('');
   }else sc.style.display='none';
 
@@ -1549,17 +1512,19 @@ function renderLive(){
 
 function buildNRP(){
   if(!S.session)return'';
+  const MAX_CONSEC=3;
   const minPlay=S.session.minPlayAfterSit||2;
   const active=S.session.activePlayers.filter(id=>{const sp=gsp(id);return sp&&sp.status!=='left';});
-  const mustPlay=[],eligible=[],warming=[];
+  const mustPlay=[],mustSit=[],eligible=[],warming=[];
   active.forEach(id=>{
     const so=S.session.soStreak[id]||0;
     const pl=S.session.plStreak[id]||0;
     const sitHx=S.session.sitOutHx[id]||0;
     const nm=gp(id)?.name||'?';
-    if(so>=1)mustPlay.push(nm);                         // just benched → must play
-    else if(pl>=minPlay||sitHx===0)eligible.push(nm);   // eligible to be benched
-    else warming.push(nm);                              // played since sit, not yet at min
+    if(so>=1)mustPlay.push(nm);              // just sat → must play next
+    else if(pl>=MAX_CONSEC)mustSit.push(nm); // hit 3-game cap → must rest
+    else if(pl>=minPlay||sitHx===0)eligible.push(nm); // eligible to be chosen to sit
+    else warming.push(nm);                   // still in minimum-play window after last sit
   });
   const chip=(n,cls)=>`<span class="nrp-chip ${cls}">${esc(n)}</span>`;
   const nextN=S.session.round+1;
@@ -1567,10 +1532,11 @@ function buildNRP(){
     <div style="font-family:'Bebas Neue',sans-serif;font-size:.95rem;letter-spacing:.5px;color:var(--gr)">⏭ Round ${nextN} Preview</div>
     <button class="btn bc sm" onclick="doNextRound()">▶ Start Round ${nextN}</button>
   </div>
-  <div style="font-size:.67rem;color:var(--mu);margin-bottom:8px">Exact pairings generated when round starts. Top-rated players bench last among equals.</div>
-  ${mustPlay.length?`<div style="font-size:.66rem;font-weight:700;color:var(--gr);margin-bottom:3px">MUST PLAY (just benched)</div><div class="nrp-row">${mustPlay.map(n=>chip(n,'nrp-play')).join('')}</div>`:''}
-  ${eligible.length?`<div style="font-size:.66rem;font-weight:700;color:var(--mu);margin-top:${mustPlay.length?'8px':'0'};margin-bottom:3px">ELIGIBLE TO BENCH</div><div class="nrp-row">${eligible.map(n=>chip(n,'nrp-bench')).join('')}</div>`:''}
-  ${warming.length?`<div style="font-size:.66rem;font-weight:700;color:var(--cy);margin-top:8px;margin-bottom:3px">WARMING UP (will play)</div><div class="nrp-row">${warming.map(n=>chip(n,'nrp-play')).join('')}</div>`:''}`;
+  <div style="font-size:.67rem;color:var(--mu);margin-bottom:8px">Pairings generated when round starts · sit-out order based on games played, not skill level.</div>
+  ${mustPlay.length?`<div style="font-size:.66rem;font-weight:700;color:var(--gr);margin-bottom:3px">✅ PLAYS NEXT (just sat out)</div><div class="nrp-row">${mustPlay.map(n=>chip(n,'nrp-play')).join('')}</div>`:''}
+  ${mustSit.length?`<div style="font-size:.66rem;font-weight:700;color:var(--or);margin-top:${mustPlay.length?'8px':'0'};margin-bottom:3px">💤 MUST REST (3 games in a row)</div><div class="nrp-row">${mustSit.map(n=>chip(n,'nrp-sit')).join('')}</div>`:''}
+  ${eligible.length?`<div style="font-size:.66rem;font-weight:700;color:var(--mu);margin-top:${(mustPlay.length||mustSit.length)?'8px':'0'};margin-bottom:3px">ELIGIBLE TO SIT</div><div class="nrp-row">${eligible.map(n=>chip(n,'nrp-bench')).join('')}</div>`:''}
+  ${warming.length?`<div style="font-size:.66rem;font-weight:700;color:var(--cy);margin-top:8px;margin-bottom:3px">WILL PLAY (in rest window)</div><div class="nrp-row">${warming.map(n=>chip(n,'nrp-play')).join('')}</div>`:''}`;
 }
 function renderCourt(m,totalCourts){
   const rnd=S.session?.round||0;
@@ -1637,7 +1603,12 @@ function renderStandings(){renderSessStd();renderAllTime();}
 function renderSessStd(){
   const el=document.getElementById('sess-std');
   if(!S.session){el.innerHTML=`<div class="empty">No active session</div>`;return;}
-  const rows=[...S.session.players].sort((a,b)=>b.sRating-a.sRating||(b.ptsFor-b.ptsAgainst)-(a.ptsFor-a.ptsAgainst)).map((sp,i)=>{
+  const rows=[...S.session.players].sort((a,b)=>{
+    if(b.wins!==a.wins)return b.wins-a.wins;
+    const pda=a.ptsFor-a.ptsAgainst,pdb=b.ptsFor-b.ptsAgainst;
+    if(pdb!==pda)return pdb-pda;
+    return b.sRating-a.sRating;
+  }).map((sp,i)=>{
     // Use stored name/tag first (survives mid-session adds), fall back to DB
     const name=sp.name||gp(sp.id)?.name||'?';
     const tag=sp.tag!==undefined?sp.tag:(gp(sp.id)?.tag||'');
@@ -1711,48 +1682,28 @@ function deleteMatch(matchId){
 }
 
 /* ── ROTATION AUTO-CALCULATION ───────────────────── */
-// Given N players, C courts, and a max-per-court cap, returns rotation settings.
-// courtGroupSize   = players assigned to each court (4 play, rest rotate bench)
-// minPlayAfterSit  = soft threshold: prefer not to re-bench a player until they've
-//                   played this many consecutive rounds since their last bench
-//                   (prevents 1-on/1-off; hard maxConsecPlay cap removed so top
-//                   players can naturally play 3+ when lower-rated players fill bench)
-function calcRotation(N, C, maxPerCourt){
-  maxPerCourt=maxPerCourt||6;
+// Given N players and C courts, returns sit-out and play-streak thresholds.
+// Always pure 4-player-per-court mode — partners rotate via smart grouping.
+function calcRotation(N, C){
   if(!N||!C||N<4)return{courtGroupSize:4,minPlayAfterSit:2,useGroups:false};
-  const raw=N/C;
-  if(raw<=4)return{courtGroupSize:4,minPlayAfterSit:2,useGroups:false};
-  const courtGroupSize=Math.min(maxPerCourt,Math.ceil(raw));
-  // Soft threshold: play this many rounds after a bench before becoming sit-eligible again
-  //   6/court (2 bench/round) → suggest 2: enough to prevent 1-on/1-off
-  //   5/court (1 bench/round) → suggest 3: bench is rarer, want more play time
-  const minPlayAfterSit=courtGroupSize>=6?2:3;
-  return{courtGroupSize,minPlayAfterSit,useGroups:true};
+  // Always pure 4-player mode — no bench rotation groups
+  // minPlayAfterSit: how many rounds to play before becoming sit-eligible again
+  const excess=N-C*4;
+  const minPlayAfterSit=excess<=0?2:(excess<=C?3:2);
+  return{courtGroupSize:4,minPlayAfterSit,useGroups:false};
 }
 
 function updateRotationPreview(){
   const N=[...S.checkedIn].length;
   const C=S.courts||1;
-  const maxPC=Math.max(4,Math.min(10,parseInt(document.getElementById('max-per-court')?.value)||S.maxPerCourt||6));
   const box=document.getElementById('rotation-preview');
   const desc=document.getElementById('rotation-desc');
   if(!box||!desc)return;
   if(N<4){box.style.display='none';return;}
-  const{courtGroupSize,minPlayAfterSit,useGroups}=calcRotation(N,C,maxPC);
+  const sitting=Math.max(0,N-C*4);
   box.style.display='block';
-  if(!useGroups){
-    const sitting=Math.max(0,N-C*4);
-    desc.innerHTML=`<span style="color:var(--cy)">Standard</span> — ${C*4} play per round${sitting?`, ${sitting} sit out`:', everyone plays'}.`;
-  }else{
-    const bench=courtGroupSize-4;
-    const maxInGroups=courtGroupSize*C;
-    const globalSits=Math.max(0,N-maxInGroups);
-    const activeVal=S.consecPlayOverride||minPlayAfterSit;
-    desc.innerHTML=
-      `<span style="color:var(--cy)">${courtGroupSize} per court</span> — `+
-      `4 play, ${bench} bench${globalSits?`, ${globalSits} sit globally`:''}.`+
-      `<br><span style="color:var(--go)">Must play ${activeVal} after benching · top players bench last · no back-to-back sits.</span>`;
-  }
+  desc.innerHTML=`<span style="color:var(--cy)">Standard</span> — ${Math.min(N,C*4)} play per round${sitting?`, ${sitting} sit out`:', everyone plays'}.`+
+    `<br><span style="color:var(--go)">Max 3 consecutive games · no back-to-back sits · fair rotation regardless of skill.</span>`;
 }
 
 /* ── ALL-TIME RATING RECALCULATION ───────────────── */
@@ -1850,7 +1801,7 @@ function renderArchive(){
     const rCount=sess.rounds.length;
     const mCount=sess.rounds.reduce((s,r)=>s+r.matches.filter(m=>m.status==='done').length,0);
 
-    const stdRows=[...sess.players].sort((a,b)=>b.sRating-a.sRating).map((sp,i)=>{
+    const stdRows=[...sess.players].sort((a,b)=>{if(b.wins!==a.wins)return b.wins-a.wins;const pda=a.ptsFor-a.ptsAgainst,pdb=b.ptsFor-b.ptsAgainst;if(pdb!==pda)return pdb-pda;return b.sRating-a.sRating;}).map((sp,i)=>{
       const d2=sp.sRating-sp.startRating,pd=(sp.ptsFor||0)-(sp.ptsAgainst||0);
       return `<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.78rem">${esc(sp.name||'?')}${sp.tag?`<span class="ptag">${esc(sp.tag)}</span>`:''}</td><td style="font-size:.72rem;color:var(--mu)">${sp.wins}W/${sp.losses}L${sp.ties?'/'+sp.ties+'T':''}</td><td style="font-size:.7rem;color:var(--mu)">${pd>=0?'+':''}${pd}</td><td><span class="dl ${d2>0?'du':d2<0?'dd':'dz'}">${d2>=0?'+':''}${d2}</span></td><td><span class="rv">${Math.round(sp.sRating)}</span></td></tr>`;
     }).join('');
@@ -2404,13 +2355,13 @@ function updateProgress(){
 function doNextRound(){
   if(!S.session)return;
   const cur=curRnd();
-  if(cur&&cur.matches.length>0){
-    const pending=cur.matches.filter(m=>m.status!=='done').length;
-    if(pending>0){
+  if(cur){
+    const pending=cur.matches.filter(m=>m.status!=='done');
+    if(pending.length>0){
+      const courts=pending.map(m=>`Court ${m.court}`).join(', ');
       showCfm(
-        `<strong>${pending} score${pending>1?'s':''} not submitted yet.</strong><br/>
-        <span style="font-size:.74rem;color:var(--mu)">Start next round anyway? The pending scores will be lost.</span>`,
-        'Start Anyway','bd2',()=>nextRound()
+        `<strong>${pending.length} match${pending.length>1?'es':''} still unscored</strong> (${courts}).<br/><span style="font-size:.75rem;color:var(--mu)">Those players won't get ELO credit for this round. Advance anyway?</span>`,
+        'Advance Anyway','bc',()=>nextRound()
       );
       return;
     }
@@ -2856,9 +2807,7 @@ function isPlayerModeUrl(){
 
 function init(){
   // Wire up UI controls (no data yet — Firebase delivers it)
-  initCourtPills('cpills-setup',n=>{S.courts=n;renderRoster();updateRotationPreview();updatePnPills();});
-  const mpcInput=document.getElementById('max-per-court');
-  if(mpcInput){mpcInput.addEventListener('input',()=>{S.maxPerCourt=Math.max(4,Math.min(10,parseInt(mpcInput.value)||6));updateRotationPreview();renderRoster();updatePnPills();});}
+  initCourtPills('cpills-setup',n=>{S.courts=n;renderRoster();updateRotationPreview();});
   initCourtPills('cpills-live',n=>{
     S.courts=n;if(S.session){S.session.courts=n;STORE.save();}
     toast(`Courts → ${n} (next round)`,'ok');
