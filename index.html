@@ -293,8 +293,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
       <div class="pin-key" onclick="pinKey('7')">7</div>
       <div class="pin-key" onclick="pinKey('8')">8</div>
       <div class="pin-key" onclick="pinKey('9')">9</div>
-      <div class="pin-key" style="grid-column:1" onclick="pinSkip()" id="pin-skip-btn" style="display:none">SKIP</div>
-      <div class="pin-key" onclick="pinKey('0')">0</div>
+      <div class="pin-key" style="grid-column:1" onclick="pinKey('0')">0</div>
       <div class="pin-key del" onclick="pinDel()">⌫</div>
     </div>
     <div style="margin-top:14px;font-size:.68rem;color:var(--m2)">Shared with co-admins · Players use the Player Link</div>
@@ -2773,30 +2772,44 @@ function updatePinStatus(){
 
 function openPinSetupModal(){
   const pin=getAdminPin();
-  openModal(`<div class="modal-title">🔐 Admin PIN Setup</div>
+  openModal(`<div class="modal-title">🔐 Admin PIN ${pin?'Change':'Setup'}</div>
     <p style="font-size:.76rem;color:var(--mu);margin-bottom:12px;line-height:1.55">
-      ${pin?'Change or remove your 4-digit admin PIN. Share with co-admins only.':'Set a 4-digit PIN. You\'ll need it every time you open the app (unless you stay unlocked).'}
+      ${pin?'Enter your current PIN, then set a new one.':'Set a 4-digit PIN. Required every time the app is opened.'}
     </p>
+    ${pin?`<label>CURRENT PIN</label>
+    <input id="cur-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:8px;letter-spacing:6px;text-align:center;font-size:1.2rem"/>`:''}
     <label>NEW PIN (4 digits)</label>
     <input id="new-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:8px;letter-spacing:6px;text-align:center;font-size:1.2rem"/>
-    <label>CONFIRM PIN</label>
+    <label>CONFIRM NEW PIN</label>
     <input id="conf-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:12px;letter-spacing:6px;text-align:center;font-size:1.2rem"/>
     <div style="display:flex;gap:7px;flex-wrap:wrap">
-      <button class="btn bp" style="flex:2" onclick="_savePinModal()">Set PIN</button>
-      ${pin?`<button class="btn bd2 sm" onclick="showCfm('Remove admin PIN? Anyone can access admin mode.','Remove PIN','bd2',()=>{setAdminPin('');ADMIN_UNLOCKED=true;closeModal();updatePinStatus();toast('PIN removed','warn');})">Remove</button>`:''}
+      <button class="btn bp" style="flex:2" onclick="_savePinModal()">Save PIN</button>
+      ${pin?`<button class="btn bd2 sm" onclick="_removePinModal()">Remove PIN</button>`:''}
       <button class="btn bg2 sm" onclick="closeModal()">Cancel</button>
     </div>`);
 }
 
+function _removePinModal(){
+  const cur=(document.getElementById('cur-pin')?.value||'').trim();
+  const stored=getAdminPin();
+  if(cur!==stored){toast('Current PIN is wrong','err');return;}
+  showCfm('Remove admin PIN? Anyone will be able to access admin mode.','Remove PIN','bd2',()=>{
+    setAdminPin('');ADMIN_UNLOCKED=true;closeModal();updatePinStatus();toast('PIN removed','warn');
+  });
+}
+
 function _savePinModal(){
+  const stored=getAdminPin();
+  if(stored){
+    const cur=(document.getElementById('cur-pin')?.value||'').trim();
+    if(cur!==stored){toast('Current PIN is wrong','err');return;}
+  }
   const p1=(document.getElementById('new-pin')?.value||'').trim();
   const p2=(document.getElementById('conf-pin')?.value||'').trim();
   if(!/^\d{4}$/.test(p1)){toast('PIN must be exactly 4 digits','err');return;}
   if(p1!==p2){toast('PINs do not match','err');return;}
   setAdminPin(p1);closeModal();updatePinStatus();toast('Admin PIN updated ✓','ok');
 }
-
-function pinSkip(){_unlockAdmin();}
 
 
 function isPlayerModeUrl(){
