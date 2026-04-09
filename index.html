@@ -678,7 +678,6 @@ const SYNC={
         const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
         if(S.session?.status==='active'&&!PLAYER_MODE){switchTab('live');startElapsed();updateProgress();}
         checkAdminAccess();
-        if(!PLAYER_MODE)
       }else{
         toast('🔄 Synced from another device','ok');
       }
@@ -1464,7 +1463,6 @@ function renderRoster(){
   else if(arr.length<4){btn.disabled=true;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=`Need ${4-arr.length} more.`;}
   else{btn.disabled=false;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=hintText;}
   updateRotationPreview();
-  if(!PLAYER_MODE)
 }
 
 /* ── RENDER: LIVE ────────────────────────────────── */
