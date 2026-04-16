@@ -470,7 +470,6 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <div id="roster-stats" style="margin-bottom:10px"></div>
     <button class="btn bp xl" id="start-btn" onclick="startSession()" disabled>🚀 Start Session</button>
     <p id="start-hint" style="font-size:.69rem;color:var(--mu);text-align:center;margin-top:5px"></p>
-    <div id="low-attendance-hint" style="display:none;font-size:.72rem;color:var(--or);background:rgba(251,147,60,.08);border:1px solid rgba(251,147,60,.25);border-radius:var(--ra);padding:7px 10px;margin-top:6px;text-align:center"></div>
   </div>
 </div>
 
@@ -494,7 +493,6 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
         </div>
       </div>
     </div>
-    <div id="cf-low-queue" style="display:none;background:rgba(251,147,60,.1);border:1px solid rgba(251,147,60,.35);border-radius:var(--ra);padding:8px 12px;margin-bottom:11px;font-size:.74rem;font-weight:700;color:var(--or)"></div>
     <div id="cf-suggestions-wrap"></div>
     <div id="cf-courts-wrap"></div>
     <div id="cf-health-panel" class="card" style="display:none;margin-bottom:11px"></div>
@@ -2025,19 +2023,6 @@ function renderRoster(){
     btn.style.display='';
     if(arr.length<4){btn.disabled=true;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=`Need ${4-arr.length} more.`;}
     else{btn.disabled=false;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=hintText;}
-  }
-  // Low-attendance advisory
-  const laEl=document.getElementById('low-attendance-hint');
-  if(laEl){
-    if(arr.length<18&&S.courts>=3){
-      laEl.style.display='block';
-      laEl.innerHTML=`⚠ Low turnout (${arr.length} players) — <strong>2 courts recommended</strong> for better match quality.
-        <button class="btn bs sm" style="margin-left:6px;font-size:.65rem" onclick="S.courts=2;renderRoster()">Switch to 2 courts</button>`;
-    }else if(arr.length>=18&&arr.length<22&&S.courts>=3){
-      laEl.style.display='block';
-      laEl.innerHTML=`${arr.length} players — 2 or 3 courts both work. 2 courts gives better matchups.`;
-      laEl.style.color='var(--mu)';
-    }else{laEl.style.display='none';}
   }
   updateRotationPreview();
 }
@@ -4592,6 +4577,12 @@ const CF={
     // Debounced batch: collect all near-simultaneous score submissions (within 400ms)
     // and run a single joint batchGenerateSuggestions for all ready courts together.
     // This fixes the 3-court simultaneous finish producing only 2 suggestions.
+    //
+    // CRITICAL: save state BEFORE the async timer so Firebase sync (BroadcastChannel /
+    // _applyRemote) cannot overwrite our score + queue changes during the 400ms window.
+    // Without this, _applyRemote restores old Firebase state (court still 'playing',
+    // empty queue), the batch finds no ready court, and no suggestion ever appears.
+    STORE.save();renderLive();renderHistory();renderStandings();
     scheduleCFBatch(courtNum, m);
 
     // Match quality score and win probability context
@@ -4843,14 +4834,6 @@ const CF={
     const log=S.session?.cfLog||[];if(!log.length){el.style.display='none';return;}
     el.style.display='block';
 
-    // Attendance context
-    const attendance=S.session.activePlayers.length;
-    const attendanceNote=attendance<18
-      ?`<div style="font-size:.68rem;color:var(--or);background:rgba(251,147,60,.08);border:1px solid rgba(251,147,60,.2);border-radius:5px;padding:5px 8px;margin-bottom:8px">⚠ Low turnout (${attendance}) — match quality is structurally limited. Consider 2 courts.</div>`
-      :attendance>=24
-      ?`<div style="font-size:.68rem;color:var(--gr);background:rgba(52,217,116,.06);border:1px solid rgba(52,217,116,.2);border-radius:5px;padding:5px 8px;margin-bottom:8px">✓ Good turnout (${attendance}) — optimal matchmaking conditions</div>`
-      :'';
-
     // Games per player
     const gameCounts={};
     S.session.activePlayers.forEach(id=>{gameCounts[id]=0;});
@@ -4887,7 +4870,6 @@ const CF={
       ?Math.round((totalIdleMs+liveIdleMs)/totalStarts/60000*10)/10:null;
 
     el.innerHTML=`<div class="ct" style="margin-bottom:8px">📈 Session Health</div>
-      ${attendanceNote}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;font-size:.74rem">
         <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px">
           <div style="color:var(--mu);font-size:.65rem;margin-bottom:3px">GAMES / PLAYER</div>
@@ -5031,18 +5013,6 @@ function startCFTick(){
 
     // 2. Refresh queue display every 20s to update wait times
     if(now%20000<1100)CF._renderQueue();
-
-    // 3. Low queue depth check — alert if < courts playing × 1.5
-    const queueLen=(S.session.cfQueue||[]).length;
-    const activeCourts=Object.values(S.session.cfCourts||{}).filter(c=>c.status==='playing').length;
-    const minQueue=Math.ceil(activeCourts*1.5);
-    const ldEl=document.getElementById('cf-low-queue');
-    if(ldEl){
-      if(queueLen<4&&activeCourts>1){
-        ldEl.style.display='block';
-        ldEl.textContent=`⚠ Queue low (${queueLen} waiting, ${activeCourts} courts active) — consider dropping to ${activeCourts-1} court${activeCourts-1>1?'s':''}`;
-      }else ldEl.style.display='none';
-    }
 
     // 4. Auto-confirm countdown ticks handled by their own intervals (startAutoConfirm)
   },1000);
