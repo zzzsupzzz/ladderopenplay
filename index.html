@@ -4104,7 +4104,11 @@ const CF={
   /* Wait-debt score: how much longer has a player been waiting vs playing */
   waitDebt(id){
     const sp=gsp(id);if(!sp)return 0;
-    const waited=sp.timeInQueueMs||0,played=sp.timeOnCourtMs||0;
+    // timeInQueueMs is only updated on confirm — add live current queue time too
+    const qEntry=S.session?.cfQueue?.find(q=>q.id===id);
+    const liveWait=qEntry?Math.max(0,Date.now()-qEntry.since):0;
+    const waited=(sp.timeInQueueMs||0)+liveWait;
+    const played=sp.timeOnCourtMs||0;
     if(played===0)return waited>0?1:0;
     return waited/Math.max(1,played);
   },
@@ -4258,10 +4262,15 @@ const CF={
     }
 
     // Multi-court joint path
-    // top: enough players for greedy to fill all courts (nc×4), capped for performance.
-    // Joint search window: capped at 12 regardless of nc to bound the search space.
-    // If n < need, greedy still uses all of top to fill as many courts as possible.
-    const top=pool.slice(0,Math.min(Math.max(nc*4,12),pool.length));
+    // Base pool: nc×4 + 4 extra so low-priority waiting players aren't permanently excluded.
+    // Force-include any player waiting longer than 1 round (fairness guarantee).
+    const roundMin=S.session.roundMin||12;
+    const urgentIds=new Set(pool.filter(p=>p.waitMin>=roundMin*0.9).map(p=>p.id));
+    const baseCap=Math.min(Math.max(nc*4+4,12),pool.length);
+    // Build top pool: start with base cap, then append any urgent players not yet included
+    let top=pool.slice(0,baseCap);
+    const topIds=new Set(top.map(p=>p.id));
+    pool.forEach(p=>{if(urgentIds.has(p.id)&&!topIds.has(p.id)){top.push(p);topIds.add(p.id);}});
     const n=top.length;
 
     if(n<need){
@@ -4270,7 +4279,7 @@ const CF={
       let remaining=[...top];
       for(const c of readyCourts){
         if(remaining.length<4){S.session.cfSuggestions[c]=null;continue;}
-        const sub=remaining.slice(0,Math.min(8,remaining.length));
+        const sub=remaining.slice(0,Math.min(12,remaining.length));
         const best=this._findBestGroup(sub,mustSplit,nrIds,n);
         if(!best){S.session.cfSuggestions[c]=null;continue;}
         filled.push({c,best});
@@ -4309,7 +4318,10 @@ const CF={
         currentAlloc.pop();
       }
     };
-    tryAlloc(0,top.slice(0,Math.min(12,n)),[],0);
+    // Search window: nc*4 players (exact need) + 4 extra for fairness.
+    // Capped at 16 for performance — C(16,4)≈1820 per level is safe.
+    const searchCap=Math.min(n,Math.max(nc*4+4,12));
+    tryAlloc(0,top.slice(0,searchCap),[],0);
 
     // If strict cap (350pt) found no valid allocation, retry with 400pt cap
     if(!bestAlloc){
@@ -4330,7 +4342,7 @@ const CF={
           currentAlloc.pop();
         }
       };
-      tryAllocRelaxed(0,top.slice(0,Math.min(12,n)),[],0);
+      tryAllocRelaxed(0,top.slice(0,searchCap),[],0);
     }
 
     // Fallback to greedy if joint search found nothing
@@ -4338,7 +4350,7 @@ const CF={
       let rem=[...top];
       readyCourts.forEach(c=>{
         if(rem.length<4){S.session.cfSuggestions[c]=null;return;}
-        const best=this._findBestGroup(rem.slice(0,8),mustSplit,nrIds,n);
+        const best=this._findBestGroup(rem.slice(0,Math.min(12,rem.length)),mustSplit,nrIds,n);
         if(best){this._storeSuggestion(c,best,finishedMatchByCourtNum?.[c]);rem=rem.filter(p=>!best.group.map(g=>g.id).includes(p.id));}
         else S.session.cfSuggestions[c]=null;
       });
@@ -4422,7 +4434,9 @@ const CF={
   },
 
   _generateSingleSuggestion(courtNum,pool,mustSplit,nrIds,finishedMatch){
-    const top=pool.slice(0,Math.min(8,pool.length));
+    // Use all available players — no artificial cap that starves low-priority players.
+    // _findBestGroup's 3-pass search handles quality vs fairness trade-off.
+    const top=pool.slice(0,Math.min(16,pool.length));
     const best=this._findBestGroup(top,mustSplit,nrIds,pool.length);
     this._storeSuggestion(courtNum,best,finishedMatch);
   },
