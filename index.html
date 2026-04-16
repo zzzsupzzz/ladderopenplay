@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>🏓 Pickleball Ladder V18</title>
+<title>🏓 Pickleball Ladder V19</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
@@ -628,8 +628,10 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,roundMin:12,sessionMode:'round',extendedMin:16,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
 
 /* ── CF simultaneous-finish batch debounce ─────────────── */
-let _cfBatchTimer=null;
-const _cfPendingBatch={}; // courtNum → finishedMatch
+// scheduleCFBatch removed in V19: suggestions are now generated synchronously
+// and immediately in CF.submitScore — no debounce needed. Player conflicts
+// between simultaneously-ready courts are handled by confirmAll's
+// immediate-regen-and-confirm pass.
 // Per-court timers (not persisted — local UI state only)
 const CT={};let _ctTick=null;
 // Firebase config stored locally (describes HOW to connect, not app data)
@@ -738,11 +740,27 @@ const SYNC={
   _applyRemote(data, isFirstLoad=false){
     try{
       const remote=data||{};
+      // Preserve any locally-generated suggestions that Firebase hasn't persisted yet.
+      // Scenario: CF.submitScore generates a suggestion synchronously then calls STORE.save().
+      // Firebase sends _applyRemote back within ~100ms — but that response carries the
+      // data from *this* exact save, so suggestions ARE included. However, if another
+      // device's save arrives first, it won't have our suggestions. Merging prevents
+      // those suggestions from being wiped on same-device Firebase echo.
+      const localSugs = S.session?.cfSuggestions
+        ? Object.fromEntries(Object.entries(S.session.cfSuggestions).filter(([,v])=>v))
+        : {};
       S.db=remote.db||[];
       S.session=remote.session||null;
       S.archive=remote.archive||[];
       if(typeof remote.adminPin!=='undefined') S.adminPin=remote.adminPin;
       if(S.session){
+        // Merge: keep local suggestions that Firebase data doesn't have yet
+        if(S.session.cfMode){
+          S.session.cfSuggestions=S.session.cfSuggestions||{};
+          Object.entries(localSugs).forEach(([c,sug])=>{
+            if(!S.session.cfSuggestions[c])S.session.cfSuggestions[c]=sug;
+          });
+        }
         // Guard all session fields — safe for sessions saved before these fields existed
         S.session.soStreak=S.session.soStreak||{};
         S.session.plStreak=S.session.plStreak||{};
@@ -1919,7 +1937,21 @@ function midRejoin(id){
   if(!S.session)return;const p=gp(id),sp=gsp(id);if(!p)return;
   if(sp)sp.status='active';
   if(!S.session.activePlayers.includes(id))S.session.activePlayers.push(id);
-  STORE.save();toast(`${p.name} rejoined! 🏓`,'ok');renderRosterModal();
+  if(S.session.cfMode){
+    // Re-add to cfQueue if not already queued or paused
+    const inQ=(S.session.cfQueue||[]).some(q=>q.id===id);
+    const inP=(S.session.cfPaused||[]).some(q=>q.id===id);
+    if(!inQ&&!inP){
+      if(!S.session.cfQueue)S.session.cfQueue=[];
+      S.session.cfQueue.push({id,since:Date.now(),consec:0});
+      // Regenerate suggestions for any ready courts now that queue size changed
+      for(let c=1;c<=S.session.courts;c++){
+        if(S.session.cfCourts?.[c]?.status==='ready'&&!S.session.cfSuggestions?.[c])
+          CF.generateSuggestion(c,null);
+      }
+    }
+  }
+  STORE.save();toast(`${p.name} rejoined! 🏓`,'ok');renderLive();renderRosterModal();
 }
 
 /* ── TIMER ───────────────────────────────────────── */
@@ -2253,40 +2285,6 @@ function recalcSessionELO(){
       });
     });
   });
-}
-
-/* ── CF debounced batch trigger ────────────────────────────
-   When multiple courts finish near-simultaneously (within 400ms),
-   collect them all into one batchGenerateSuggestions call so the
-   joint optimizer sees the full returning player pool at once.
-   Without this, each court fires its own 200ms timeout independently,
-   causing the 2nd and 3rd batches to overwrite the 1st batch's joint
-   solution with narrower single-court ones, leaving one court with no
-   suggestion when the queue is exactly N×4 players.
-──────────────────────────────────────────────────────────── */
-function scheduleCFBatch(courtNum, finishedMatch){
-  _cfPendingBatch[courtNum]=finishedMatch;
-  if(_cfBatchTimer)clearTimeout(_cfBatchTimer);
-  _cfBatchTimer=setTimeout(()=>{
-    if(!S.session)return;
-    _cfBatchTimer=null;
-    const courts=Object.keys(_cfPendingBatch).map(Number);
-    const matches={..._cfPendingBatch};
-    courts.forEach(c=>delete _cfPendingBatch[c]);
-    // Stale-suggestion invalidation: >90s old → force regeneration
-    Object.entries(S.session.cfCourts||{})
-      .filter(([c,ct])=>ct.status==='ready'&&!courts.includes(+c))
-      .forEach(([c])=>{
-        const sug=S.session.cfSuggestions[+c];
-        if(sug&&Date.now()-sug.ts>90000)delete S.session.cfSuggestions[+c];
-      });
-    // Also include already-ready courts that still have no suggestion
-    const extraCourts=Object.entries(S.session.cfCourts||{})
-      .filter(([c,ct])=>!courts.includes(+c)&&ct.status==='ready'&&!S.session.cfSuggestions[+c])
-      .map(([c])=>+c);
-    CF.batchGenerateSuggestions([...courts,...extraCourts],matches);
-    STORE.save();renderLive();renderStandings();renderHistory();
-  },400);
 }
 
 function deleteRound(roundNum){
@@ -3586,9 +3584,6 @@ function seedExampleData(){
 /* ── END SESSION WITH SUMMARY ──────────────────────── */
 function doEndSession(){
   if(!S.session){toast('No active session','err');return;}
-  // Cancel any pending CF batch timer to prevent ghost suggestions on the new session
-  if(_cfBatchTimer){clearTimeout(_cfBatchTimer);_cfBatchTimer=null;}
-  Object.keys(_cfPendingBatch).forEach(k=>delete _cfPendingBatch[k]);
   showCfm(`End <strong>${esc(S.session.name)}</strong>?<br/><span style="font-size:.74rem;color:var(--mu)">Ratings saved to database.</span>`,'🏁 End Session','bp',()=>{
     const isCF=S.session.cfMode;
     const arch={id:S.session.id,name:S.session.name,date:S.session.date,cfMode:isCF||false,
@@ -4449,9 +4444,13 @@ const CF={
       if(qEntry&&sp){sp.timeInQueueMs=(sp.timeInQueueMs||0)+(now-qEntry.since);}
     });
     this.dequeue(sug.allIds);
+    const prevCourt=S.session.cfCourts[courtNum]||{};
+    const idleMs=prevCourt.idleStart?Math.max(0,now-prevCourt.idleStart):0;
     const match={id:uid(),courtNum,t1:sug.t1,t2:sug.t2,
       s1:null,s2:null,status:'pending',eloDeltas:null,startTime:now,extended:false};
-    S.session.cfCourts[courtNum]={status:'playing',match};
+    S.session.cfCourts[courtNum]={status:'playing',match,
+      totalIdleMs:(prevCourt.totalIdleMs||0)+idleMs,
+      matchCount:prevCourt.matchCount||0};
     // Track pair consecutive
     if(!S.session.cfPairConsec)S.session.cfPairConsec={};
     const t1k=this.pairKey(sug.t1[0],sug.t1[1]),t2k=this.pairKey(sug.t2[0],sug.t2[1]);
@@ -4554,7 +4553,7 @@ const CF={
     S.session.cfCourts[courtNum]={status:'ready',match:null,
       idleStart:Date.now(),
       totalIdleMs:prevCourt.totalIdleMs||0,
-      matchCount:prevCourt.matchCount||0};
+      matchCount:(prevCourt.matchCount||0)+1};
     [...m.t1,...m.t2].forEach((id,idx)=>{
       if((S.session.cfPaused||[]).find(q=>q.id===id))return;
       if(S.session.cfQueue.find(q=>q.id===id))return; // guard: no double-push on duplicate event
@@ -4574,16 +4573,19 @@ const CF={
       S.session.cfQueue.push({id,since:Date.now()-boostMs-staggerMs,consec:0});
     });
 
-    // Debounced batch: collect all near-simultaneous score submissions (within 400ms)
-    // and run a single joint batchGenerateSuggestions for all ready courts together.
-    // This fixes the 3-court simultaneous finish producing only 2 suggestions.
-    //
-    // CRITICAL: save state BEFORE the async timer so Firebase sync (BroadcastChannel /
-    // _applyRemote) cannot overwrite our score + queue changes during the 400ms window.
-    // Without this, _applyRemote restores old Firebase state (court still 'playing',
-    // empty queue), the batch finds no ready court, and no suggestion ever appears.
-    STORE.save();renderLive();renderHistory();renderStandings();
-    scheduleCFBatch(courtNum, m);
+    // Generate suggestion IMMEDIATELY and SYNCHRONOUSLY for this court.
+    // Architecture rationale:
+    //   - No debounce: court 1 gets its suggestion the instant its score is submitted,
+    //     regardless of whether courts 2 or 3 have also finished. Players choose their
+    //     own rhythm — no court should wait for another.
+    //   - Player conflicts between independently-generated suggestions (when multiple
+    //     courts finish near-simultaneously) are resolved by confirmAll's immediate-
+    //     regen-and-confirm logic, which was redesigned for exactly this purpose.
+    //   - Single STORE.save() after generation: one Firebase write captures both the
+    //     completed score state AND the new suggestion together, eliminating the race
+    //     window where _applyRemote could wipe the score between two separate saves.
+    this.batchGenerateSuggestions([courtNum],{[courtNum]:m});
+    STORE.save();renderLive();renderHistory();renderStandings();updateHeader();
 
     // Match quality score and win probability context
     const t1Avg=(this.cfRating(m.t1[0])+this.cfRating(m.t1[1]))/2;
@@ -4652,7 +4654,7 @@ const CF={
     const gap=Math.abs((t1[0].sr+t1[1].sr)/2-(t2[0].sr+t2[1].sr)/2);
     S.session.cfSuggestions[courtNum]={courtNum,t1:t1.map(p=>p.id),t2:t2.map(p=>p.id),allIds:ids,
       meta:{gap:Math.round(gap),gapWarn:gap>250,maxWait:0,urgentWait:false,splitOverride:false,repeatMatchup:false,shortGameBoost:false}};
-    closeModal();this.confirmSuggestion(courtNum);
+    closeModal();cancelAutoConfirm(courtNum);this.confirmSuggestion(courtNum);
   },
 
   /* ── Render CF live view ── */
