@@ -2973,6 +2973,7 @@ function renderPlayerView(){
         </div>`;
       })()}
     </div>`;
+  } else {
     // Specific session view (from dropdown filter)
     let targetSess=null,targetPlayers=null,sessIsLive=false;
     if(sessFilter==='__current__'&&S.session){targetSess=S.session;targetPlayers=null;sessIsLive=true;}
@@ -3586,6 +3587,9 @@ function seedExampleData(){
 /* ── END SESSION WITH SUMMARY ──────────────────────── */
 function doEndSession(){
   if(!S.session){toast('No active session','err');return;}
+  // Cancel any pending CF batch timer to prevent ghost suggestions on the new session
+  if(_cfBatchTimer){clearTimeout(_cfBatchTimer);_cfBatchTimer=null;}
+  Object.keys(_cfPendingBatch).forEach(k=>delete _cfPendingBatch[k]);
   showCfm(`End <strong>${esc(S.session.name)}</strong>?<br/><span style="font-size:.74rem;color:var(--mu)">Ratings saved to database.</span>`,'🏁 End Session','bp',()=>{
     const isCF=S.session.cfMode;
     const arch={id:S.session.id,name:S.session.name,date:S.session.date,cfMode:isCF||false,
@@ -3649,8 +3653,10 @@ function _saveCFScore(matchIdx){
   if(isNaN(s1)||isNaN(s2)||s1<0||s2<0){toast('Invalid scores','err');return;}
   m.s1=s1;m.s2=s2;
   recalcSessionCFELO();
+  // Also update all-time DB ratings to reflect the revised session delta
+  recalcAllTimeRatings();
   _boostKCache=null;_allMatchesCache=null;
-  STORE.save();closeModal();renderLive();renderHistory();renderStandings();
+  STORE.save();closeModal();renderLive();renderHistory();renderStandings();renderAllTime();
   if(isActiveTab('player'))renderPlayerView();
   toast('CF match updated — ELO recalculated ✓','ok');
 }
@@ -4252,8 +4258,10 @@ const CF={
     }
 
     // Multi-court joint path
-    // Limit search: use top min(12, queueLen) priority players to keep it fast
-    const top=pool.slice(0,Math.min(12,pool.length));
+    // top: enough players for greedy to fill all courts (nc×4), capped for performance.
+    // Joint search window: capped at 12 regardless of nc to bound the search space.
+    // If n < need, greedy still uses all of top to fill as many courts as possible.
+    const top=pool.slice(0,Math.min(Math.max(nc*4,12),pool.length));
     const n=top.length;
 
     if(n<need){
@@ -4301,7 +4309,7 @@ const CF={
         currentAlloc.pop();
       }
     };
-    tryAlloc(0,top.slice(0,Math.min(8*nc,n)),[],0);
+    tryAlloc(0,top.slice(0,Math.min(12,n)),[],0);
 
     // If strict cap (350pt) found no valid allocation, retry with 400pt cap
     if(!bestAlloc){
@@ -4322,7 +4330,7 @@ const CF={
           currentAlloc.pop();
         }
       };
-      tryAllocRelaxed(0,top.slice(0,Math.min(8*nc,n)),[],0);
+      tryAllocRelaxed(0,top.slice(0,Math.min(12,n)),[],0);
     }
 
     // Fallback to greedy if joint search found nothing
@@ -4680,21 +4688,41 @@ const CF={
     const courts=Object.keys(S.session.cfSuggestions||{})
       .filter(c=>S.session.cfSuggestions[c]).map(Number).sort();
     const usedIds=new Set();
-    let anyRegenerated=false;
-    courts.forEach(c=>{
-      const sug=S.session.cfSuggestions[c];if(!sug)return;
+    let anyChange=false;
+
+    for(const c of courts){
+      const sug=S.session.cfSuggestions[c];
+      if(!sug)continue;
+
       if(sug.allIds.some(id=>usedIds.has(id))){
+        // Player overlap with already-confirmed court — regenerate immediately
         delete S.session.cfSuggestions[c];
-        CF.generateSuggestion(c,null);
-        anyRegenerated=true;
-        toast(`Court ${c} refreshed — players reassigned`,'warn');
-        return;
+        CF.generateSuggestion(c,null); // synchronous — updates cfSuggestions[c] in place
+        anyChange=true;
+        const newSug=S.session.cfSuggestions[c];
+        if(!newSug){
+          toast(`Court ${c} — not enough players, will suggest when queue fills`,'warn');
+          continue;
+        }
+        if(newSug.allIds.some(id=>usedIds.has(id))){
+          // Extremely rare: still conflicts after regeneration — leave for manual confirm
+          toast(`Court ${c} refreshed — tap Confirm when ready`,'warn');
+          continue;
+        }
+        // New suggestion is conflict-free — confirm it right now
+        newSug.allIds.forEach(id=>usedIds.add(id));
+        cancelAutoConfirm(c);
+        CF.confirmSuggestion(c);
+      } else {
+        // No overlap — confirm directly
+        sug.allIds.forEach(id=>usedIds.add(id));
+        cancelAutoConfirm(c);
+        CF.confirmSuggestion(c);
+        anyChange=true;
       }
-      sug.allIds.forEach(id=>usedIds.add(id));
-      cancelAutoConfirm(c);
-      CF.confirmSuggestion(c);
-    });
-    if(anyRegenerated)renderLive();
+    }
+    // confirmSuggestion already calls renderLive; only force a re-render if only regeneration happened
+    if(anyChange)renderLive();
   },
 
   _renderSug(courtNum,sug){
