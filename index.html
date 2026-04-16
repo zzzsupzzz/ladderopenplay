@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>🏓 Pickleball Ladder V17</title>
+<title>🏓 Pickleball Ladder V18</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
@@ -506,7 +506,6 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
         <div id="cf-paused-list"></div>
       </div>
     </div>
-    <div id="cf-health-panel" class="card" style="margin-top:11px;display:none"></div>
   </div>
   <div id="live-wrap" style="display:none">
     <div class="card">
@@ -3394,7 +3393,7 @@ function runExport(fmt){
   } else if(fmt==='pdf'){
     content=buildRoundSheet();filename=`pb-rounds-${Date.now()}.txt`;mime='text/plain;charset=utf-8';
   } else {
-    content=JSON.stringify({version:15,exportDate:new Date().toISOString(),players:S.db,session:S.session,archive:S.archive},null,2);
+    content=JSON.stringify({version:18,exportDate:new Date().toISOString(),players:S.db,session:S.session,archive:S.archive},null,2);
     filename=`pb-ladder-${Date.now()}.json`;mime='application/json;charset=utf-8';
   }
   // FIX: Blob correctly handles non-ASCII chars (e.g. "Hải long")
@@ -3409,31 +3408,46 @@ function runExport(fmt){
 }
 
 function buildRoundSheet(){
-  // Mimics the PDF format from [SYR x APL] Weekend Pickles & Ladders
   const sessions=[...(S.session?[S.session]:[]),...S.archive];
   if(!sessions.length)return'No session data.';
   return sessions.map(sess=>{
     const gn=id=>{const sp=(sess.players||[]).find(p=>p.id===id);return sp?(sp.name+(sp.tag?` ${sp.tag}`:'')):gp(id)?plainName(gp(id)):id;};
     const width=62;
     const hr='-'.repeat(width);
+    const isCF=!!sess.cfMode;
     const lines=[sess.name,`${'='.repeat(sess.name.length)}`,
-      new Date(sess.date).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'}),hr,''];
-    (sess.rounds||[]).forEach(r=>{
-      lines.push(`Round ${r.number}`,'');
-      r.matches.forEach(m=>{
-        const t1n=m.t1.map(gn).join('\n        ');
-        const t2n=m.t2.map(gn).join('\n        ');
-        const s1=m.status==='done'?String(m.s1):'?';
-        const s2=m.status==='done'?String(m.s2):'?';
-        lines.push(`  COURT ${m.court}`);
+      new Date(sess.date).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'}),
+      isCF?'⚡ Continuous Flow Mode':'🔄 Round Mode',hr,''];
+    if(isCF){
+      // CF session: flat match log grouped by court
+      const cfLog=sess.cfLog||[];
+      lines.push(`${cfLog.length} matches played`,'');
+      cfLog.forEach((m,i)=>{
+        const s1=String(m.s1??'?'),s2=String(m.s2??'?');
+        lines.push(`  #${String(i+1).padStart(2)}  Court ${m.courtNum}`);
         lines.push(`  ┌─────────────────────────────┬──────┐`);
         lines.push(`  │ ${m.t1.map(gn).join(' / ').padEnd(27)} │  ${s1.padStart(2)}  │`);
         lines.push(`  │ ${m.t2.map(gn).join(' / ').padEnd(27)} │  ${s2.padStart(2)}  │`);
         lines.push(`  └─────────────────────────────┴──────┘`);
       });
-      if(r.sitOuts?.length) lines.push(`  Sitting out: ${r.sitOuts.map(gn).join(', ')}`);
       lines.push('');
-    });
+    }else{
+      // Round mode
+      (sess.rounds||[]).forEach(r=>{
+        lines.push(`Round ${r.number}`,'');
+        r.matches.forEach(m=>{
+          const s1=m.status==='done'?String(m.s1):'?';
+          const s2=m.status==='done'?String(m.s2):'?';
+          lines.push(`  COURT ${m.court}`);
+          lines.push(`  ┌─────────────────────────────┬──────┐`);
+          lines.push(`  │ ${m.t1.map(gn).join(' / ').padEnd(27)} │  ${s1.padStart(2)}  │`);
+          lines.push(`  │ ${m.t2.map(gn).join(' / ').padEnd(27)} │  ${s2.padStart(2)}  │`);
+          lines.push(`  └─────────────────────────────┴──────┘`);
+        });
+        if(r.sitOuts?.length) lines.push(`  Sitting out: ${r.sitOuts.map(gn).join(', ')}`);
+        lines.push('');
+      });
+    }
     // Standings
     if(sess.players?.length){
       lines.push(hr,'FINAL STANDINGS','');
@@ -3782,7 +3796,13 @@ function _saveArchiveCFScore(matchIdx,sessId){
 /* ── HEADER + TABS ───────────────────────────────── */
 function updateHeader(){
   const b=document.getElementById('hbadge'),s=document.getElementById('hsub');
-  if(S.session?.status==='active'){b.textContent=`R${S.session.round} LIVE`;b.className='live';s.textContent=S.session.name;}
+  if(S.session?.status==='active'){
+    // CF mode: show match count. Round mode: show round number.
+    const label=S.session.cfMode
+      ?`CF ${S.session.cfMatchCount||0}`
+      :`R${S.session.round}`;
+    b.textContent=`${label} LIVE`;b.className='live';s.textContent=S.session.name;
+  }
   else{b.textContent='SETUP';b.className='';s.textContent='No active session';}
   const sb=document.getElementById('share-btn');
   if(sb&&!PLAYER_MODE)sb.style.display='inline-flex';
