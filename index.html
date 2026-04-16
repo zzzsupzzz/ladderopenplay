@@ -17,7 +17,22 @@
 .prob-wrap{margin-top:7px}.prob-lbl{font-size:.63rem;color:var(--m2);margin-bottom:3px;text-align:center}
 .prob-bar{height:5px;border-radius:3px;background:var(--s3);overflow:hidden}
 .prob-fill{height:100%;background:linear-gradient(90deg,var(--cy),var(--pu));transition:width .3s}
-/* V16 — Firebase loading overlay */
+/* ── CONTINUOUS FLOW + NR additions ─── */
+.nr-badge{font-size:.62rem;font-weight:700;padding:1px 6px;border-radius:5px;background:rgba(167,139,250,.15);color:var(--pu);border:1px solid rgba(167,139,250,.3);display:inline-block}
+.nr-seed{font-size:.62rem;color:var(--cy);background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.25);border-radius:5px;padding:1px 5px;display:inline-block}
+.mode-pill{flex:1;padding:11px 8px;border-radius:var(--ra);border:1px solid var(--bd);background:var(--s2);color:var(--mu);font-family:'DM Sans',sans-serif;font-size:.79rem;font-weight:600;cursor:pointer;text-align:center;transition:all .15s;line-height:1.4}
+.mode-pill:hover{border-color:var(--m2);color:var(--tx)}.mode-pill.sel{background:rgba(34,211,238,.08);border-color:var(--cy);color:var(--cy)}
+.cf-queue-item{display:flex;align-items:center;gap:7px;padding:6px 10px;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);margin-bottom:4px}
+.cf-wait{font-size:.65rem;font-weight:700;padding:2px 7px;border-radius:10px;white-space:nowrap}
+.cf-wait-ok{background:rgba(52,217,116,.1);color:var(--gr)}.cf-wait-warn{background:rgba(251,147,60,.1);color:var(--or)}.cf-wait-hot{background:rgba(248,113,113,.1);color:var(--re)}
+.cf-suggest{background:var(--sf);border:2px solid rgba(34,211,238,.35);border-radius:var(--rl);padding:14px;margin-bottom:11px}
+.cf-suggest-hd{font-family:'Bebas Neue',sans-serif;font-size:1rem;color:var(--cy);letter-spacing:.5px;margin-bottom:9px}
+.cf-chip{font-size:.65rem;font-weight:700;padding:2px 7px;border-radius:10px;display:inline-flex;align-items:center;gap:3px}
+.cf-chip-ok{background:rgba(52,217,116,.12);color:var(--gr)}.cf-chip-warn{background:rgba(251,147,60,.12);color:var(--or)}.cf-chip-info{background:var(--s2);color:var(--mu)}
+.court-card.extended{border-color:var(--or)!important}.court-card.extended .chead{background:linear-gradient(90deg,rgba(251,147,60,.1),var(--s3))!important}
+.cf-paused-item{display:flex;align-items:center;gap:7px;padding:5px 10px;background:var(--s2);border:1px dashed var(--bd);border-radius:var(--ra);margin-bottom:4px;opacity:.7}
+</style>
+<style>
 #fb-loading{position:fixed;inset:0;background:var(--bg);z-index:8500;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px}
 #fb-loading.hidden{display:none}
 .fb-spinner{width:36px;height:36px;border:3px solid var(--s3);border-top-color:var(--gr);border-radius:50%;animation:spin .9s linear infinite}
@@ -312,6 +327,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     </div>
     <button id="share-btn" onclick="openShareModal()" style="font-size:.69rem;font-weight:600;padding:4px 9px;border-radius:20px;background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.3);color:var(--pu);cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">📱 Share</button>
     <span id="sync-badge" onclick="openSyncModal()" title="Live sync settings">⚪ Sync Off</span>
+    <span id="sync-status" title="Synced" style="font-size:.75rem;color:var(--gr);min-width:14px;text-align:center">✓</span>
     <span id="hbadge">SETUP</span>
     <button id="lock-btn" onclick="lockAdmin()" title="Lock admin" style="display:none;background:none;border:none;cursor:pointer;font-size:1rem;color:var(--mu);padding:2px 4px" title="Lock admin access">🔒</button>
   </div>
@@ -341,22 +357,41 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <div class="ct">🗓️ Session Setup
       <button class="btn bg2 sm" style="margin-left:auto" onclick="openShareModal()" title="Share read-only player view link">📱 Player Link</button>
     </div>
-    <div class="g2">
-      <div><label>SESSION NAME</label><input id="sess-name" class="inp" placeholder="Saturday Open Play…"/></div>
-      <div><label>ROUND DURATION (MIN)</label><input id="round-dur" class="inp" type="number" value="15" min="5" max="90"/></div>
+    <label>SESSION MODE</label>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button id="mode-round" class="mode-pill sel" onclick="selectMode('round')">🔄 Round Mode<br/><span style="font-size:.67rem;font-weight:400;opacity:.8">All courts sync together</span></button>
+      <button id="mode-flow" class="mode-pill" onclick="selectMode('flow')">⚡ Continuous Flow<br/><span style="font-size:.67rem;font-weight:400;opacity:.8">Each court runs independently</span></button>
     </div>
-    <div class="dv"></div>
-    <div id="rotation-preview" style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px 12px;margin-bottom:10px;display:none">
-      <div style="font-size:.65rem;font-weight:700;color:var(--mu);letter-spacing:.06em;margin-bottom:5px">🔄 ROTATION (auto-calculated)</div>
-      <div id="rotation-desc" style="font-size:.78rem;color:var(--tx);line-height:1.6"></div>
+    <div id="round-mode-opts">
+      <div class="g2">
+        <div><label>SESSION NAME</label><input id="sess-name" class="inp" placeholder="Saturday Open Play…"/></div>
+        <div><label>ROUND DURATION (MIN)</label><input id="round-dur" class="inp" type="number" value="12" min="5" max="90"/></div>
+      </div>
+      <div class="dv"></div>
+      <div id="rotation-preview" style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px 12px;margin-bottom:10px;display:none">
+        <div style="font-size:.65rem;font-weight:700;color:var(--mu);letter-spacing:.06em;margin-bottom:5px">🔄 ROTATION (auto-calculated)</div>
+        <div id="rotation-desc" style="font-size:.78rem;color:var(--tx);line-height:1.6"></div>
+      </div>
     </div>
-    <label>NUMBER OF COURTS</label>
+    <div id="flow-mode-opts" style="display:none">
+      <div class="g2">
+        <div><label>SESSION NAME</label><input id="sess-name-flow" class="inp" placeholder="Saturday Open Play…"/></div>
+        <div><label>EXTENDED FLAG (MIN)</label><input id="extended-min" class="inp" type="number" value="16" min="8" max="60" title="Flag court as extended after this many minutes"/></div>
+      </div>
+      <div style="margin-top:8px;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px;font-size:.74rem;color:var(--mu);line-height:1.7">
+        <span style="color:var(--cy);font-weight:700">Skill-based queue</span> — best match pulled when a court opens.<br/>
+        <span style="color:var(--gr);font-weight:700">NR players</span> — placed in middle bracket, rated after 5 games.<br/>
+        <span style="color:var(--or);font-weight:700">Wait debt</span> — long-waiters get priority; short games trigger re-queue boost.<br/>
+        <span style="color:var(--go);font-weight:700">Partner split</span> — winning pair must split after 2 consecutive wins together.
+      </div>
+    </div>
+    <label style="margin-top:10px;display:block">NUMBER OF COURTS</label>
     <div class="cpills" id="cpills-setup">
       <div class="cpill sel" data-c="1">1</div><div class="cpill" data-c="2">2</div>
       <div class="cpill" data-c="3">3</div><div class="cpill" data-c="4">4</div>
       <div class="cpill" data-c="5">5</div><div class="cpill" data-c="6">6</div>
     </div>
-    <div style="margin-top:10px">
+    <div id="round-rotation-rules" style="margin-top:10px">
       <label>ROTATION RULES</label>
       <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px;font-size:.74rem;color:var(--mu);line-height:1.7">
         <span style="color:var(--gr);font-weight:700">Max 3 consecutive games</span> — everyone rotates out after 3 in a row, no exceptions.<br/>
@@ -387,8 +422,20 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
       <div style="flex:2;min-width:100px"><label>NAME</label><input id="np-name" class="inp" placeholder="Full name…" onkeydown="if(event.key==='Enter')addPlayer()"/></div>
       <div style="flex:1;min-width:65px"><label>TAG (optional)</label><input id="np-tag" class="inp" placeholder="#5 or Jr." onkeydown="if(event.key==='Enter')addPlayer()"/></div>
-      <div style="width:72px"><label>RATING</label><input id="np-rating" class="inp" type="number" value="1000" min="400" max="2000"/></div>
-      <div style="display:flex;align-items:flex-end"><button class="btn bp" onclick="addPlayer()">+ Add</button></div>
+      <div style="width:72px" id="np-rating-wrap"><label>RATING</label><input id="np-rating" class="inp" type="number" value="1000" min="400" max="2000"/></div>
+      <div style="display:flex;flex-direction:column;justify-content:flex-end;gap:3px">
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:.68rem;color:var(--pu);font-weight:700;white-space:nowrap"><input type="checkbox" id="np-nr" onchange="toggleNRInput(this.checked)" style="accent-color:var(--pu)"/> NR</label>
+        <button class="btn bp" onclick="addPlayer()">+ Add</button>
+      </div>
+    </div>
+    <div id="np-nr-level" style="display:none;margin-bottom:8px">
+      <label>NR LEVEL — BASED ON TONIGHT'S SESSION</label>
+      <div style="display:flex;gap:5px">
+        <button class="pn-pill sel" id="nrl-beg" onclick="setNRLevel('beginner')">🌱 Bottom<br/><span id="nrl-beg-sub" style="font-size:.6rem;font-weight:400">~700</span></button>
+        <button class="pn-pill" id="nrl-mid" onclick="setNRLevel('intermediate')">⚡ Middle<br/><span id="nrl-mid-sub" style="font-size:.6rem;font-weight:400">~avg</span></button>
+        <button class="pn-pill" id="nrl-adv" onclick="setNRLevel('advanced')">🔥 Top<br/><span id="nrl-adv-sub" style="font-size:.6rem;font-weight:400">~1300</span></button>
+      </div>
+    </div>
     </div>
     <p style="font-size:.68rem;color:var(--mu);margin-bottom:8px">Same name? Use Tag — "Alex #7" vs "Alex Jr."</p>
     <div style="display:flex;gap:6px;margin-bottom:7px">
@@ -407,12 +454,44 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <div id="roster-stats" style="margin-bottom:10px"></div>
     <button class="btn bp xl" id="start-btn" onclick="startSession()" disabled>🚀 Start Session</button>
     <p id="start-hint" style="font-size:.69rem;color:var(--mu);text-align:center;margin-top:5px"></p>
+    <div id="low-attendance-hint" style="display:none;font-size:.72rem;color:var(--or);background:rgba(251,147,60,.08);border:1px solid rgba(251,147,60,.25);border-radius:var(--ra);padding:7px 10px;margin-top:6px;text-align:center"></div>
   </div>
 </div>
 
 <!-- ══ LIVE ══ -->
 <div id="tab-live" class="tp">
   <div id="live-empty" class="empty" style="display:none"><div style="font-size:2rem;margin-bottom:8px">🏓</div><div>No session active — go to Setup.</div></div>
+  <!-- CF Live View -->
+  <div id="cf-live-wrap" style="display:none">
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:7px">
+        <div><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--tx)" id="cf-sess-lbl">CONTINUOUS FLOW</div><div style="font-size:.71rem;color:var(--mu)" id="cf-sess-sub">—</div></div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">
+          <button class="btn bs sm" onclick="openRosterModal()">👤 Players ±</button>
+          <button id="cf-ac-toggle" class="btn bg2 sm" onclick="toggleCFAutoConfirm()" title="Auto-confirm suggestions after timer">⚡ Auto</button>
+          <select id="cf-ac-dur" class="inp" style="width:58px;font-size:.72rem;padding:4px 6px" onchange="S.session&&(S.session.cfAutoConfirmDur=+this.value)" title="Auto-confirm delay">
+            <option value="30">30s</option>
+            <option value="60">60s</option>
+            <option value="90">90s</option>
+          </select>
+          <button class="btn bd2" onclick="doEndSession()">🏁 End</button>
+        </div>
+      </div>
+    </div>
+    <div id="cf-low-queue" style="display:none;background:rgba(251,147,60,.1);border:1px solid rgba(251,147,60,.35);border-radius:var(--ra);padding:8px 12px;margin-bottom:11px;font-size:.74rem;font-weight:700;color:var(--or)"></div>
+    <div id="cf-suggestions-wrap"></div>
+    <div id="cf-courts-wrap"></div>
+    <div id="cf-health-panel" class="card" style="display:none;margin-bottom:11px"></div>
+    <div class="card">
+      <div class="ct">⏳ Queue <span id="cf-queue-badge" style="font-size:.66rem;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(34,211,238,.1);color:var(--cy)">0</span></div>
+      <div id="cf-queue-list"></div>
+      <div id="cf-paused-wrap" style="display:none">
+        <div style="font-size:.65rem;font-weight:700;color:var(--mu);letter-spacing:.05em;margin:8px 0 4px">⏸ PAUSED</div>
+        <div id="cf-paused-list"></div>
+      </div>
+    </div>
+    <div id="cf-health-panel" class="card" style="margin-top:11px;display:none"></div>
+  </div>
   <div id="live-wrap" style="display:none">
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:7px">
@@ -533,7 +612,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 //  • Pickles & Ladders icon embedded
 // ================================================================
 
-const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,roundMin:15,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
+const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,roundMin:12,sessionMode:'round',extendedMin:16,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
 // Per-court timers (not persisted — local UI state only)
 const CT={};let _ctTick=null;
 // Firebase config stored locally (describes HOW to connect, not app data)
@@ -647,13 +726,37 @@ const SYNC={
       S.archive=remote.archive||[];
       if(typeof remote.adminPin!=='undefined') S.adminPin=remote.adminPin;
       if(S.session){
-        S.session.soStreak=S.session.soStreak||{};S.session.plStreak=S.session.plStreak||{};
-        S.session.sitOutHx=S.session.sitOutHx||{};S.session.partnerHx=S.session.partnerHx||{};
+        // Guard all session fields — safe for sessions saved before these fields existed
+        S.session.soStreak=S.session.soStreak||{};
+        S.session.plStreak=S.session.plStreak||{};
+        S.session.sitOutHx=S.session.sitOutHx||{};
+        S.session.partnerHx=S.session.partnerHx||{};
         S.session.oppHx=S.session.oppHx||{};
+        S.session.oppHxTime=S.session.oppHxTime||{};
+        S.session.nrPairingHx=S.session.nrPairingHx||{};
+        S.session.ratingOverrides=S.session.ratingOverrides||{};
+        S.session.neverPair=S.session.neverPair||{};
+        // CF fields
+        if(S.session.cfMode){
+          S.session.cfLog=S.session.cfLog||[];
+          S.session.cfQueue=S.session.cfQueue||[];
+          S.session.cfPaused=S.session.cfPaused||[];
+          S.session.cfCourts=S.session.cfCourts||{};
+          S.session.cfSuggestions=S.session.cfSuggestions||{};
+          S.session.cfMatchupHx=S.session.cfMatchupHx||{};
+          S.session.cfPairConsec=S.session.cfPairConsec||{};
+          S.session.cfPairWins=S.session.cfPairWins||{};
+          S.session.cfPairSessionCount=S.session.cfPairSessionCount||{};
+          S.session.cfPairLastAt=S.session.cfPairLastAt||{};
+        }
         if(S.session.roundMin)S.roundMin=S.session.roundMin;
         S.checkedIn.clear();
         S.session.activePlayers?.forEach(id=>S.checkedIn.add(id));
+        // Restore CF tick if session is active and in CF mode
+        if(S.session.status==='active'&&S.session.cfMode)startCFTick();
       }else{S.checkedIn.clear();}
+      // Invalidate matchmaking caches — archive may have changed on remote
+      _invalidateMatchmakingCaches();
 
       // Seed example data on a brand-new empty room (first device, not player mode)
       if(S.db.length===0&&S.archive.length===0&&!isPlayerModeUrl()&&!PLAYER_MODE){
@@ -743,9 +846,10 @@ let _bc=null; // BroadcastChannel for same-browser instant tab sync
 
 const STORE={
   save(){
-    // Push to Firebase (single source of truth)
     SYNC.push();
-    // Also broadcast to other tabs in same browser instantly (no localStorage needed)
+    // Flash sync indicator
+    const si=document.getElementById('sync-status');
+    if(si){si.textContent='⏳';si.title='Syncing…';clearTimeout(si._t);si._t=setTimeout(()=>{si.textContent='✓';si.title='Synced';},1200);}
     if(!PLAYER_MODE){
       try{
         if(!_bc&&typeof BroadcastChannel!=='undefined')_bc=new BroadcastChannel('pb_ladder_v16');
@@ -759,6 +863,86 @@ const STORE={
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5);}
 function gp(id){return S.db.find(p=>p.id===id);}
 function gsp(id){return S.session?.players.find(p=>p.id===id);}
+
+// Returns approximate weeks since this player last appeared in an archived session
+// ── Performance caches — cleared at session start and after archive changes ──────
+// These prevent repeated O(n×archive) scans during hot matchmaking loops.
+let _sessionTogetherCache = null; // {pairKey: count} — pre-computed archive co-sessions
+let _boostKCache = null;          // {id: bool} — shouldBoostK per player per session
+let _staleCacheKey = null;        // tracks when caches were last built
+let _allMatchesCache = null;      // memoized session match list — rebuilt after each game
+let _allMatchesCacheKey = -1;     // cfMatchCount or round number when cache was built
+
+// O(1) session match accessor — replaces repeated flatMap rebuilds inside effectiveRating
+// Called ~990 times per batchGenerateSuggestions in a 50-match session
+function _getSessionMatches(){
+  if(!S.session)return[];
+  // Key: total completed matches in session (changes after every submitScore/applyScore)
+  const key=(S.session.cfMatchCount||0)+(S.session.round||0)*1000;
+  if(_allMatchesCache!==null&&_allMatchesCacheKey===key)return _allMatchesCache;
+  _allMatchesCache=[
+    ...(S.session.rounds||[]).flatMap(r=>r.matches.filter(m=>m.status==='done')),
+    ...(S.session.cfLog||[])
+  ];
+  _allMatchesCacheKey=key;
+  return _allMatchesCache;
+}
+
+function _invalidateMatchmakingCaches(){
+  _sessionTogetherCache=null;
+  _boostKCache=null;
+  _staleCacheKey=null;
+  _allMatchesCache=null;
+  _allMatchesCacheKey=-1;
+}
+
+function _buildSessionTogetherCache(){
+  if(_sessionTogetherCache&&_staleCacheKey===S.archive.length)return;
+  _sessionTogetherCache={};
+  S.archive.forEach(sess=>{
+    const ids=(sess.players||[]).map(sp=>sp.id);
+    for(let i=0;i<ids.length-1;i++)for(let j=i+1;j<ids.length;j++){
+      const key=[ids[i],ids[j]].sort().join('|');
+      _sessionTogetherCache[key]=(_sessionTogetherCache[key]||0)+1;
+    }
+  });
+  _staleCacheKey=S.archive.length;
+}
+
+function _getSessionsTogether(a,b){
+  _buildSessionTogetherCache();
+  return _sessionTogetherCache[[a,b].sort().join('|')]||0;
+}
+
+function sessionsSinceLastPlayed(id){
+  const lastSess=S.archive.find(sess=>sess.players?.some(sp=>sp.id===id));
+  if(!lastSess)return 999;
+  const daysSince=(Date.now()-new Date(lastSess.date))/86400000;
+  return Math.floor(daysSince/7);
+}
+
+// Ringer: high rating from very few games — rating not yet trustworthy
+function isRinger(p){
+  return p&&!p.isNR&&(p.gamesPlayed||0)<20&&(p.rating||0)>1150;
+}
+
+// K-factor reactivation: genuinely improving bottom-tier players get boosted K
+// Memoized per session — result cached after first call, cleared when archive changes
+function shouldBoostK(id){
+  if(!_boostKCache)_boostKCache={};
+  if(id in _boostKCache)return _boostKCache[id];
+  const p=gp(id);
+  if(!p||(p.gamesPlayed||0)<80||(p.rating||0)>950){_boostKCache[id]=false;return false;}
+  const recentSessions=S.archive.slice(0,5);
+  let w=0,g=0;
+  recentSessions.forEach(sess=>{
+    const sp2=sess.players?.find(x=>x.id===id);if(!sp2)return;
+    w+=(sp2.wins||0);g+=(sp2.matchesPlayed||0);
+  });
+  const result=g>=8&&(w/g)>0.60;
+  _boostKCache[id]=result;
+  return result;
+}
 function plainName(p){return p?(p.tag?`${p.name} ${p.tag}`:p.name):'?';}
 function tagHtml(p){return p?.tag?`<span class="ptag">${esc(p.tag)}</span>`:'';}
 function fmtDate(d=new Date()){return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});}
@@ -819,7 +1003,18 @@ function clearAllCT(){
 
 
 const ELO={
-  K(id){const p=gp(id)||{gamesPlayed:0};const sp=gsp(id)||{matchesPlayed:0};const t=(p.gamesPlayed||0)+(sp.matchesPlayed||0);return t<15?40:t<40?28:18;},
+  K(id){
+    const p=gp(id)||{};
+    const sp=gsp(id)||{matchesPlayed:0};
+    const t=(p.gamesPlayed||0)+(sp.matchesPlayed||0);
+    if(p.isNR||t<5)return 60;
+    // K-factor reactivation for improving bottom-tier players
+    if(shouldBoostK(id))return 28;
+    // Returning player after 4+ week absence: treat like semi-new (stale rating)
+    const weeks=sessionsSinceLastPlayed(id);
+    if(weeks>=4)return Math.min(40,t<15?40:28);
+    return t<15?40:t<40?28:18;
+  },
   exp(a,b){return 1/(1+Math.pow(10,(b-a)/400));},
   expTeam(t1ids,t2ids){
     const avg=ids=>ids.reduce((s,id)=>{const sp=gsp(id);return s+(sp?sp.sRating:(gp(id)?.rating||1000));},0)/ids.length;
@@ -865,40 +1060,120 @@ const ELO={
 // Why keep all-time at all? Prevents wild over-reaction in rounds 1-2 where
 // one lucky win would shuffle the courts completely.
 function effectiveRating(id, round){
-  const TRANSITION_ROUNDS=2; // rounds 1-2 blend; round 3+ = full session weight
+  const TRANSITION_ROUNDS=2;
   const p=gp(id),sp=gsp(id);
   const allTime=p?.rating||1000;
   if(!sp||!round||round<1)return allTime;
   const t=Math.min(1,Math.max(0,(round-1)/TRANSITION_ROUNDS));
-  // Session ELO (already updated each match)
   const sessElo=sp.sRating||allTime;
-  // Amplified session performance signal on top of ELO:
-  //   each net win adds 30pts of pressure, each net point adds 0.4
   const wins=sp.wins||0,losses=sp.losses||0;
   const pd=(sp.ptsFor||0)-(sp.ptsAgainst||0);
-  const perfBonus=Math.max(-150,Math.min(150,(wins-losses)*30+pd*0.4));
-  const sessPerf=sessElo+perfBonus;
-  return allTime*(1-t)+sessPerf*t;
+  const netW=wins-losses;
+  const cap=netW>=6?250:netW>=4?200:150;
+
+  // Quality-weighted perfBonus — wins against stronger opponents count more.
+  // Prevents inflating rating purely from beating weaker players.
+  let qualityMult=1.0;
+  if(S.session&&(wins+losses)>0){
+    const allMatches=_getSessionMatches(); // O(1) memoized — was O(rounds×matches) per call
+    const myMatches=allMatches.filter(m=>m.t1?.includes(id)||m.t2?.includes(id));
+    if(myMatches.length){
+      const oppAvgs=myMatches.map(m=>{
+        const oppTeam=m.t1?.includes(id)?m.t2:m.t1;
+        const oppR=oppTeam?.map(oid=>{const osp=gsp(oid);return osp?.sRating||gp(oid)?.rating||allTime;});
+        return oppR?.length?oppR.reduce((a,b)=>a+b,0)/oppR.length:allTime;
+      });
+      const avgOppR=oppAvgs.reduce((a,b)=>a+b,0)/oppAvgs.length;
+      const oppDiff=avgOppR-allTime;
+      qualityMult=Math.max(0.4,Math.min(1.8,1+(oppDiff/300)));
+    }
+  }
+
+  // Losing streak detection — drop effective rating faster for players on active losing streaks.
+  // This BREAKS THE COMPOUND PROBLEM: when two losing-streak players are rated similarly,
+  // their effective rating drops enough that the algorithm pairs them with DIFFERENT partners
+  // (stronger players who can help them win) rather than keeping them together.
+  //
+  // Without this: A(-3 net) + B(-3 net) rated ~900 each → paired together forever → both keep losing
+  // With this:    A(-3 net) + B(-3 net) rated ~820 → cross-team gap with 1100-level players is
+  //               smaller → algorithm naturally mixes them with better partners
+  let currentLoseStreak=0;
+  if(S.session){
+    const allMatches=_getSessionMatches(); // same cache hit — zero rebuild cost
+    const myOrdered=allMatches.filter(m=>m.t1?.includes(id)||m.t2?.includes(id));
+    for(let i=myOrdered.length-1;i>=0;i--){
+      const m=myOrdered[i];
+      const inT1=m.t1?.includes(id);
+      const won=inT1?m.s1>m.s2:m.s2>m.s1,tie=m.s1===m.s2;
+      if(won||tie)break;
+      currentLoseStreak++;
+    }
+  }
+  // Streak softener: -25pts per loss beyond 2 (capped at -100 total).
+  // Mild enough not to distort matchups when not on a streak.
+  const streakDrop=currentLoseStreak>2?Math.min(100,(currentLoseStreak-2)*25):0;
+
+  const perfBonus=Math.max(-cap,Math.min(cap,(netW*30+pd*0.4)*qualityMult));
+  const sessPerf=sessElo+perfBonus-streakDrop;
+  const base=allTime*(1-t)+sessPerf*t;
+  const ovr=S.session?.ratingOverrides?.[id]||0;
+  return base+ovr;
 }
 
 
 const MM={
   pc(a,b){return S.session?.partnerHx[a]?.[b]||0;},
-  oc(a,b){return S.session?.oppHx[a]?.[b]||0;},
+  // Opponent penalty with recency decay — 0.75^gamesAgo:
+  // 1 game ago = 0.75×, 4 games ago = 0.32×, 8 games ago = 0.10×
+  // Prevents long-session oppHx from forcing bad skill matches just to avoid repeats
+  // Tier isolation: amplify penalty when these two appear together across many archive sessions
+  oc(a,b){
+    const raw=S.session?.oppHx[a]?.[b]||0;
+    if(!raw)return 0;
+    const now=S.session?.cfMode?(S.session.cfMatchCount||0):(S.session?.round||0);
+    const lastSeen=S.session?.oppHxTime?.[a]?.[b]||0;
+    const gamesAgo=Math.max(0,now-lastSeen);
+    const decayed=raw*Math.max(0.05,Math.pow(0.75,gamesAgo));
+    // Tier isolation: use pre-computed cache (O(1)) instead of archive scan (O(n×m))
+    const sessionsTogether=_getSessionsTogether(a,b);
+    const isolationMult=sessionsTogether>=8?1.5:sessionsTogether>=4?1.2:1.0;
+    return decayed*isolationMult;
+  },
   matchScore(t1,t2){
     const rp=this.pc(t1[0].id,t1[1].id)+this.pc(t2[0].id,t2[1].id);
     const ro=t1.reduce((s,a)=>t2.reduce((ss,b)=>ss+this.oc(a.id,b.id),s),0);
-    // Cross-team imbalance: penalise uneven avg ratings
-    const crossImb=Math.abs((t1[0].sr+t1[1].sr)-(t2[0].sr+t2[1].sr))/200;
-    // Within-team gap: mildly penalise pairing players far apart in skill
-    // (avoids "strong player carries weak partner" every round)
-    const t1gap=Math.abs(t1[0].sr-t1[1].sr)/600;
-    const t2gap=Math.abs(t2[0].sr-t2[1].sr)/600;
-    return rp*80+ro*25+crossImb+(t1gap+t2gap);
+    // Cross-team imbalance dominates — 200pt avg gap = 26.7pts penalty
+    // Uses sum (t1+t2 each doubled), so divide by 15 not 30
+    const crossImb=Math.abs((t1[0].sr+t1[1].sr)-(t2[0].sr+t2[1].sr))/15;
+    // Within-team gap — bad partner pairing. Hard cap enforced separately.
+    const t1gap=Math.abs(t1[0].sr-t1[1].sr)/40;
+    const t2gap=Math.abs(t2[0].sr-t2[1].sr)/40;
+    // Repeat penalties — 10× less than a 200pt gap. Context: 1 partner repeat=3, 1 opp repeat=5.
+    const rp_pen=rp*3;
+    const ro_pen=ro*5;
+    // Never-pair hard wall
+    const np=S.session?.neverPair||{};
+    const neverRpt=(np[t1[0].id]?.includes(t1[1].id)||np[t1[1].id]?.includes(t1[0].id)?999:0)
+                  +(np[t2[0].id]?.includes(t2[1].id)||np[t2[1].id]?.includes(t2[0].id)?999:0);
+    return rp_pen+ro_pen+crossImb+(t1gap+t2gap)+neverRpt;
   },
   bestPair(four){
     const[a,b,c,d]=four;
-    return[{t1:[a,b],t2:[c,d]},{t1:[a,c],t2:[b,d]},{t1:[a,d],t2:[b,c]}].sort((x,y)=>this.matchScore(x.t1,x.t2)-this.matchScore(y.t1,y.t2))[0];
+    const candidates=[{t1:[a,b],t2:[c,d]},{t1:[a,c],t2:[b,d]},{t1:[a,d],t2:[b,c]}]
+      .sort((x,y)=>this.matchScore(x.t1,x.t2)-this.matchScore(y.t1,y.t2));
+    // In round mode prefer pairings not on cooldown, but never sacrifice match quality severely
+    if(!S.session?.cfMode&&S.session?.cfPairLastAt){
+      const nonCooldown=candidates.filter(p=>
+        !CF.isRoundPairOnCooldown(p.t1[0].id,p.t1[1].id)&&
+        !CF.isRoundPairOnCooldown(p.t2[0].id,p.t2[1].id));
+      // Only use a non-cooldown pair if it doesn't cost more than 40 score points
+      if(nonCooldown.length&&
+         this.matchScore(nonCooldown[0].t1,nonCooldown[0].t2)-
+         this.matchScore(candidates[0].t1,candidates[0].t2)<=40){
+        return nonCooldown[0];
+      }
+    }
+    return candidates[0];
   },
 
   // Quality score for court assignment — uses effective rating so mid-session
@@ -921,8 +1196,11 @@ const MM={
   // Assign court numbers so best matchup goes to middle slot
   assignCourts(matches){
     const scored=matches.map(m=>({m,q:this.courtQuality(m.t1,m.t2)}));
-    scored.sort((a,b)=>b.q-a.q); // best first
-    const order=this.middleOrder(scored.length);
+    scored.sort((a,b)=>b.q-a.q);
+    // Rotate which physical court gets the best matchup each round
+    const rot=(S.session?.round||0)%Math.max(1,scored.length);
+    const baseOrder=this.middleOrder(scored.length);
+    const order=baseOrder.map(i=>(i+rot)%scored.length);
     const result=new Array(scored.length);
     scored.forEach((item,rank)=>{result[order[rank]]={...item.m,court:order[rank]+1};});
     return result;
@@ -1046,17 +1324,13 @@ const MM={
       const{t1,t2}=this.bestPair(g);
       const avg=arr=>arr.reduce((s,p)=>s+p.sr,0)/arr.length;
       const a1=avg(t1),a2=avg(t2);
-      // Cross-team imbalance (raw ELO points) — main quality signal
       const crossImb=Math.abs(a1-a2);
-      // Within-team gap — penalise "carry" pairings mildly
-      const t1gap=Math.abs(t1[0].sr-t1[1].sr);
-      const t2gap=Math.abs(t2[0].sr-t2[1].sr);
-      // Partner repeat penalty — mild, so quality always dominates for large imbalances
-      // A 200pt cross-team gap weighs ~100; one partner repeat weighs ~25.
-      // So a bad match (~200pt gap) = 4 repeated-partner slots → repeats yield quickly.
+      const t1gap=Math.abs(t1[0].sr-t1[1].sr)/40;
+      const t2gap=Math.abs(t2[0].sr-t2[1].sr)/40;
       let repeatPenalty=0;
       for(let i=0;i<g.length;i++)for(let j=i+1;j<g.length;j++)repeatPenalty+=this.pc(g[i].id,g[j].id);
-      return crossImb*0.5+(t1gap+t2gap)*0.15+repeatPenalty*25;
+      // Skill balance dominant: 200pt cross-team gap >> 3 partner repeats
+      return crossImb+(t1gap+t2gap)+repeatPenalty*3;
     };
 
     const totalScore=groups=>groups.reduce((t,g)=>t+groupScore(g),0);
@@ -1093,8 +1367,25 @@ const MM={
 
   recHx(matches){
     const ph=S.session.partnerHx,oh=S.session.oppHx;
+    if(!S.session.oppHxTime)S.session.oppHxTime={};
+    if(!S.session.cfPairLastAt)S.session.cfPairLastAt={};
+    const oht=S.session.oppHxTime;
+    const now=S.session.cfMode?(S.session.cfMatchCount||0):(S.session.round||0);
     const r=(obj,a,b)=>{(obj[a]||(obj[a]={}))[b]=((obj[a]||{})[b]||0)+1;(obj[b]||(obj[b]={}))[a]=((obj[b]||{})[a]||0)+1;};
-    matches.forEach(m=>{r(ph,m.t1[0],m.t1[1]);r(ph,m.t2[0],m.t2[1]);m.t1.forEach(a=>m.t2.forEach(b=>r(oh,a,b)));});
+    const rt=(obj,a,b,t)=>{(obj[a]||(obj[a]={}))[b]=t;(obj[b]||(obj[b]={}))[a]=t;};
+    matches.forEach(m=>{
+      r(ph,m.t1[0],m.t1[1]);r(ph,m.t2[0],m.t2[1]);
+      m.t1.forEach(a=>m.t2.forEach(b=>{r(oh,a,b);rt(oht,a,b,now);}));
+      // Track last-at for round mode pair cooldown
+      const recordLastAt=(a,b)=>{
+        const pk=[a,b].sort().join('|');
+        if(!S.session.cfPairLastAt[pk])S.session.cfPairLastAt[pk]={};
+        S.session.cfPairLastAt[pk][a]=gsp(a)?.matchesPlayed||0;
+        S.session.cfPairLastAt[pk][b]=gsp(b)?.matchesPlayed||0;
+      };
+      recordLastAt(m.t1[0],m.t1[1]);
+      recordLastAt(m.t2[0],m.t2[1]);
+    });
   }
 };
 
@@ -1102,14 +1393,21 @@ const MM={
 function addPlayer(){
   const name=document.getElementById('np-name').value.trim();
   const tag=document.getElementById('np-tag').value.trim();
-  const rating=Math.max(400,Math.min(2000,parseInt(document.getElementById('np-rating').value)||1000));
+  const isNR=document.getElementById('np-nr')?.checked||false;
+  // NR initial rating: use tonight's session percentile positions
+  // bottom=p25, middle=p50, top=p75 of checked-in rated players
+  const nrLevels=calcNRLevelRatings();
+  const nrLevelRating=isNR?({beginner:nrLevels.bottom,intermediate:nrLevels.middle,advanced:nrLevels.top}[_nrLevel||'beginner']??null):null;
+  const rating=isNR?1000:Math.max(400,Math.min(2000,parseInt(document.getElementById('np-rating')?.value)||1000));
   if(!name){toast('Enter a name','err');return;}
   if(S.db.some(p=>p.name.toLowerCase()===name.toLowerCase()&&(p.tag||'').toLowerCase()===tag.toLowerCase())){toast('Name+Tag already exists','err');return;}
-  S.db.push({id:uid(),name,tag,rating,gamesPlayed:0,wins:0,losses:0,ties:0,createdAt:new Date().toISOString()});
+  S.db.push({id:uid(),name,tag,rating,isNR:isNR||false,nrLevelHint:nrLevelRating,isSeeding:false,gamesPlayed:0,wins:0,losses:0,ties:0,createdAt:new Date().toISOString()});
   STORE.save();renderDB();renderRoster();renderAllTime();updatePvSelect();
-  document.getElementById('np-name').value='';document.getElementById('np-tag').value='';document.getElementById('np-rating').value='1000';
+  document.getElementById('np-name').value='';document.getElementById('np-tag').value='';
+  const nrCb=document.getElementById('np-nr');if(nrCb){nrCb.checked=false;toggleNRInput(false);}
+  const rInp=document.getElementById('np-rating');if(rInp)rInp.value='1000';
   document.getElementById('np-name').focus();
-  toast(`${name} added ✓`,'ok');
+  toast(`${name} added${isNR?' — NR (rated after 5 games)':''} ✓`,'ok');
 }
 
 function deletePlayer(id){
@@ -1144,26 +1442,57 @@ function selectNone(){S.checkedIn.clear();renderDB();renderRoster();}
 
 /* ── SESSION ─────────────────────────────────────── */
 function startSession(){
+  _invalidateMatchmakingCaches();
+  _buildSessionTogetherCache(); // pre-warm before first match generation
   const arr=[...S.checkedIn];if(arr.length<4){toast('Need at least 4 players','err');return;}
-  S.roundMin=parseInt(document.getElementById('round-dur').value)||15;
-  const name=document.getElementById('sess-name').value.trim()||`Open Play — ${fmtDate()}`;
+  const isCF=S.sessionMode==='flow';
+  S.roundMin=parseInt(document.getElementById('round-dur')?.value)||12;
+  S.extendedMin=parseInt(document.getElementById('extended-min')?.value)||16;
+  const nameEl=isCF?document.getElementById('sess-name-flow'):document.getElementById('sess-name');
+  const name=(nameEl?.value||'').trim()||`Open Play — ${fmtDate()}`;
   const{minPlayAfterSit}=calcRotation(arr.length,S.courts);
+  // NR start rating = session average of rated players
+  const ratedRatings=arr.filter(id=>!gp(id)?.isNR).map(id=>gp(id)?.rating||1000);
+  const sessAvg=ratedRatings.length?Math.round(ratedRatings.reduce((a,b)=>a+b,0)/ratedRatings.length):1000;
   S.session={
     id:uid(),name,date:new Date().toISOString(),courts:S.courts,roundMin:S.roundMin,
-    minPlayAfterSit,courtGroupSize:4,
+    minPlayAfterSit,courtGroupSize:4,cfMode:isCF,extendedMin:S.extendedMin,
     sessionStart:Date.now(),
     activePlayers:[...arr],
-    players:arr.map(id=>{const p=gp(id);return{id,name:p.name,tag:p.tag||'',sRating:p.rating,startRating:p.rating,wins:0,losses:0,ties:0,matchesPlayed:0,ptsFor:0,ptsAgainst:0,status:'active'};}),
-    round:0,rounds:[],sitOutHx:{},soStreak:{},plStreak:{},partnerHx:{},oppHx:{},status:'active'
+    players:arr.map(id=>{
+      const p=gp(id);
+      const startR=p.isNR?(p.nrLevelHint||(()=>{const rated=arr.filter(id2=>!gp(id2)?.isNR).map(id2=>gp(id2)?.rating||1000);return rated.length?Math.round(rated.reduce((a,b)=>a+b,0)/rated.length):1000;})()):(p.rating||1000);
+      return{id,name:p.name,tag:p.tag||'',isNR:p.isNR||false,isSeeding:false,
+             sRating:startR,startRating:startR,wins:0,losses:0,ties:0,
+             matchesPlayed:0,ptsFor:0,ptsAgainst:0,timeOnCourtMs:0,timeInQueueMs:0,status:'active'};
+    }),
+    round:0,rounds:[],sitOutHx:{},soStreak:{},plStreak:{},partnerHx:{},oppHx:{},oppHxTime:{},
+    nrPairingHx:{},
+    cfQueue:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,
+    cfMatchupHx:{},cfPairConsec:{},cfPairWins:{},cfMustSplitPair:null,cfPaused:[],
+    cfPairSessionCount:{},cfPairLastAt:{},
+    neverPair:{},ratingOverrides:{},
+    status:'active'
   };
-  STORE.save();updateHeader();startElapsed();switchTab('live');nextRound();toast('Session started! 🎉','ok');
+  STORE.save();updateHeader();startElapsed();switchTab('live');
+  if(isCF){CF.initQueue();renderLive();toast('⚡ Continuous Flow started!','ok');}
+  else{nextRound();toast('Session started! 🎉','ok');}
 }
 
 function nextRound(){
   if(!S.session)return;
   clearAllCT();
   const cur=S.session.rounds.length?S.session.rounds[S.session.rounds.length-1]:null;
-  if(cur)MM.recHx(cur.matches);
+  if(cur){
+    MM.recHx(cur.matches);
+    // Track sit-out queue time (Bug 1 fix: round mode timeInQueueMs was always 0)
+    // Players who sat out the just-completed round waited ~roundMin minutes
+    const roundMs=(S.session.roundMin||12)*60000;
+    (cur.sitOuts||[]).forEach(id=>{
+      const sp=gsp(id);if(!sp)return;
+      sp.timeInQueueMs=(sp.timeInQueueMs||0)+roundMs;
+    });
+  }
   S.session.round++;
   const{matches,sitOuts}=MM.generate(S.session.courts);
   S.session.rounds.push({number:S.session.round,ts:new Date().toISOString(),matches,sitOuts});
@@ -1179,6 +1508,21 @@ function submitScore(matchId){
   const s1=parseInt(document.getElementById(`s1-${matchId}`)?.value),s2=parseInt(document.getElementById(`s2-${matchId}`)?.value);
   if(isNaN(s1)||isNaN(s2)||s1<0||s2<0){toast('Enter valid scores','err');return;}
   applyScore(m,s1,s2);
+}
+
+function skipCourtScore(matchId){
+  // Mark a pending court match as skipped — partner/opp history still recorded,
+  // no ELO change. Allows organizer to advance without waiting for a tardy court.
+  const rnd=curRnd();if(!rnd)return;
+  const m=rnd.matches.find(x=>x.id===matchId);if(!m||m.status==='done'||m.status==='skipped')return;
+  showCfm(
+    `Skip Court ${m.court} score?<br/><span style="font-size:.74rem;color:var(--mu)">Match history recorded · no ELO change · partner/opponent tracked.</span>`,
+    'Skip Court','bg2',()=>{
+      m.status='skipped';m.s1=null;m.s2=null;
+      STORE.save();renderLive();renderHistory();
+      toast(`Court ${m.court} skipped — no ELO change`,'warn');
+    }
+  );
 }
 
 function applyScore(m,s1,s2){
@@ -1197,15 +1541,35 @@ function applyScore(m,s1,s2){
   [...m.t1,...m.t2].forEach((id,i)=>{
     const sp=gsp(id);if(!sp)return;
     sp.sRating=Math.max(400,sp.sRating+m.eloDeltas[i]);sp.matchesPlayed++;
+    // Track court time in round mode (approximate via roundMin — actual match time not recorded)
+    if(!S.session.cfMode){
+      const roundMs=(S.session.roundMin||12)*60000;
+      sp.timeOnCourtMs=(sp.timeOnCourtMs||0)+roundMs;
+    }
     if(i<2){sp.ptsFor+=s1;sp.ptsAgainst+=s2;}else{sp.ptsFor+=s2;sp.ptsAgainst+=s1;}
     if(s1===s2)sp.ties=(sp.ties||0)+1;else if((i<2&&s1>s2)||(i>=2&&s2>s1))sp.wins++;else sp.losses++;
   });
+  [...m.t1,...m.t2].forEach(id=>checkNRPromotion(id));
+  // Track NR pairing history to distribute calibration tax fairly
+  const hasNR=[...m.t1,...m.t2].some(mid=>gp(mid)?.isNR||gsp(mid)?.isNR);
+  if(hasNR&&S.session){
+    if(!S.session.nrPairingHx)S.session.nrPairingHx={};
+    [...m.t1,...m.t2].forEach(mid=>{
+      if(!gp(mid)?.isNR)S.session.nrPairingHx[mid]=gsp(mid)?.matchesPlayed||0;
+    });
+  }
+  _boostKCache=null; // player game counts changed — refresh K-boost detection
+  _allMatchesCache=null; // session match list changed — invalidate effectiveRating cache
   STORE.save();renderLive();renderStandings();renderHistory();
   if(isActiveTab('player'))renderPlayerView();
   // Toast with ELO deltas
   const tie=s1===s2,w=tie?null:(s1>s2?m.t1:m.t2).map(id=>gp(id)?.name||'?').join(' & ');
+  // Win probability context
+  const preExp=ELO.expTeam(m.t1,m.t2);
+  const winnerExp=tie?50:Math.round((s1>s2?preExp:1-preExp)*100);
+  const ctxMsg=tie?'':winnerExp<35?`🔥 Upset! ${winnerExp}% chance`:winnerExp>70?`Expected (${winnerExp}% fav)`:`${winnerExp}% → result`;
   const dStr=[...m.t1,...m.t2].map((id,i)=>{const d=m.eloDeltas[i],p=gp(id);return`${p?.name||'?'}: <strong style="color:${d>0?'var(--gr)':d<0?'var(--re)':'var(--mu)'}">${d>0?'+':''}${d}</strong>`;}).join(' · ');
-  toast(`${s1}–${s2} ${tie?'🤝':(w+' win!')}<br/><span style="font-size:.71rem;opacity:.8">${dStr}</span>`,'ok');
+  toast(`${s1}–${s2} ${tie?'🤝':(w+' win!')}${ctxMsg?' <span style="font-size:.68rem;color:var(--m2)">·'+ctxMsg+'</span>':''}<br/><span style="font-size:.71rem;opacity:.8">${dStr}</span>`,'ok');
 }
 
 function openEditScore(matchId){
@@ -1281,7 +1645,7 @@ function curRnd(){return S.session?.rounds[S.session.rounds.length-1];}
 /* ── MID-MATCH PLAYER SWAP ───────────────────────── */
 function openSwapModal(matchId,teamNum,playerIdx){
   const rnd=curRnd();if(!rnd)return;
-  const m=rnd.matches.find(x=>x.id===matchId);if(!m||m.status==='done'){toast('Cannot swap a completed match','warn');return;}
+  const m=rnd.matches.find(x=>x.id===matchId);if(!m||m.status==='done'||m.status==='skipped'){toast('Cannot swap a completed match','warn');return;}
   const teamArr=teamNum===1?m.t1:m.t2;
   const outId=teamArr[playerIdx];
   const outP=gp(outId);
@@ -1329,22 +1693,101 @@ function openRosterModal(){if(!S.session){toast('No active session','err');retur
 function renderRosterModal(){
   const inS=S.session.activePlayers.map(id=>{
     const p=gp(id),sp=gsp(id),left=sp?.status==='left',late=sp?.status==='late';
-    return `<div class="prow" style="cursor:default">
-      <div class="pnc"><div class="pn">${p?.name||'?'}${tagHtml(p)}${left?'<span class="tleft">LEFT</span>':''}${late?'<span class="tlate">LATE</span>':''}</div></div>
-      ${!left?`<button class="btn bd2 sm" onclick="midRemove('${id}')">Leave ←</button>`:`<button class="btn bg2 sm" onclick="midRejoin('${id}')">Rejoin</button>`}
+    const ovr=S.session.ratingOverrides?.[id]||0;
+    const ovrTag=ovr?`<span style="font-size:.6rem;color:${ovr>0?'var(--gr)':'var(--re)'};margin-left:3px">${ovr>0?'+':''}${ovr}</span>`:'';
+    const isPaused=S.session.cfMode&&(S.session.cfPaused||[]).some(q=>q.id===id);
+    return `<div class="prow" style="cursor:default;flex-wrap:wrap;gap:5px">
+      <div class="pnc" style="min-width:100px"><div class="pn">${p?.name||'?'}${tagHtml(p)}${left?'<span class="tleft">LEFT</span>':''}${late?'<span class="tlate">LATE</span>':''}${ovrTag}</div></div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
+        ${!left?`<button class="btn bg2 sm" style="font-size:.65rem" onclick="openOvrModal('${id}')">⚡ RTG</button>`:''}
+        ${!left?`<button class="btn bg2 sm" style="font-size:.65rem" onclick="openNeverPairModal('${id}')">🚫 Pair</button>`:''}
+        ${!left&&S.session.cfMode?`<button class="btn bg2 sm" style="font-size:.65rem" onclick="${isPaused?`cfResumePlayer('${id}')`:`cfPausePlayer('${id}')`}">${isPaused?'▶':'⏸'}</button>`:''}
+        ${!left?`<button class="btn bd2 sm" onclick="midRemove('${id}')">Leave</button>`:`<button class="btn bg2 sm" onclick="midRejoin('${id}')">Rejoin</button>`}
+      </div>
     </div>`;
   }).join('');
   const notIn=S.db.filter(p=>!S.session.activePlayers.includes(p.id));
   openModal(`<div class="modal-title">👤 Roster Management</div>
-    <p style="font-size:.72rem;color:var(--mu);margin-bottom:8px">Late joiners enter next round immediately. Leaving players are excluded from future rounds.</p>
+    <p style="font-size:.72rem;color:var(--mu);margin-bottom:8px">⚡ RTG = override matchmaking rating · 🚫 Pair = never-partner restriction</p>
     <div style="font-size:.67rem;font-weight:700;color:var(--mu);letter-spacing:.06em;margin-bottom:4px">IN SESSION (${S.session.activePlayers.length})</div>
     <div style="margin-bottom:8px">${inS||'<div style="color:var(--mu);font-size:.78rem">None</div>'}</div>
     <div class="dv"></div>
     <div style="font-size:.67rem;font-weight:700;color:var(--mu);letter-spacing:.06em;margin-bottom:4px">ADD LATE ARRIVALS</div>
     <input class="inp" placeholder="🔍 Search…" oninput="filterMidAdd(this.value)" style="margin-bottom:6px"/>
-    <div id="mid-add">${notIn.map(p=>`<div class="prow" style="cursor:default"><div class="pnc"><div class="pn">${p.name}${tagHtml(p)}</div></div><div class="pr" style="color:var(--mu)">${Math.round(p.rating)}</div><button class="btn bp sm" onclick="midAdd('${p.id}')">Join →</button></div>`).join('')||'<div style="color:var(--mu);font-size:.78rem">All players in session</div>'}</div>
+    <div id="mid-add">${notIn.map(p=>`<div class="prow" style="cursor:default">
+      <div class="pnc"><div class="pn">${p.name}${tagHtml(p)}</div></div>
+      <div class="pr" style="color:var(--mu)">${p.isNR?'<span class="nr-badge">NR</span>':Math.round(p.rating)}</div>
+      <button class="btn bg2 sm" onclick="midAddWarm('${p.id}')">☕ Warm up</button>
+      <button class="btn bp sm" onclick="midAdd('${p.id}')">Join →</button>
+    </div>`).join('')||'<div style="color:var(--mu);font-size:.78rem">All players in session</div>'}</div>
     <div class="dv"></div>
     <button class="btn bg2 sm" style="width:100%" onclick="closeModal()">Done</button>`);
+}
+
+function openOvrModal(id){
+  const p=gp(id);if(!p)return;
+  const cur=S.session.ratingOverrides?.[id]||0;
+  openModal(`<div class="modal-title">⚡ Override Rating — ${esc(p.name)}</div>
+    <p style="font-size:.74rem;color:var(--mu);margin-bottom:10px">Shift this player's <em>matchmaking</em> rating up or down. Does not affect ELO. Use when their real-time form is clearly above/below their current rating.</p>
+    <label>ADJUSTMENT (–400 to +400)</label>
+    <input id="ovr-val" class="inp" type="number" value="${cur}" min="-400" max="400" style="margin-bottom:12px"/>
+    <div style="display:flex;gap:6px">
+      <button class="btn bp" style="flex:1" onclick="saveOvr('${id}')">Apply</button>
+      ${cur?`<button class="btn bg2 sm" onclick="saveOvr('${id}',true)">Clear</button>`:''}
+      <button class="btn bg2 sm" onclick="openRosterModal()">Back</button>
+    </div>`);
+}
+
+function saveOvr(id,clear=false){
+  if(!S.session)return;
+  if(!S.session.ratingOverrides)S.session.ratingOverrides={};
+  if(clear){delete S.session.ratingOverrides[id];}
+  else{const v=parseInt(document.getElementById('ovr-val')?.value)||0;S.session.ratingOverrides[id]=Math.max(-400,Math.min(400,v));}
+  STORE.save();renderRosterModal();toast(`Rating override updated ✓`,'ok');
+}
+
+function openNeverPairModal(id){
+  const p=gp(id);if(!p)return;
+  const cur=(S.session.neverPair?.[id]||[]);
+  const others=S.session.activePlayers.filter(x=>x!==id&&gsp(x)?.status!=='left');
+  openModal(`<div class="modal-title">🚫 Never Partner — ${esc(p.name)}</div>
+    <p style="font-size:.74rem;color:var(--mu);margin-bottom:10px">These players will never be assigned as partners. They can still be opponents.</p>
+    <div style="max-height:260px;overflow-y:auto">
+      ${others.map(oid=>{const op=gp(oid);const checked=cur.includes(oid)||((S.session.neverPair?.[oid]||[]).includes(id));
+        return`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--bd)">
+          <input type="checkbox" id="np-${oid}" ${checked?'checked':''} style="accent-color:var(--re)"/>
+          <label for="np-${oid}" style="font-size:.82rem;flex:1;cursor:pointer">${esc(op?.name||'?')}</label>
+        </div>`;}).join('')}
+    </div>
+    <div style="display:flex;gap:6px;margin-top:12px">
+      <button class="btn bp" style="flex:1" onclick="saveNeverPair('${id}')">Save</button>
+      <button class="btn bg2 sm" onclick="openRosterModal()">Back</button>
+    </div>`);
+}
+
+function saveNeverPair(id){
+  if(!S.session)return;
+  if(!S.session.neverPair)S.session.neverPair={};
+  const others=S.session.activePlayers.filter(x=>x!==id);
+  S.session.neverPair[id]=others.filter(oid=>document.getElementById(`np-${oid}`)?.checked);
+  // Mirror: if A→B, also add B→A
+  others.forEach(oid=>{
+    if(!S.session.neverPair[oid])S.session.neverPair[oid]=[];
+    const cb=document.getElementById(`np-${oid}`)?.checked;
+    const hasIt=S.session.neverPair[oid].includes(id);
+    if(cb&&!hasIt)S.session.neverPair[oid].push(id);
+    else if(!cb&&hasIt)S.session.neverPair[oid]=S.session.neverPair[oid].filter(x=>x!==id);
+  });
+  STORE.save();renderRosterModal();toast('Never-pair list saved ✓','ok');
+}
+
+function midAddWarm(id){
+  // Add to session but immediately pause in CF queue (warm-up first)
+  midAdd(id);
+  if(S.session?.cfMode){
+    // midAdd already pushed to queue — pause them immediately
+    setTimeout(()=>{cfPausePlayer(id);toast(`${gp(id)?.name||'?'} added in warm-up mode ☕`,'ok');renderLive();},100);
+  }
 }
 
 function filterMidAdd(q){
@@ -1358,23 +1801,61 @@ function midAdd(id){
   if(!S.session)return;const p=gp(id);if(!p)return;
   if(S.session.activePlayers.includes(id)){toast('Already in session','warn');return;}
   S.session.activePlayers.push(id);
-  // Credit rounds missed as sit-outs so algorithm prioritises them to play
   const missed=Math.max(0,S.session.round-1);
+  const startR=p.isNR?(()=>{const rated=S.session.players.filter(sp=>!sp.isNR).map(sp=>sp.sRating||1000);return rated.length?Math.round(rated.reduce((a,b)=>a+b,0)/rated.length):1000;})():(p.rating||1000);
   if(!gsp(id)){
-    S.session.players.push({id,sRating:p.rating,startRating:p.rating,wins:0,losses:0,ties:0,matchesPlayed:0,ptsFor:0,ptsAgainst:0,status:'late'});
-  } else { gsp(id).status='late'; }
-  S.session.sitOutHx[id]=missed; // treated as having sat out all rounds so far
-  S.session.soStreak[id]=2;      // immediately enters must-play protection
-  S.session.plStreak[id]=0;
-  S.checkedIn.add(id);STORE.save();
-  toast(`${p.name} joined — credited ${missed} sit-out round${missed!==1?'s':''}, plays immediately 🏓`,'ok');
-  renderRosterModal();
+    S.session.players.push({id,name:p.name,tag:p.tag||'',isNR:p.isNR||false,isSeeding:false,
+      sRating:startR,startRating:startR,wins:0,losses:0,ties:0,matchesPlayed:0,ptsFor:0,ptsAgainst:0,timeOnCourtMs:0,timeInQueueMs:0,status:'late'});
+  }else{gsp(id).status='late';}
+  S.checkedIn.add(id);
+  if(S.session.cfMode){
+    // CF: add to queue with high priority (joined late so they've been waiting)
+    if(!S.session.cfQueue)S.session.cfQueue=[];
+    S.session.cfQueue.push({id,since:Date.now()-missed*S.session.roundMin*60000*0.5,consec:0});
+    // Regenerate suggestions for ready courts
+    for(let c=1;c<=S.session.courts;c++){
+      if(S.session.cfCourts?.[c]?.status==='ready')CF.generateSuggestion(c,null);
+    }
+    toast(`${p.name} joined queue 🏓`,'ok');
+  }else{
+    S.session.sitOutHx[id]=missed;
+    S.session.soStreak[id]=2;
+    S.session.plStreak[id]=0;
+    toast(`${p.name} joined — credited ${missed} sit-out round${missed!==1?'s':''}, plays immediately 🏓`,'ok');
+  }
+  STORE.save();renderLive();renderRosterModal();
 }
 
 function midRemove(id){
   if(!S.session)return;const p=gp(id),sp=gsp(id);if(!p||!sp)return;
   sp.status='left';S.session.activePlayers=S.session.activePlayers.filter(x=>x!==id);
-  STORE.save();toast(`${p.name} marked as left`,'warn');renderRosterModal();
+  if(S.session.cfMode){
+    S.session.cfQueue=(S.session.cfQueue||[]).filter(q=>q.id!==id);
+    S.session.cfPaused=(S.session.cfPaused||[]).filter(q=>q.id!==id);
+  }
+  STORE.save();toast(`${p.name} marked as left`,'warn');renderLive();renderRosterModal();
+}
+
+function cfPausePlayer(id){
+  if(!S.session?.cfMode)return;
+  const p=gp(id);if(!p)return;
+  const qi=S.session.cfQueue.findIndex(q=>q.id===id);
+  if(qi===-1){toast(`${p.name} is not in queue`,'warn');return;}
+  const [entry]=S.session.cfQueue.splice(qi,1);
+  if(!S.session.cfPaused)S.session.cfPaused=[];
+  S.session.cfPaused.push({...entry,pausedAt:Date.now()});
+  STORE.save();renderLive();toast(`${p.name} paused ⏸`,'warn');
+}
+
+function cfResumePlayer(id){
+  if(!S.session?.cfMode)return;
+  const p=gp(id);if(!p)return;
+  const pi=(S.session.cfPaused||[]).findIndex(q=>q.id===id);
+  if(pi===-1)return;
+  const [entry]=S.session.cfPaused.splice(pi,1);
+  // Re-enter queue preserving wait time (since is kept from original)
+  S.session.cfQueue.push({id:entry.id,since:entry.since,consec:entry.consec||0});
+  STORE.save();renderLive();toast(`${p.name} back in queue ✓`,'ok');
 }
 
 function midRejoin(id){
@@ -1407,8 +1888,10 @@ function stopTimer(){
 
 /* ── RENDER: DB ──────────────────────────────────── */
 function renderDB(){
+  // Refresh NR level labels if NR panel is open (checked-in pool may have changed)
+  if(document.getElementById('np-nr-level')?.style.display!=='none')updateNRLevelLabels();
   const q=(document.getElementById('db-search')?.value||'').toLowerCase();
-  let players=[...S.db].sort((a,b)=>b.rating-a.rating);
+  let players=[...S.db].sort((a,b)=>{if(!!a.isNR!==!!b.isNR)return a.isNR?1:-1;return b.rating-a.rating;});
   if(q)players=players.filter(p=>plainName(p).toLowerCase().includes(q));
   document.getElementById('db-badge').textContent=S.db.length;
   if(!players.length){document.getElementById('db-list').innerHTML=`<div class="empty">No players yet.</div>`;return;}
@@ -1416,11 +1899,16 @@ function renderDB(){
     const chk=S.checkedIn.has(p.id),ed=S.editId===p.id;
     const wr=p.gamesPlayed>0?Math.round((p.wins/p.gamesPlayed)*100)+'%':'—';
     const pd=p.gamesPlayed>0?(p.wins-p.losses>=0?'+':'')+(p.wins-p.losses):'';
+    const rtgDisplay=p.isNR?`<span class="nr-badge">NR</span>`:p.isSeeding?`<span class="nr-seed">~${Math.round(p.rating)}</span>`:`${Math.round(p.rating)}`;
+    const staleWeeks=p.gamesPlayed>0?sessionsSinceLastPlayed(p.id):0;
+    const staleBadge=staleWeeks>=4?`<span title="Away ${staleWeeks}w — K boosted on return" style="font-size:.6rem;color:var(--or);cursor:default;margin-left:2px">🔄</span>`:'';
+    const ringerBadge=isRinger(p)?`<span title="High rating, few games — rating may be inflating" style="font-size:.6rem;color:var(--pu);cursor:default;margin-left:2px">⚡</span>`:'';
+    const boostBadge=shouldBoostK(p.id)?`<span title="K-factor boosted — you're improving!" style="font-size:.6rem;color:var(--gr);cursor:default;margin-left:2px">📈</span>`:'';
     return `<div style="background:var(--s2);border:1px solid ${ed?'var(--cy)':chk?'var(--gr)':'var(--bd)'};border-radius:var(--ra);margin-bottom:4px;overflow:hidden;transition:border-color .15s">
       <div class="prow click ${chk?'chk':''}" onclick="toggleCheckIn('${p.id}')">
         <div class="pav" style="${chk?'background:rgba(52,217,116,.15);border-color:var(--gr);color:var(--gr)':''}">${p.name.slice(0,2).toUpperCase()}</div>
-        <div class="pnc"><div class="pn">${p.name}${tagHtml(p)}</div><div class="pst">${p.gamesPlayed}G · ${wr} WR${pd?' · '+pd+' PD':''}</div></div>
-        <div class="pr" style="color:${chk?'var(--gr)':'var(--mu)'}">${Math.round(p.rating)}</div>
+        <div class="pnc"><div class="pn">${p.name}${tagHtml(p)}${staleBadge}${ringerBadge}${boostBadge}</div><div class="pst">${p.gamesPlayed}G · ${wr} WR${pd?' · '+pd+' PD':''}</div></div>
+        <div class="pr" style="color:${chk?'var(--gr)':'var(--mu)'}">${rtgDisplay}</div>
         <div style="color:${chk?'var(--gr)':'var(--m2)'};width:15px;text-align:center;font-size:.88rem;pointer-events:none">${chk?'✓':'+'}</div>
         <button class="btn bg2 ibtn" onclick="event.stopPropagation();toggleEdit('${p.id}')" title="Edit">✏️</button>
       </div>
@@ -1428,8 +1916,12 @@ function renderDB(){
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
           <div style="flex:2;min-width:90px"><label>NAME</label><input id="en-${p.id}" class="inp" value="${p.name.replace(/"/g,'&quot;')}" onkeydown="if(event.key==='Enter')savePlayerEdit('${p.id}')"/></div>
           <div style="flex:1;min-width:60px"><label>TAG</label><input id="et-${p.id}" class="inp" value="${(p.tag||'').replace(/"/g,'&quot;')}" onkeydown="if(event.key==='Enter')savePlayerEdit('${p.id}')"/></div>
-          <div style="width:68px"><label>RATING</label><input id="er-${p.id}" class="inp" type="number" value="${Math.round(p.rating)}" min="400" max="2000"/></div>
+          <div style="width:68px"><label>RATING</label>${p.isNR
+            ?`<div class="nr-badge" style="display:block;text-align:center;padding:6px 0">NR</div><input id="er-${p.id}" type="hidden" value="1000"/>`
+            :`<input id="er-${p.id}" class="inp" type="number" value="${Math.round(p.rating)}" min="400" max="2000"/>`
+          }</div>
         </div>
+        ${p.isNR?`<p style="font-size:.68rem;color:var(--pu);margin-bottom:7px">NR — rated after 5 games.</p>`:''}
         <div style="display:flex;gap:6px">
           <button class="btn bp sm" onclick="savePlayerEdit('${p.id}')">✓ Save</button>
           <button class="btn bg2 sm" onclick="toggleEdit('${p.id}')">Cancel</button>
@@ -1451,8 +1943,8 @@ function renderRoster(){
     document.getElementById('start-btn').disabled=true;return;
   }
   const players=arr.map(gp).filter(Boolean).sort((a,b)=>b.rating-a.rating);
-  document.getElementById('roster-list').innerHTML=players.map(p=>`<div class="prow click chk" onclick="toggleCheckIn('${p.id}')"><div class="pnc"><div class="pn">${p.name}${tagHtml(p)}</div></div><div class="pr" style="color:var(--gr)">${Math.round(p.rating)}</div><div style="color:var(--gr)">✓</div></div>`).join('');
-  const avg=Math.round(arr.reduce((s,id)=>s+(gp(id)?.rating||0),0)/arr.length);
+  document.getElementById('roster-list').innerHTML=players.map(p=>`<div class="prow click chk" onclick="toggleCheckIn('${p.id}')"><div class="pnc"><div class="pn">${p.name}${tagHtml(p)}</div></div><div class="pr" style="color:var(--gr)">${p.isNR?'<span class="nr-badge">NR</span>':Math.round(p.rating)}</div><div style="color:var(--gr)">✓</div></div>`).join('');
+  const avg=Math.round(arr.filter(id=>!gp(id)?.isNR).reduce((s,id)=>s+(gp(id)?.rating||0),0)/Math.max(1,arr.filter(id=>!gp(id)?.isNR).length));
   const need=S.courts*4;
   const playingR1=Math.min(need,arr.length);
   const so=Math.max(0,arr.length-need);
@@ -1462,6 +1954,19 @@ function renderRoster(){
   if(act){btn.disabled=true;btn.textContent='✅ Session Running';document.getElementById('start-hint').textContent='Go to Live tab.';}
   else if(arr.length<4){btn.disabled=true;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=`Need ${4-arr.length} more.`;}
   else{btn.disabled=false;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=hintText;}
+  // Low-attendance advisory
+  const laEl=document.getElementById('low-attendance-hint');
+  if(laEl){
+    if(arr.length<18&&S.courts>=3){
+      laEl.style.display='block';
+      laEl.innerHTML=`⚠ Low turnout (${arr.length} players) — <strong>2 courts recommended</strong> for better match quality.
+        <button class="btn bs sm" style="margin-left:6px;font-size:.65rem" onclick="S.courts=2;renderRoster()">Switch to 2 courts</button>`;
+    }else if(arr.length>=18&&arr.length<22&&S.courts>=3){
+      laEl.style.display='block';
+      laEl.innerHTML=`${arr.length} players — 2 or 3 courts both work. 2 courts gives better matchups.`;
+      laEl.style.color='var(--mu)';
+    }else{laEl.style.display='none';}
+  }
   updateRotationPreview();
 }
 
@@ -1469,10 +1974,15 @@ function renderRoster(){
 function renderLive(){
   const none=!S.session||S.session.status!=='active';
   document.getElementById('live-empty').style.display=none?'block':'none';
-  document.getElementById('live-wrap').style.display=none?'none':'block';
-  if(none)return;
+  const lw=document.getElementById('live-wrap'),cfw=document.getElementById('cf-live-wrap');
+  if(none){if(lw)lw.style.display='none';if(cfw)cfw.style.display='none';return;}
+  if(S.session.cfMode){
+    if(lw)lw.style.display='none';if(cfw)cfw.style.display='block';
+    CF.renderLive();startCFTick();return;
+  }
+  if(lw)lw.style.display='block';if(cfw)cfw.style.display='none';
   const rnd=curRnd();if(!rnd)return;
-  const done=rnd.matches.filter(m=>m.status==='done').length;
+  const done=rnd.matches.filter(m=>m.status==='done'||m.status==='skipped').length;
   document.getElementById('round-lbl').textContent=`ROUND ${rnd.number}`;
   document.getElementById('round-sub').textContent=`${done}/${rnd.matches.length} submitted · ${S.session.name}`;
   syncCourtPills('cpills-live',S.session.courts);
@@ -1483,14 +1993,21 @@ function renderLive(){
     sc.style.display='block';
     sl.innerHTML=(rnd.sitOuts||[]).map(id=>{
       const p=gp(id),cnt=S.session.sitOutHx[id]||0,soSt=S.session.soStreak[id]||0;
+      const plSt=S.session.plStreak?.[id]||0;
+      const MAX_CONSEC=3;
       const warn=soSt>=1;
-      return `<div class="so-chip ${warn?'so-warn':''}">${p?.name||'?'}${tagHtml(p)}<span class="so-n${warn?' warn':''}">${cnt}x${warn?' — PLAYS NEXT':''}</span></div>`;
+      // Transparent reason for organizer too
+      let tag='';
+      if(warn)tag='PLAYS NEXT';
+      else if(plSt>=MAX_CONSEC)tag=`${plSt}-game cap`;
+      else if(S.session.activePlayers.length>S.session.courts*4)tag='rotation';
+      return `<div class="so-chip ${warn?'so-warn':''}">${p?.name||'?'}${tagHtml(p)}<span class="so-n${warn?' warn':''}">${cnt}x${tag?' — '+tag:''}</span></div>`;
     }).join('');
   }else sc.style.display='none';
 
   const nc=rnd.matches.length;
   document.getElementById('courts-wrap').innerHTML=[...rnd.matches].sort((a,b)=>a.court-b.court).map(m=>renderCourt(m,nc)).join('');
-  [...rnd.matches].filter(m=>m.status!=='done').forEach(m=>renderQS(`qs-${m.id}`,`s1-${m.id}`,`s2-${m.id}`));
+  [...rnd.matches].filter(m=>m.status!=='done'&&m.status!=='skipped').forEach(m=>renderQS(`qs-${m.id}`,`s1-${m.id}`,`s2-${m.id}`));
 
   // Restart running timers after re-render (DOM was replaced)
   if(_ctTick){clearInterval(_ctTick);_ctTick=null;}
@@ -1501,7 +2018,7 @@ function renderLive(){
   // Next-round preview: show when all scores are in
   const nrpEl=document.getElementById('nrp-wrap');
   if(nrpEl){
-    const allDone=rnd.matches.length>0&&rnd.matches.every(m=>m.status==='done');
+    const allDone=rnd.matches.length>0&&rnd.matches.every(m=>m.status==='done'||m.status==='skipped');
     if(allDone){nrpEl.style.display='block';nrpEl.innerHTML=buildNRP();}
     else{nrpEl.style.display='none';}
   }
@@ -1540,12 +2057,17 @@ function renderCourt(m,totalCourts){
   const info=ids=>ids.map(id=>{const p=gp(id),sp=gsp(id);return{...p||{name:'?',tag:''},sr:effectiveRating(id,rnd)};});
   const t1=info(m.t1),t2=info(m.t2);
   const a1=Math.round((t1[0].sr+t1[1].sr)/2),a2=Math.round((t2[0].sr+t2[1].sr)/2);
-  const done=m.status==='done',tie=done&&m.s1===m.s2,t1w=done&&!tie&&m.s1>m.s2,t2w=done&&!tie&&m.s2>m.s1;
+  const skipped=m.status==='skipped';
+  const done=m.status==='done'||skipped,tie=done&&!skipped&&m.s1===m.s2,t1w=done&&!tie&&!skipped&&m.s1>m.s2,t2w=done&&!tie&&!skipped&&m.s2>m.s1;
 
-  const pRow=(p,ti,pi)=>`<div style="display:flex;align-items:center;gap:4px;justify-content:center;margin-bottom:${pi===0?'3px':'0'}">
-    <span style="font-size:.78rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;text-align:center">${esc(p.name)}${tagHtml(p)}</span>
-    ${!done?`<button style="flex-shrink:0;background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.3);border-radius:5px;padding:1px 5px;font-size:.6rem;color:var(--cy);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600" onclick="event.stopPropagation();openSwapModal('${m.id}',${ti},${pi})">↔</button>`:''}
-  </div>`;
+  const pRow=(p,ti,pi)=>{
+    const staleBadge=p.id&&sessionsSinceLastPlayed(p.id)>=4?`<span title="Returning after ${sessionsSinceLastPlayed(p.id)}w away — K boosted" style="font-size:.58rem;cursor:default">🔄</span>`:'';
+    const ringerBadge=p.id&&isRinger(p)?`<span title="High rating, few games" style="font-size:.58rem;cursor:default">⚡</span>`:'';
+    return `<div style="display:flex;align-items:center;gap:4px;justify-content:center;margin-bottom:${pi===0?'3px':'0'}">
+      <span style="font-size:.78rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;text-align:center">${esc(p.name)}${tagHtml(p)}${staleBadge}${ringerBadge}</span>
+      ${!done?`<button style="flex-shrink:0;background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.3);border-radius:5px;padding:1px 5px;font-size:.6rem;color:var(--cy);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600" onclick="event.stopPropagation();openSwapModal('${m.id}',${ti},${pi})">↔</button>`:''}
+    </div>`;
+  };
 
   // Win probability bar (only for pending matches)
   const exp1=!done?ELO.expTeam(m.t1,m.t2):null;
@@ -1558,11 +2080,14 @@ function renderCourt(m,totalCourts){
     return`<span class="ec ${d>0?'ec-up':d<0?'ec-dn':'ec-ze'}">${esc(p?.name||'?')} ${d>0?'+':''}${d}</span>`;
   }).join('')}</div>`:'';
 
-  const scoreSection=done
+  const scoreSection=skipped
+    ?`<div style="text-align:center;padding:10px;font-size:.78rem;color:var(--mu)">⏭ Skipped — no score recorded</div>`
+    :done
     ?`<div class="sfinal">${m.s1} – ${m.s2}${tie?' 🤝':''}</div>${eloChips}<button class="sedit" onclick="openEditScore('${m.id}')">✏️ Edit</button>`
     :`<div class="srow"><input class="sinp inp" id="s1-${m.id}" type="number" min="0" max="99" placeholder="0"/><span class="sdash">–</span><input class="sinp inp" id="s2-${m.id}" type="number" min="0" max="99" placeholder="0"/></div>
     <div class="qs-row" id="qs-${m.id}"></div>${probBar}
-    <button class="btn bp" style="width:100%;margin-top:8px" onclick="submitScore('${m.id}')">✓ Submit Score</button>`;
+    <button class="btn bp" style="width:100%;margin-top:8px" onclick="submitScore('${m.id}')">✓ Submit Score</button>
+    <button class="btn bg2 sm" style="width:100%;margin-top:4px;font-size:.68rem;color:var(--mu)" onclick="skipCourtScore('${m.id}')" title="Skip this court and advance without score">⏭ Skip court (no score)</button>`;
 
   // Bench players (6-player court mode) — rotating courtside
   const benchHtml=(m.bench&&m.bench.length)
@@ -1576,12 +2101,12 @@ function renderCourt(m,totalCourts){
     ?`<span data-ct="${m.id}" class="ct-timer">--:--</span>`
     :`<button class="ct-start" onclick="startCourtTimer('${m.id}')">⏱ Start Timer</button>`;
 
-  return `<div class="court-card ${done?'done':''}">
+  return `<div class="court-card ${done?'done':''}${skipped?' done':''}">
     <div class="chead">
       <span class="clbl">COURT ${m.court}</span>
       <div style="display:flex;align-items:center;gap:8px">
         ${timerHtml}
-        <span class="mbadge ${done?'mb-d':'mb-p'}">${done?'✓ DONE':'○ PENDING'}</span>
+        <span class="mbadge ${done?'mb-d':'mb-p'}">${skipped?'⏭ SKIPPED':done?'✓ DONE':'○ PENDING'}</span>
       </div>
     </div>
     <div class="cbody">
@@ -1600,19 +2125,45 @@ function renderStandings(){renderSessStd();renderAllTime();}
 function renderSessStd(){
   const el=document.getElementById('sess-std');
   if(!S.session){el.innerHTML=`<div class="empty">No active session</div>`;return;}
+
+  // Build strength-of-schedule: avg opponent rating faced this session
+  const sosMap={};
+  const allMatches=[
+    ...(S.session.rounds||[]).flatMap(r=>r.matches.filter(m=>m.status==='done')),
+    ...(S.session.cfLog||[])
+  ];
+  S.session.players.forEach(sp=>{
+    const myMatches=allMatches.filter(m=>[...m.t1,...m.t2].includes(sp.id));
+    if(!myMatches.length){sosMap[sp.id]=null;return;}
+    const oppRatings=myMatches.flatMap(m=>{
+      const opps=[...m.t1,...m.t2].filter(x=>x!==sp.id);
+      return opps.map(oid=>{const osp=S.session.players.find(p=>p.id===oid);return osp?.sRating||1000;});
+    });
+    sosMap[sp.id]=Math.round(oppRatings.reduce((a,b)=>a+b,0)/oppRatings.length);
+  });
+  const sosValues=Object.values(sosMap).filter(v=>v!==null);
+  const avgSos=sosValues.length?Math.round(sosValues.reduce((a,b)=>a+b,0)/sosValues.length):null;
+
   const rows=[...S.session.players].sort((a,b)=>{
     if(b.wins!==a.wins)return b.wins-a.wins;
     const pda=a.ptsFor-a.ptsAgainst,pdb=b.ptsFor-b.ptsAgainst;
     if(pdb!==pda)return pdb-pda;
     return b.sRating-a.sRating;
   }).map((sp,i)=>{
-    // Use stored name/tag first (survives mid-session adds), fall back to DB
     const name=sp.name||gp(sp.id)?.name||'?';
     const tag=sp.tag!==undefined?sp.tag:(gp(sp.id)?.tag||'');
     const d=sp.sRating-sp.startRating,pd=sp.ptsFor-sp.ptsAgainst;
-    return `<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.79rem">${esc(name)}${tag?`<span class="ptag">${esc(tag)}</span>`:''}${sp.status==='left'?'<span class="tleft">LEFT</span>':''}</td><td style="font-size:.73rem;color:var(--mu)">${sp.wins}W/${sp.losses}L${sp.ties?'/'+sp.ties+'T':''}</td><td style="font-size:.71rem;color:var(--mu)">${pd>=0?'+':''}${pd}</td><td><span class="dl ${d>0?'du':d<0?'dd':'dz'}">${d>=0?'+':''}${d}</span></td><td><span class="rv">${Math.round(sp.sRating)}</span></td></tr>`;
+    const nrTag=sp.isNR?`<span class="nr-badge">NR</span>`:sp.isSeeding?`<span class="nr-seed">~${Math.round(sp.sRating)}</span>`:'';
+    const onCourt=S.session.cfMode?Object.values(S.session.cfCourts||{}).find(c=>c.match&&[...c.match.t1,...c.match.t2].includes(sp.id)):null;
+    const courtTag=onCourt?`<span style="font-size:.6rem;color:var(--cy);background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.25);border-radius:4px;padding:1px 4px;margin-left:3px">▶C${onCourt.match?.courtNum||''}</span>`:'';
+    const rtgCell=sp.isNR?'NR':Math.round(sp.sRating);
+    // SOS indicator: above avg = harder schedule, below avg = softer
+    const sos=sosMap[sp.id];
+    const sosTag=sos&&avgSos?`<span title="Avg opponent rating: ${sos}" style="font-size:.6rem;padding:1px 4px;border-radius:4px;margin-left:2px;${sos>avgSos+50?'color:var(--or);background:rgba(251,147,60,.1)':sos<avgSos-50?'color:var(--mu);background:var(--s2)':'color:var(--mu)'}">${sos>avgSos+50?'↑':''}${sos<avgSos-50?'↓':''}${sos}</span>`:'';
+    return `<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.79rem">${esc(name)}${tag?`<span class="ptag">${esc(tag)}</span>`:''}${nrTag}${courtTag}${sp.status==='left'?'<span class="tleft">LEFT</span>':''}</td><td style="font-size:.73rem;color:var(--mu)">${sp.wins}W/${sp.losses}L${sp.ties?'/'+sp.ties+'T':''}</td><td style="font-size:.71rem;color:var(--mu)">${pd>=0?'+':''}${pd}${sosTag}</td><td><span class="dl ${d>0?'du':d<0?'dd':'dz'}">${d>=0?'+':''}${d}</span></td><td><span class="rv">${rtgCell}</span></td></tr>`;
   }).join('');
-  el.innerHTML=`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th>W/L</th><th>PD</th><th>Δ</th><th>RTG</th></tr></thead><tbody>${rows}</tbody></table>`;
+  el.innerHTML=`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th>W/L</th><th>PD+SOS</th><th>Δ</th><th>RTG</th></tr></thead><tbody>${rows}</tbody></table>
+  <div style="font-size:.62rem;color:var(--m2);margin-top:5px;padding:0 2px">SOS = avg opponent rating (↑ harder schedule, ↓ easier)</div>`;
 }
 function renderAllTime(){
   const el=document.getElementById('alltime-std');if(!el)return;
@@ -1705,6 +2256,7 @@ function updateRotationPreview(){
 
 /* ── ALL-TIME RATING RECALCULATION ───────────────── */
 function recalcAllTimeRatings(){
+  _invalidateMatchmakingCaches();
   // Recompute S.db ratings/stats from remaining archived sessions + active session
   // Method: for each player, base = startRating of earliest appearance,
   //         then add net delta (sRating - startRating) per remaining session in order.
@@ -1775,8 +2327,30 @@ function deleteArchiveSess(sessId){
 /* ── RENDER: HISTORY ─────────────────────────────── */
 function renderHistory(){
   const el=document.getElementById('history-wrap');
-  if(!S.session||!S.session.rounds.length){el.innerHTML=`<div class="empty">No rounds yet this session.</div>`;return;}
+  if(!S.session){el.innerHTML=`<div class="empty">No rounds yet this session.</div>`;return;}
   const gn=id=>{const sp=gsp(id);if(sp?.name)return esc(sp.name+(sp.tag?` ${sp.tag}`:''));return esc(gp(id)?.name||'?');};
+  // CF mode: flat match log
+  if(S.session.cfMode){
+    const log=S.session.cfLog||[];
+    if(!log.length){el.innerHTML=`<div class="empty">No matches yet.</div>`;return;}
+    el.innerHTML=[...log].reverse().map(m=>{
+      const t1n=m.t1.map(gn).join(' & '),t2n=m.t2.map(gn).join(' & ');
+      const sc=`${m.s1}–${m.s2}`,tie=m.s1===m.s2,t1w=m.s1>m.s2;
+      const durMs=m.endTime&&m.startTime?m.endTime-m.startTime:0;
+      const durMin=durMs?Math.round(durMs/60000)+'min':'';
+      const extTag=m.extended?`<span style="font-size:.62rem;color:var(--or)"> extended</span>`:'';
+      return `<div class="hm" style="flex-wrap:wrap;gap:4px">
+        <span style="font-size:.65rem;color:var(--cy);min-width:46px">C${m.courtNum}</span>
+        <div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div>
+        <div class="hscore" style="${tie?'color:var(--go)':''}">${sc}</div>
+        <div style="flex:1;text-align:right;font-weight:${!t1w&&!tie?700:400};color:${!t1w&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div>
+        <span style="font-size:.63rem;color:var(--m2)">${durMin}${extTag}</span>
+      </div>`;
+    }).join('');
+    return;
+  }
+  // Round mode
+  if(!S.session.rounds.length){el.innerHTML=`<div class="empty">No rounds yet this session.</div>`;return;}
   el.innerHTML=[...S.session.rounds].reverse().map(r=>{
     const ms=r.matches.map(m=>{
       const t1n=m.t1.map(gn).join(' & '),t2n=m.t2.map(gn).join(' & ');
@@ -1795,29 +2369,51 @@ function renderArchive(){
   S.archive.map(sess=>{
     const d=new Date(sess.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
     const top=[...sess.players].sort((a,b)=>b.sRating-a.sRating).slice(0,3);
-    const rCount=sess.rounds.length;
-    const mCount=sess.rounds.reduce((s,r)=>s+r.matches.filter(m=>m.status==='done').length,0);
+    const isCF=!!sess.cfMode;
+    const rCount=isCF?null:(sess.rounds||[]).length;
+    const mCount=isCF
+      ?(sess.cfLog||[]).length
+      :(sess.rounds||[]).reduce((s,r)=>s+r.matches.filter(m=>m.status==='done').length,0);
+    const metaLabel=isCF
+      ?`${d} · ⚡ CF · ${mCount} matches · ${sess.players.length} players`
+      :`${d} · ${rCount} round${rCount!==1?'s':''} · ${mCount} matches · ${sess.players.length} players`;
 
     const stdRows=[...sess.players].sort((a,b)=>{if(b.wins!==a.wins)return b.wins-a.wins;const pda=a.ptsFor-a.ptsAgainst,pdb=b.ptsFor-b.ptsAgainst;if(pdb!==pda)return pdb-pda;return b.sRating-a.sRating;}).map((sp,i)=>{
       const d2=sp.sRating-sp.startRating,pd=(sp.ptsFor||0)-(sp.ptsAgainst||0);
       return `<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.78rem">${esc(sp.name||'?')}${sp.tag?`<span class="ptag">${esc(sp.tag)}</span>`:''}</td><td style="font-size:.72rem;color:var(--mu)">${sp.wins}W/${sp.losses}L${sp.ties?'/'+sp.ties+'T':''}</td><td style="font-size:.7rem;color:var(--mu)">${pd>=0?'+':''}${pd}</td><td><span class="dl ${d2>0?'du':d2<0?'dd':'dz'}">${d2>=0?'+':''}${d2}</span></td><td><span class="rv">${Math.round(sp.sRating)}</span></td></tr>`;
     }).join('');
 
-    const matchHistory=(sess.rounds||[]).map(r=>{
-      const gn=id=>esc(getArchiveName(id,sess.players));
-      const ms=r.matches.map(m=>{
-        const t1n=m.t1.map(gn).join(' & ');
-        const t2n=m.t2.map(gn).join(' & ');
-        const sc=m.status==='done'?`${m.s1}–${m.s2}`:'—',tie=m.status==='done'&&m.s1===m.s2,t1w=m.status==='done'&&m.s1>m.s2;
-        return `<div class="hm"><div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div><div class="hscore" style="${tie?'color:var(--go)':''}">${sc}</div><div style="flex:1;text-align:right;font-weight:${!t1w&&m.status==='done'&&!tie?700:400};color:${!t1w&&m.status==='done'&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div><button class="sedit" style="width:auto;margin-top:0" onclick="openEditScoreArchive('${m.id}','${sess.id}')">✏️</button></div>`;
+    // Build match history — handle both round and CF modes
+    let matchHistory='';
+    if(isCF){
+      const cfMatches=sess.cfLog||[];
+      matchHistory=cfMatches.length
+        ?`<div class="hr"><div class="hrhd" onclick="this.nextElementSibling.classList.toggle('open')"><span>ALL MATCHES (${cfMatches.length}) ▸</span><span style="font-size:.69rem">⚡ Continuous Flow</span></div><div class="hr-body open">${
+          cfMatches.map(m=>{
+            const gn=id=>esc(getArchiveName(id,sess.players));
+            const t1n=m.t1.map(gn).join(' & '),t2n=m.t2.map(gn).join(' & ');
+            const tie=m.s1===m.s2,t1w=m.s1>m.s2;
+            return `<div class="hm"><div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div><div class="hscore" style="${tie?'color:var(--go)':''}">${m.s1}–${m.s2}</div><div style="flex:1;text-align:right;font-weight:${!t1w&&!tie?700:400};color:${!t1w&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div></div>`;
+          }).join('')
+        }</div></div>`
+        :'<div class="empty">No matches recorded</div>';
+    }else{
+      matchHistory=(sess.rounds||[]).map(r=>{
+        const gn=id=>esc(getArchiveName(id,sess.players));
+        const ms=r.matches.map(m=>{
+          const t1n=m.t1.map(gn).join(' & ');
+          const t2n=m.t2.map(gn).join(' & ');
+          const sc=m.status==='done'?`${m.s1}–${m.s2}`:'—',tie=m.status==='done'&&m.s1===m.s2,t1w=m.status==='done'&&m.s1>m.s2;
+          return `<div class="hm"><div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div><div class="hscore" style="${tie?'color:var(--go)':''}">${sc}</div><div style="flex:1;text-align:right;font-weight:${!t1w&&m.status==='done'&&!tie?700:400};color:${!t1w&&m.status==='done'&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div><button class="sedit" style="width:auto;margin-top:0" onclick="openEditScoreArchive('${m.id}','${sess.id}')">✏️</button></div>`;
+        }).join('');
+        const sos=r.sitOuts?.length?` · 💤 ${r.sitOuts.map(id=>esc(getArchiveName(id,sess.players))).join(', ')}` : '';
+        return `<div class="hr"><div class="hrhd" onclick="this.nextElementSibling.classList.toggle('open')"><span>ROUND ${r.number} ▸</span><span style="font-size:.69rem">${new Date(r.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}${sos}</span></div><div class="hr-body open">${ms}</div></div>`;
       }).join('');
-      const sos=r.sitOuts?.length?` · 💤 ${r.sitOuts.map(id=>esc(getArchiveName(id,sess.players))).join(', ')}` : '';
-      return `<div class="hr"><div class="hrhd" onclick="this.nextElementSibling.classList.toggle('open')"><span>ROUND ${r.number} ▸</span><span style="font-size:.69rem">${new Date(r.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}${sos}</span></div><div class="hr-body open">${ms}</div></div>`;
-    }).join('');
+    }
 
     return `<div class="arch-sess">
       <div class="arch-hdr" onclick="this.nextElementSibling.classList.toggle('open')">
-        <div><div class="arch-title">${esc(sess.name)}</div><div class="arch-meta">${d} · ${rCount} rounds · ${mCount} matches · ${sess.players.length} players</div></div>
+        <div><div class="arch-title">${esc(sess.name)}</div><div class="arch-meta">${metaLabel}</div></div>
         <span style="color:var(--mu);font-size:.8rem">▼</span>
       </div>
       <div class="arch-body">
@@ -1928,7 +2524,10 @@ function renderPlayerView(){
 
   // No live session — show helpful message instead of empty space
   if(!S.session&&PLAYER_MODE){
-    const hasHistory=S.archive.some(sess=>sess.rounds?.some(r=>r.matches.some(m=>m.t1.includes(id)||m.t2.includes(id))));
+    const hasHistory=S.archive.some(sess=>
+      sess.rounds?.some(r=>r.matches.some(m=>m.t1.includes(id)||m.t2.includes(id)))||
+      sess.cfLog?.some(m=>m.t1?.includes(id)||m.t2?.includes(id))
+    );
     if(!hasHistory){
       el.innerHTML=`<div class="card" style="text-align:center;padding:24px">
         <div style="font-size:2rem;margin-bottom:8px">⏳</div>
@@ -1941,7 +2540,60 @@ function renderPlayerView(){
 
   // Current match
   let currentMatchHtml='';
-  if(rnd&&sp&&sp.status!=='left'){
+  // CF mode: show queue/court status
+  if(S.session?.cfMode&&sp&&sp.status!=='left'){
+    const onCourt=Object.values(S.session.cfCourts||{}).find(c=>c.match&&[...c.match.t1,...c.match.t2].includes(id));
+    const qi=(S.session.cfQueue||[]).findIndex(q=>q.id===id);
+    const isPaused=(S.session.cfPaused||[]).some(q=>q.id===id);
+    if(onCourt){
+      const m=onCourt.match;
+      const inT1=m.t1.includes(id);
+      const partner=gp((inT1?m.t1:m.t2).find(x=>x!==id));
+      const opps=(inT1?m.t2:m.t1).map(x=>gp(x)?.name||'?');
+      const elapsed=m.startTime?Math.floor((Date.now()-m.startTime)/1000):0;
+      const em=Math.floor(elapsed/60),es=elapsed%60;
+      currentMatchHtml=`<div class="pv-match-now">
+        <div style="font-size:.68rem;font-weight:700;color:var(--cy);letter-spacing:.08em;margin-bottom:6px">ON COURT ${m.courtNum}</div>
+        <div style="font-size:.82rem;color:var(--mu);margin-bottom:4px">Partner: <strong style="color:var(--tx)">${partner?plainName(partner):'?'}</strong></div>
+        <div style="font-size:.82rem;color:var(--mu);margin-bottom:6px">vs <strong style="color:var(--re)">${opps.join(' & ')}</strong></div>
+        <div style="font-size:.78rem;color:var(--cy)">⏱ ${String(em).padStart(2,'0')}:${String(es).padStart(2,'0')} in play — good luck! 🏓</div>
+      </div>`;
+    }else if(isPaused){
+      currentMatchHtml=`<div class="card" style="text-align:center;color:var(--mu)"><div style="font-size:1.5rem;margin-bottom:6px">⏸</div><div style="font-size:.85rem">You're paused — let the organizer know when ready to re-join</div></div>`;
+    }else if(qi>=0){
+      const qEntry=S.session.cfQueue[qi];
+      const waitMin=qEntry?Math.round((Date.now()-qEntry.since)/60000):0;
+      const totalQ=S.session.cfQueue.length;
+      const upNext=qi<2;
+      const boosted=qEntry&&qEntry.since>Date.now()-5*60000&&qEntry.consec===0;
+      // Transparency: tell the player why they're at this position
+      const debt=CF.waitDebt(id);
+      let reasonMsg='';
+      if(upNext)reasonMsg='';
+      else if(waitMin>=20)reasonMsg='⏰ Long wait — you\'re being prioritised';
+      else if(debt>1.8)reasonMsg='⚖ Wait-debt priority — you\'ve waited more than you\'ve played';
+      else if(waitMin<3)reasonMsg='Just re-entered queue';
+      else{
+        // Check if any recent partners are on cooldown with this player
+        const recentPartners=Object.entries(S.session.cfPairSessionCount||{})
+          .filter(([pk,cnt])=>cnt>=2&&pk.split('|').includes(id))
+          .map(([pk])=>pk.split('|').find(x=>x!==id))
+          .filter(pid=>CF.isPairOnCooldown(id,pid));
+        if(recentPartners.length){
+          const names=recentPartners.map(pid=>gp(pid)?.name||'?').join(', ');
+          reasonMsg=`🔄 Pair cooldown active with ${names} — finding you a fresh partner`;
+        }else{
+          reasonMsg=`System is finding the best match for your level`;
+        }
+      }
+      currentMatchHtml=`<div class="pv-match-now" style="border-color:${upNext?'var(--gr)':'rgba(34,211,238,.3)'}">
+        <div style="font-size:.68rem;font-weight:700;color:${upNext?'var(--gr)':'var(--cy)'};letter-spacing:.08em;margin-bottom:6px">${upNext?'🏓 UP NEXT!':'⏳ IN QUEUE'}</div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:2.2rem;color:${upNext?'var(--gr)':'var(--cy)'}">#${qi+1} <span style="font-size:1rem;color:var(--mu)">of ${totalQ}</span></div>
+        <div style="font-size:.74rem;color:var(--mu);margin-top:4px">Waited ${waitMin} min${boosted?' · ⚡ Short-game boost applied':''}</div>
+        ${reasonMsg?`<div style="font-size:.69rem;color:var(--m2);margin-top:5px;border-top:1px solid var(--bd);padding-top:5px">${reasonMsg}</div>`:''}
+      </div>`;
+    }
+  } else if(rnd&&sp&&sp.status!=='left'){
     const myMatch=rnd.matches.find(m=>m.t1.includes(id)||m.t2.includes(id));
     if(myMatch){
       const inT1=myMatch.t1.includes(id);
@@ -1959,7 +2611,28 @@ function renderPlayerView(){
         ${done?`<div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:${won?'var(--gr)':tie?'var(--go)':'var(--re)'};letter-spacing:2px">${myMatch.s1}–${myMatch.s2} ${won?'WIN 🎉':tie?'TIE 🤝':'LOSS'}</div>`:`<div style="font-size:.78rem;color:var(--cy)">Match in progress — good luck! 🏓</div>`}
       </div>`;
     } else if(rnd.sitOuts.includes(id)){
-      currentMatchHtml=`<div class="card" style="text-align:center;color:var(--or)"><div style="font-size:1.5rem;margin-bottom:6px">💤</div><div style="font-size:.85rem">You're sitting out Round ${rnd.number}</div><div style="font-size:.73rem;color:var(--mu);margin-top:4px">You've sat out ${S.session.sitOutHx[id]||0} time(s) total this session</div></div>`;
+      const sitCount=S.session.sitOutHx[id]||0;
+      const played=sp.matchesPlayed||0;
+      const pd=(sp.ptsFor||0)-(sp.ptsAgainst||0);
+      // Explain WHY sitting out
+      const plStrk=S.session.plStreak?.[id]||0;
+      const soStrk=S.session.soStreak?.[id]||0;
+      const MAX_CONSEC=3;
+      let sitReason='';
+      if(plStrk>=MAX_CONSEC)sitReason=`You played ${plStrk} games in a row — system rotated you out. You play next round.`;
+      else if(S.session.activePlayers.length>S.session.courts*4){
+        const surplus=S.session.activePlayers.length-S.session.courts*4;
+        sitReason=`${surplus} player${surplus>1?'s':''} always sit each round. You'll be prioritised next.`;
+      }else sitReason='Rotation rest — you play next round.';
+      currentMatchHtml=`<div class="card" style="text-align:center">
+        <div style="font-size:1.5rem;margin-bottom:6px">💤</div>
+        <div style="font-size:.85rem;color:var(--or)">Sitting out Round ${rnd.number}</div>
+        <div style="font-size:.73rem;color:var(--mu);margin-top:6px">
+          This session: <strong style="color:var(--tx)">${sp.wins}W / ${sp.losses}L</strong> &nbsp;·&nbsp; ${played} game${played!==1?'s':''} &nbsp;·&nbsp; PD ${pd>=0?'+':''}${pd}<br/>
+          Sat out ${sitCount} time${sitCount!==1?'s':''} total &nbsp;·&nbsp; ELO ${sp.sRating-sp.startRating>=0?'+':''}${Math.round(sp.sRating-sp.startRating)}
+        </div>
+        <div style="font-size:.68rem;color:var(--m2);margin-top:7px;border-top:1px solid var(--bd);padding-top:6px">${sitReason}</div>
+      </div>`;
     }
   }
 
@@ -1969,25 +2642,43 @@ function renderPlayerView(){
 
   // Collect matches for the selected session filter
   const pastMatches=[];
-  function addMatchesFromSess(rounds,sessName,sessDate,sessPlayerList){
-    (rounds||[]).forEach(r=>{
-      r.matches.forEach(m=>{
-        if(!(m.t1.includes(id)||m.t2.includes(id))||m.status!=='done')return;
-        const inT1=m.t1.includes(id);
-        const myTeam=inT1?m.t1:m.t2,oppTeam=inT1?m.t2:m.t1;
-        let partnerName,oppsNames;
-        if(sessPlayerList){
-          const partnerSp=sessPlayerList.find(x=>x.id===myTeam.find(y=>y!==id));
-          partnerName=partnerSp?.name||'?';
-          oppsNames=oppTeam.map(oid=>{const x=sessPlayerList.find(s=>s.id===oid);return x?.name||'?';});
-        }else{
-          const partnerP=gp(myTeam.find(y=>y!==id));partnerName=partnerP?plainName(partnerP):'?';
-          oppsNames=oppTeam.map(oid=>{const x=gp(oid);return x?plainName(x):'?';});
-        }
-        const won=(inT1&&m.s1>m.s2)||(!inT1&&m.s2>m.s1),tie=m.s1===m.s2;
-        pastMatches.push({date:sessDate,sessName,round:r.number,
-          s1:inT1?m.s1:m.s2,s2:inT1?m.s2:m.s1,won,tie,partner:partnerName,opps:oppsNames});
-      });
+  // Unified match collector — handles both round mode (rounds[].matches) and CF (cfLog[])
+  function addMatchesFromSess(sess,sessName,sessDate,sessPlayerList,isCFSess){
+    const matchList=isCFSess
+      ?(sess.cfLog||[]).map(m=>({...m,round:null}))
+      :(sess.rounds||[]).flatMap(r=>r.matches.map(m=>({...m,round:r.number})));
+    matchList.forEach(m=>{
+      if(!(m.t1?.includes(id)||m.t2?.includes(id)))return;
+      if(!isCFSess&&m.status!=='done')return;
+      const inT1=m.t1.includes(id);
+      const myTeam=inT1?m.t1:m.t2,oppTeam=inT1?m.t2:m.t1;
+      let partnerName,oppsNames;
+      const pList=sessPlayerList||(sess.players||null);
+      if(pList){
+        const partnerSp=pList.find(x=>x.id===myTeam.find(y=>y!==id));
+        partnerName=partnerSp?.name||'?';
+        oppsNames=oppTeam.map(oid=>{const x=pList.find(s=>s.id===oid);return x?.name||gp(oid)?.name||'?';});
+      }else{
+        const partnerP=gp(myTeam.find(y=>y!==id));partnerName=partnerP?plainName(partnerP):'?';
+        oppsNames=oppTeam.map(oid=>{const x=gp(oid);return x?plainName(x):'?';});
+      }
+      const s1=inT1?m.s1:m.s2,s2=inT1?m.s2:m.s1;
+      const won=(s1>s2),tie=(s1===s2);
+      // ELO delta for this player
+      const playerIdx=[...m.t1,...m.t2].indexOf(id);
+      const eloDelta=m.eloDeltas?.[playerIdx]??null;
+      // Match quality
+      const t1r=pList?[...m.t1].map(oid=>{const x=pList.find(s=>s.id===oid);return x?.sRating||1000;}):null;
+      const t2r=pList?[...m.t2].map(oid=>{const x=pList.find(s=>s.id===oid);return x?.sRating||1000;}):null;
+      const gap=t1r&&t2r?Math.abs((t1r[0]+t1r[1])/2-(t2r[0]+t2r[1])/2):null;
+      const qual=gap===null?null:gap<30?3:gap<80?2:gap<150?1:0;
+      // Quality win: won against opponents whose avg rating > my rating at time of match
+      const myRating=pList?pList.find(x=>x.id===id)?.sRating||1000:gp(id)?.rating||1000;
+      const oppTeamR=inT1?t2r:t1r;
+      const oppAvgR=oppTeamR?oppTeamR.reduce((a,b)=>a+b,0)/oppTeamR.length:null;
+      const qualityWin=won&&oppAvgR!==null&&oppAvgR>myRating;
+      pastMatches.push({date:sessDate,sessName,round:m.round,courtNum:m.courtNum||null,
+        s1,s2,won,tie,partner:partnerName,opps:oppsNames,eloDelta,qual,isCF:isCFSess,qualityWin:qualityWin||false});
     });
   }
 
@@ -2001,9 +2692,34 @@ function renderPlayerView(){
       const sorted=[...S.session.players].sort((a,b)=>b.sRating-a.sRating);
       const rank=sorted.findIndex(x=>x.id===id)+1;
       const d=sp.sRating-sp.startRating,pd=sp.ptsFor-sp.ptsAgainst;
+      // Session quality wins (wins against stronger opponents)
+      const sessMatches=[...(S.session.rounds||[]).flatMap(r=>r.matches.filter(m=>m.status==='done')),
+        ...(S.session.cfLog||[])].filter(m=>m.t1?.includes(id)||m.t2?.includes(id));
+      let sessQW=0,sessLoseStreak=0,curLStreak=0;
+      sessMatches.forEach(m=>{
+        const inT1=m.t1?.includes(id);
+        const won=inT1?m.s1>m.s2:m.s2>m.s1,tie=m.s1===m.s2;
+        if(won){
+          curLStreak=0;
+          const oppTeam=inT1?m.t2:m.t1;
+          const oppAvg=oppTeam?.map(oid=>{const osp=S.session.players.find(p=>p.id===oid);return osp?.sRating||1000;}).reduce((a,b,_,arr)=>a+b/arr.length,0)||0;
+          if(oppAvg>sp.sRating)sessQW++;
+        }else if(!tie){curLStreak++;sessLoseStreak=Math.max(sessLoseStreak,curLStreak);}
+      });
+      const sessQWPct=sp.wins>0?Math.round((sessQW/sp.wins)*100):null;
+      const qwHtml=sessQWPct!==null&&sp.wins>=2
+        ?`<div style="font-size:.65rem;color:${sessQWPct>=50?'var(--gr)':'var(--mu)'};margin-top:2px">${sessQW}/${sp.wins} wins vs stronger${sessQWPct>=60?' ⭐':''}</div>`:'';
+      // Losing streak empathy message
+      const streakHtml=curLStreak>=3
+        ?`<div style="background:rgba(248,113,113,.07);border:1px solid rgba(248,113,113,.2);border-radius:var(--ra);padding:7px 10px;margin-top:8px;font-size:.72rem">
+            <div style="font-weight:700;color:var(--re);margin-bottom:3px">📉 ${curLStreak}-game losing streak</div>
+            <div style="color:var(--mu);font-size:.68rem">The algorithm has detected your streak and is softening your matchups to help you reset. Hang in there.</div>
+          </div>`:
+        sessLoseStreak>=3&&curLStreak===0
+        ?`<div style="font-size:.66rem;color:var(--gr);margin-top:5px">✓ Bounced back from a ${sessLoseStreak}-game skid earlier</div>`:'';
       sessStandHtml=`<div class="card">
         <div class="ct" style="margin-bottom:8px">📊 This Session</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:${streakHtml?'4px':'0'}"  >
           <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
             <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">RANK</div>
             <div style="font-family:'Bebas Neue',sans-serif;font-size:1.8rem;color:var(--go)">#${rank}</div>
@@ -2012,6 +2728,7 @@ function renderPlayerView(){
           <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
             <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">RECORD</div>
             <div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--tx)">${sp.wins}W / ${sp.losses}L${sp.ties?'/'+sp.ties+'T':''}</div>
+            ${qwHtml}
           </div>
           <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
             <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">RATING Δ</div>
@@ -2019,10 +2736,70 @@ function renderPlayerView(){
             <div style="font-size:.67rem;color:var(--mu)">PD: ${pd>=0?'+':''}${pd}</div>
           </div>
         </div>
+        ${streakHtml}
       </div>`;
     }
+    // Rating sparkline — up to 24 sessions with career trajectory
     const wr=p.gamesPlayed>0?Math.round((p.wins/p.gamesPlayed)*100):'—';
-    careerHtml=`<div class="card">
+    const sessHistory=[...S.archive].filter(sess=>sess.players?.some(sp=>sp.id===id)).slice(0,24).reverse();
+    let sparkHtml='';
+    if(sessHistory.length>=2){
+      const pts=sessHistory.map(sess=>{const sp2=sess.players.find(x=>x.id===id);return sp2?Math.round(sp2.sRating):null;}).filter(x=>x!==null);
+      if(S.session&&sp)pts.push(Math.round(sp.sRating));
+      const firstRating=pts[0];
+      const currentRating=pts[pts.length-1];
+      const totalDelta=currentRating-firstRating;
+      const mn=Math.min(...pts)-30,mx=Math.max(...pts)+30,range=mx-mn||1;
+      const W=240,H=48;
+      const px=(v,i)=>`${Math.round((i/(pts.length-1))*W)},${Math.round(H-((v-mn)/range)*H)}`;
+      const polyline=pts.map((v,i)=>px(v,i)).join(' ');
+      const trend=pts[pts.length-1]-pts[0];
+      // Trajectory label
+      const sessCount=sessHistory.length+(S.session?1:0);
+      const trajLabel=totalDelta>50?'📈 Rising':totalDelta<-50?'📉 Falling':'〰 Stable';
+      const trajColor=totalDelta>50?'var(--gr)':totalDelta<-50?'var(--re)':'var(--mu)';
+      // Show K-boost badge if active
+      const kBoosted=shouldBoostK(id);
+      sparkHtml=`<div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;margin-top:8px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
+          <span style="font-size:.65rem;color:var(--mu)">RATING TREND — ${sessCount} session${sessCount!==1?'s':''}</span>
+          <span style="font-size:.65rem;font-weight:700;color:${trajColor}">${trajLabel} ${totalDelta>=0?'+':''}${totalDelta}</span>
+        </div>
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;overflow:visible">
+          <polyline points="${polyline}" fill="none" stroke="${trend>=0?'var(--gr)':'var(--re)'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          ${pts.map((v,i)=>`<circle cx="${Math.round((i/(pts.length-1))*W)}" cy="${Math.round(H-((v-mn)/range)*H)}" r="${i===0||i===pts.length-1?3.5:2}" fill="${i===pts.length-1?'var(--gr)':i===0?'var(--m2)':'var(--s3)'}" stroke="${i===0||i===pts.length-1?trend>=0?'var(--gr)':'var(--re)':'none'}" stroke-width="1.5"/>`).join('')}
+        </svg>
+        <div style="display:flex;justify-content:space-between;font-size:.63rem;color:var(--m2);margin-top:3px">
+          <span>Started ${firstRating}</span>
+          ${kBoosted?`<span style="color:var(--gr)">📈 K-boost active</span>`:''}
+          <span>Now ${currentRating}</span>
+        </div>
+      </div>`;
+    }
+
+    // Who I haven't played with this session
+    let freshHtml='';
+    if(S.session&&sp){
+      const playedWith=new Set();
+      const rounds=S.session.cfMode?(S.session.cfLog||[]).map(m=>({matches:[m]})):(S.session.rounds||[]);
+      rounds.forEach(r=>{(r.matches||[r]).forEach(m=>{
+        if([...(m.t1||[]),...(m.t2||[])].includes(id)){
+          [...(m.t1||[]),...(m.t2||[])].forEach(x=>{if(x!==id)playedWith.add(x);});
+        }
+      });});
+      const notYet=S.session.activePlayers.filter(x=>x!==id&&!playedWith.has(x)&&gsp(x)?.status!=='left');
+      if(notYet.length){
+        freshHtml=`<div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;margin-top:8px">
+          <div style="font-size:.65rem;color:var(--mu);margin-bottom:5px">HAVEN'T PLAYED WITH YET</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">${notYet.map(x=>`<span style="font-size:.72rem;font-weight:600;padding:2px 8px;background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.2);border-radius:10px;color:var(--cy)">${esc(gp(x)?.name||'?')}</span>`).join('')}</div>
+        </div>`;
+      }
+    }
+
+    // Difficulty-adjusted win rate: wins against opponents above your own rating
+    const allPastForId=[...pastMatches]; // populated by addMatchesFromSess calls below
+    // We compute this after calling addMatchesFromSess; use a deferred approach via IIFE after
+    careerHtml=`<div class="card" id="career-card-${id}">
       <div class="ct" style="margin-bottom:8px">🏆 Career Stats</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
@@ -2038,10 +2815,56 @@ function renderPlayerView(){
           <div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:var(--go)">${wr}${typeof wr==='number'?'%':''}</div>
         </div>
       </div>
+      <div id="career-qwr-${id}" style="margin-top:8px"></div>
+      ${sparkHtml}${freshHtml}
+      ${(()=>{
+        if(!S.session||!sp)return'';
+        const totalWaitMin=sp.timeInQueueMs?Math.round(sp.timeInQueueMs/60000):0;
+        const totalPlayMin=sp.timeOnCourtMs?Math.round(sp.timeOnCourtMs/60000):0;
+        const ratio=totalPlayMin>0?Math.round((totalPlayMin/(totalPlayMin+totalWaitMin))*100):null;
+        // Longest single wait: find max gap between queue entries in cfLog
+        let longestWait=0;
+        if(S.session.cfMode){
+          const qEntry=S.session.cfQueue?.find(q=>q.id===id);
+          if(qEntry)longestWait=Math.round((Date.now()-qEntry.since)/60000);
+        }
+        if(!totalWaitMin&&!totalPlayMin)return'';
+        return`<div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;margin-top:8px">
+          <div style="font-size:.65rem;color:var(--mu);margin-bottom:5px">SESSION TIME BREAKDOWN</div>
+          <div style="display:flex;gap:8px">
+            <div style="flex:1;text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--gr)">${totalPlayMin}m</div><div style="font-size:.63rem;color:var(--mu)">on court</div></div>
+            <div style="flex:1;text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--mu)">${totalWaitMin}m</div><div style="font-size:.63rem;color:var(--mu)">waiting</div></div>
+            ${ratio!==null?`<div style="flex:1;text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:${ratio>=60?'var(--gr)':ratio>=40?'var(--go)':'var(--or)'}">${ratio}%</div><div style="font-size:.63rem;color:var(--mu)">play ratio</div></div>`:''}
+            ${longestWait>0?`<div style="flex:1;text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:${longestWait>=20?'var(--or)':'var(--mu)'}">${longestWait}m</div><div style="font-size:.63rem;color:var(--mu)">current wait</div></div>`:''}
+          </div>
+        </div>`;
+      })()}
     </div>`;
-    // Gather all sessions (overall view)
-    if(S.session)addMatchesFromSess(S.session.rounds,S.session.name+' (today)',S.session.date,null);
-    S.archive.forEach(sess=>addMatchesFromSess(sess.rounds,sess.name,sess.date,sess.players));
+    // Gather all sessions (overall view) — pass full sess object + isCF flag
+    if(S.session)addMatchesFromSess(S.session,S.session.name+' (today)',S.session.date,null,!!S.session.cfMode);
+    S.archive.forEach(sess=>addMatchesFromSess(sess,sess.name,sess.date,sess.players,!!sess.cfMode));
+    // Inject difficulty-adjusted win rate now that pastMatches is populated
+    const qwEl=document.getElementById(`career-qwr-${id}`);
+    if(qwEl){
+      const totalWins=pastMatches.filter(m=>m.won).length;
+      const qualityWins=pastMatches.filter(m=>m.qualityWin).length;
+      const totalAbove=pastMatches.filter(m=>m.qualityWin!==null&&m.won!==undefined).length; // only matches with opponent rating data
+      const qwr=totalWins>0?Math.round((qualityWins/Math.max(1,totalWins))*100):null;
+      if(qwr!==null&&totalWins>=5){
+        const qwrColor=qwr>=60?'var(--gr)':qwr>=40?'var(--go)':'var(--or)';
+        const qwrLabel=qwr>=60?'Elite difficulty wins':qwr>=40?'Good difficulty wins':qwr>=25?'Building upsets':'Mostly easier games';
+        qwEl.innerHTML=`<div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
+            <span style="font-size:.65rem;color:var(--mu);font-weight:700;text-transform:uppercase;letter-spacing:.04em">Quality Win Rate</span>
+            <span style="font-size:.68rem;color:${qwrColor};font-weight:700">${qwr}%</span>
+          </div>
+          <div style="height:5px;background:var(--s3);border-radius:3px;margin-bottom:5px">
+            <div style="width:${qwr}%;height:100%;background:linear-gradient(90deg,${qwrColor},var(--cy));border-radius:3px;transition:width .4s"></div>
+          </div>
+          <div style="font-size:.67rem;color:var(--mu)">${qualityWins} of ${totalWins} wins were against higher-rated opponents &nbsp;·&nbsp; <span style="color:${qwrColor}">${qwrLabel}</span></div>
+        </div>`;
+      }
+    }
   } else {
     // Specific session view (from dropdown filter)
     let targetSess=null,targetPlayers=null,sessIsLive=false;
@@ -2074,30 +2897,106 @@ function renderPlayerView(){
           </div>
         </div>`;
       }
-      addMatchesFromSess(targetSess.rounds,targetSess.name,targetSess.date,targetPlayers);
+      addMatchesFromSess(targetSess,targetSess.name,targetSess.date,targetPlayers,!!targetSess.cfMode);
     }
   }
 
-  // Build clickable per-session cards (grouping matches by session name+date)
+  // Group matches by session
   const sessBuckets=[];
   pastMatches.forEach(m=>{
     let b=sessBuckets.find(x=>x.name===m.sessName&&x.date===m.date);
-    if(!b){b={name:m.sessName,date:m.date,matches:[]};sessBuckets.push(b);}
+    if(!b){b={name:m.sessName,date:m.date,matches:[],isCF:!!m.isCF};sessBuckets.push(b);}
     b.matches.push(m);
   });
 
+  /* ── Hybrid session bucket renderer ──────────────────────────────────
+     CF sessions → Option B: summary stats + scannable timeline (collapsed)
+     Round sessions → Option A: match cards (existing format)
+  ─────────────────────────────────────────────────────────────────── */
   function renderSessBucket(b,expanded){
-    const agg=b.matches.reduce((acc,m)=>{if(m.won)acc.w++;else if(m.tie)acc.t++;else acc.l++;return acc;},{w:0,l:0,t:0});
+    const agg=b.matches.reduce((acc,m)=>{
+      if(m.won)acc.w++;else if(m.tie)acc.t++;else acc.l++;
+      if(m.eloDelta!==null)acc.elo+=m.eloDelta||0;
+      return acc;
+    },{w:0,l:0,t:0,elo:0});
     const rec=`${agg.w}W/${agg.l}L${agg.t?'/'+agg.t+'T':''}`;
     const d=new Date(b.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+    const bid='pvb-'+btoa(b.name+b.date).replace(/[^a-zA-Z0-9]/g,'').slice(0,12);
+    const eloStr=agg.elo>=0?`+${agg.elo}`:String(agg.elo);
+
+    if(b.isCF){
+      // ── Option B hybrid for CF sessions ──────────────────────────
+      const wr=b.matches.length?Math.round((agg.w/b.matches.length)*100):0;
+      // Avg match quality
+      const quals=b.matches.map(m=>m.qual).filter(q=>q!==null);
+      const avgQual=quals.length?quals.reduce((a,q)=>a+q,0)/quals.length:null;
+      const qualLabel=avgQual===null?'':avgQual>=2.5?'⭐⭐⭐':avgQual>=1.5?'⭐⭐':avgQual>=0.5?'⭐':'○';
+      // Opponent frequency
+      const oppCount={};
+      b.matches.forEach(m=>m.opps.forEach(o=>{oppCount[o]=(oppCount[o]||0)+1;}));
+      const topOpps=Object.entries(oppCount).sort(([,a],[,b])=>b-a).slice(0,5);
+
+      const timelineRows=b.matches.map(m=>{
+        const col=m.won?'var(--gr)':m.tie?'var(--go)':'var(--re)';
+        const dot=m.won?'var(--gr)':m.tie?'var(--go)':'var(--re)';
+        const qStr=m.qual===3?'⭐⭐⭐':m.qual===2?'⭐⭐':m.qual===1?'⭐':m.qual===0?'○':'';
+        const eDelta=m.eloDelta!==null?`<span style="font-size:.68rem;font-weight:700;color:${m.eloDelta>=0?'var(--gr)':'var(--re)'}">${m.eloDelta>=0?'+':''}${m.eloDelta}</span>`:'';
+        return `<div style="display:flex;align-items:center;gap:7px;padding:4px 0;border-bottom:1px solid var(--bd)">
+          <span style="width:8px;height:8px;border-radius:50%;background:${dot};flex-shrink:0;border:1.5px solid var(--bg)"></span>
+          <span style="font-family:'Bebas Neue',sans-serif;font-size:.92rem;color:${col};min-width:36px">${m.s1}–${m.s2}</span>
+          <span style="flex:1;min-width:0">
+            <span style="font-size:.73rem;font-weight:600;color:var(--tx)">w/ ${esc(m.partner)}</span>
+            <span style="font-size:.66rem;color:var(--mu)"> vs ${m.opps.map(esc).join(' & ')}</span>
+          </span>
+          <span style="display:flex;align-items:center;gap:4px;flex-shrink:0">${eDelta}<span style="font-size:.62rem;color:var(--m2)">${qStr}</span></span>
+        </div>`;
+      }).join('');
+
+      return `<div class="hr" style="margin-bottom:5px">
+        <div class="hrhd" onclick="const d=document.getElementById('${bid}');d.classList.toggle('open');this.querySelector('.pv-arr').textContent=d.classList.contains('open')?'▾':'▸'">
+          <div>
+            <div style="font-weight:700;font-size:.81rem;color:var(--tx)">${esc(b.name)} <span style="font-size:.62rem;color:var(--cy);background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.2);border-radius:4px;padding:1px 5px;margin-left:3px">⚡CF</span></div>
+            <div style="font-size:.67rem;color:var(--mu);margin-top:1px">${d} &nbsp;·&nbsp; ${b.matches.length}G &nbsp;·&nbsp; <span style="color:${agg.w>agg.l?'var(--gr)':agg.l>agg.w?'var(--re)':'var(--mu)'}">${rec}</span> &nbsp;·&nbsp; <span style="color:${agg.elo>=0?'var(--gr)':'var(--re)'}">${eloStr} ELO</span>${qualLabel?' &nbsp;·&nbsp; '+qualLabel:''}</div>
+          </div>
+          <span class="pv-arr" style="color:var(--mu);font-size:.75rem">${expanded?'▾':'▸'}</span>
+        </div>
+        <div class="hr-body${expanded?' open':''}" id="${bid}">
+          <!-- Summary stats -->
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:10px 12px 8px">
+            <div style="background:var(--s2);border:1px solid var(--bd);border-radius:6px;padding:7px;text-align:center">
+              <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:${agg.w>=agg.l?'var(--gr)':'var(--re)'}">${agg.w}W/${agg.l}L</div>
+              <div style="font-size:.6rem;color:var(--mu)">Record</div>
+            </div>
+            <div style="background:var(--s2);border:1px solid var(--bd);border-radius:6px;padding:7px;text-align:center">
+              <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:${agg.elo>=0?'var(--gr)':'var(--re)'}">${eloStr}</div>
+              <div style="font-size:.6rem;color:var(--mu)">ELO Δ</div>
+            </div>
+            <div style="background:var(--s2);border:1px solid var(--bd);border-radius:6px;padding:7px;text-align:center">
+              <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--cy)">${b.matches.length}</div>
+              <div style="font-size:.6rem;color:var(--mu)">Games</div>
+            </div>
+          </div>
+          <!-- Timeline -->
+          <div style="padding:0 12px 6px;font-size:.64rem;color:var(--mu);font-weight:700;letter-spacing:.04em;text-transform:uppercase">All matches${avgQual!==null?' &nbsp;·&nbsp; Avg quality: '+qualLabel:''}</div>
+          <div style="padding:0 12px 10px">${timelineRows}</div>
+          <!-- Opponent frequency -->
+          ${topOpps.length?`<div style="padding:0 12px 10px">
+            <div style="font-size:.63rem;color:var(--mu);margin-bottom:5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em">Most Played Against</div>
+            <div style="display:flex;flex-wrap:wrap;gap:4px">${topOpps.map(([n,c])=>`<span style="font-size:.69rem;padding:2px 8px;background:var(--s2);border:1px solid var(--bd);border-radius:10px">${esc(n)} <span style="color:var(--mu)">${c}×</span></span>`).join('')}</div>
+          </div>`:''}
+        </div>
+      </div>`;
+    }
+
+    // ── Option A for round-mode sessions (unchanged) ──────────────
     const matchRows=b.matches.map(m=>{
       const col=m.won?'var(--gr)':m.tie?'var(--go)':'var(--re)';
+      const eDelta=m.eloDelta!==null?`<span style="font-size:.65rem;font-weight:700;color:${m.eloDelta>=0?'var(--gr)':'var(--re)'}"> ${m.eloDelta>=0?'+':''}${m.eloDelta}</span>`:'';
       return `<div class="hm" style="gap:8px;padding:8px 12px">
         <div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;color:${col};min-width:42px">${m.s1}–${m.s2}</div>
-        <div class="pnc"><div class="pn" style="font-size:.79rem">${m.won?'✓ WIN':m.tie?'🤝 TIE':'✗ LOSS'} &nbsp;·&nbsp; R${m.round}</div><div class="pst">w/ ${esc(m.partner)} vs ${m.opps.map(esc).join(' & ')}</div></div>
+        <div class="pnc"><div class="pn" style="font-size:.79rem">${m.won?'✓ WIN':m.tie?'🤝 TIE':'✗ LOSS'}${eDelta} &nbsp;·&nbsp; R${m.round}</div><div class="pst">w/ ${esc(m.partner)} vs ${m.opps.map(esc).join(' & ')}</div></div>
       </div>`;
     }).join('');
-    const bid='pvb-'+btoa(b.name+b.date).replace(/[^a-zA-Z0-9]/g,'').slice(0,12);
     return `<div class="hr" style="margin-bottom:5px">
       <div class="hrhd" onclick="const d=document.getElementById('${bid}');d.classList.toggle('open');this.querySelector('.pv-arr').textContent=d.classList.contains('open')?'▾':'▸'">
         <div>
@@ -2353,11 +3252,12 @@ function doNextRound(){
   if(!S.session)return;
   const cur=curRnd();
   if(cur){
-    const pending=cur.matches.filter(m=>m.status!=='done');
+    // skipped matches count as resolved (partner/opp history recorded, no ELO)
+    const pending=cur.matches.filter(m=>m.status!=='done'&&m.status!=='skipped');
     if(pending.length>0){
       const courts=pending.map(m=>`Court ${m.court}`).join(', ');
       showCfm(
-        `<strong>${pending.length} match${pending.length>1?'es':''} still unscored</strong> (${courts}).<br/><span style="font-size:.75rem;color:var(--mu)">Those players won't get ELO credit for this round. Advance anyway?</span>`,
+        `<strong>${pending.length} match${pending.length>1?'es':''} still unscored</strong> (${courts}).<br/><span style="font-size:.75rem;color:var(--mu)">Those players won't get ELO credit for this round. Advance anyway?<br/>Tip: use "⏭ Skip court" on each court to advance individually.</span>`,
         'Advance Anyway','bc',()=>nextRound()
       );
       return;
@@ -2365,8 +3265,6 @@ function doNextRound(){
   }
   nextRound();
 }
-
-/* ── EXPORT (V12: Blob for non-ASCII + PDF-style txt) */
 function openExportModal(){
   openModal(`<div class="modal-title">📤 Export Data</div>
     <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
@@ -2582,29 +3480,30 @@ function seedExampleData(){
 function doEndSession(){
   if(!S.session){toast('No active session','err');return;}
   showCfm(`End <strong>${esc(S.session.name)}</strong>?<br/><span style="font-size:.74rem;color:var(--mu)">Ratings saved to database.</span>`,'🏁 End Session','bp',()=>{
-    // Archive the completed session first
-    const arch={id:S.session.id,name:S.session.name,date:S.session.date,
+    const isCF=S.session.cfMode;
+    const arch={id:S.session.id,name:S.session.name,date:S.session.date,cfMode:isCF||false,
       players:S.session.players.map(sp=>{const p=gp(sp.id)||{};return{id:sp.id,name:sp.name||p.name||'?',tag:sp.tag||p.tag||'',sRating:sp.sRating,startRating:sp.startRating,wins:sp.wins,losses:sp.losses,ties:sp.ties,matchesPlayed:sp.matchesPlayed,ptsFor:sp.ptsFor,ptsAgainst:sp.ptsAgainst};}),
-      rounds:JSON.parse(JSON.stringify(S.session.rounds))};
+      rounds:JSON.parse(JSON.stringify(S.session.rounds||[])),
+      cfLog:JSON.parse(JSON.stringify(S.session.cfLog||[]))};
     S.archive.unshift(arch);if(S.archive.length>30)S.archive.pop();
     const top=[...arch.players].sort((a,b)=>b.sRating-a.sRating).slice(0,3);
-    const totalM=arch.rounds.reduce((s,r)=>s+r.matches.filter(m=>m.status==='done').length,0);
+    const totalM=isCF?(arch.cfLog||[]).length:arch.rounds.reduce((s,r)=>s+r.matches.filter(m=>m.status==='done').length,0);
     const n=S.session.name;S.checkedIn.clear();S.session=null;
-    // Recalculate all-time ratings from full archive history (consistent with deleteArchiveSess)
+    if(_cfTick){clearInterval(_cfTick);_cfTick=null;}
     recalcAllTimeRatings();
     STORE.save();stopTimer();stopElapsed();
-    // Reset progress bar
     const pb=document.getElementById('prog-bar');if(pb)pb.style.width='0%';
     updateHeader();renderDB();renderRoster();renderAllTime();renderHistory();renderArchive();updatePvSessFilter();
+    const modeLabel=isCF?`${totalM} matches · Continuous Flow`:`${arch.rounds.length} rounds · ${totalM} matches`;
     openModal(`<div class="modal-title" style="text-align:center">🏆 Session Complete!</div>
-      <div style="text-align:center;margin-bottom:12px;color:var(--mu);font-size:.76rem">${esc(n)}<br/>${arch.rounds.length} rounds · ${totalM} matches · ${arch.players.length} players</div>
+      <div style="text-align:center;margin-bottom:12px;color:var(--mu);font-size:.76rem">${esc(n)}<br/>${modeLabel} · ${arch.players.length} players</div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:.86rem;color:var(--mu);letter-spacing:.5px;margin-bottom:6px">🥇 TOP PERFORMERS</div>
       ${top.map((sp,i)=>`<div class="prow" style="cursor:default;margin-bottom:4px">
         <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:${i===0?'var(--go)':i===1?'#c0ccd8':'#d4956a'};min-width:22px">${i+1}</div>
         <div class="pnc"><div class="pn">${esc(sp.name)}${sp.tag?`<span class="ptag">${esc(sp.tag)}</span>`:''}</div></div>
         <div style="font-size:.75rem;color:var(--mu)">${sp.wins}W/${sp.losses}L</div>
         <div class="pr">${Math.round(sp.sRating)}</div>
-        <span class="dl ${(sp.sRating-sp.startRating)>0?'du':(sp.sRating-sp.startRating)<0?'dd':'dz'}">${sp.sRating-sp.startRating>=0?'+':''}${sp.sRating-sp.startRating}</span>
+        <span class="dl ${(sp.sRating-sp.startRating)>0?'du':(sp.sRating-sp.startRating)<0?'dd':'dz'}">${sp.sRating-sp.startRating>=0?'+':''}${Math.round(sp.sRating-sp.startRating)}</span>
       </div>`).join('')}
       <button class="btn bp" style="width:100%;margin-top:14px" onclick="closeModal();switchTab('standings')">View Full Standings →</button>`);
     switchTab('standings');
@@ -2816,25 +3715,1085 @@ function isPlayerModeUrl(){
   return window.location.hash==='#player'||params.get('view')==='player'||params.get('mode')==='player';
 }
 
+/* ════════════════════════════════════════════════════════════
+   CONTINUOUS FLOW ENGINE
+   ════════════════════════════════════════════════════════════ */
+
+/* ── Mode selector helpers ── */
+function selectMode(mode){
+  S.sessionMode=mode;
+  document.getElementById('mode-round')?.classList.toggle('sel',mode==='round');
+  document.getElementById('mode-flow')?.classList.toggle('sel',mode==='flow');
+  const ro=document.getElementById('round-mode-opts'),fo=document.getElementById('flow-mode-opts');
+  const rr=document.getElementById('round-rotation-rules');
+  if(ro)ro.style.display=mode==='round'?'block':'none';
+  if(fo)fo.style.display=mode==='flow'?'block':'none';
+  if(rr)rr.style.display=mode==='round'?'block':'none';
+  updateRotationPreview();
+}
+
+function toggleNRInput(checked){
+  const wrap=document.getElementById('np-rating-wrap');if(!wrap)return;
+  const lvlWrap=document.getElementById('np-nr-level');
+  if(checked){
+    wrap.innerHTML=`<label>RATING</label><div class="nr-badge" style="display:block;text-align:center;padding:8px 4px;font-size:.8rem">NR</div>`;
+    if(lvlWrap)lvlWrap.style.display='block';
+    updateNRLevelLabels();
+  }else{
+    wrap.innerHTML=`<label>RATING</label><input id="np-rating" class="inp" type="number" value="1000" min="400" max="2000"/>`;
+    if(lvlWrap)lvlWrap.style.display='none';
+  }
+}
+
+// Compute session-position percentile ratings from tonight's checked-in rated players
+function calcNRLevelRatings(){
+  const ratedIds=[...S.checkedIn].filter(id=>{const p=gp(id);return p&&!p.isNR&&(p.gamesPlayed||0)>0;});
+  if(ratedIds.length<4){
+    // Not enough data — fall back to global constants
+    return{bottom:700,middle:null,top:1300};
+  }
+  const ratings=ratedIds.map(id=>gp(id).rating).sort((a,b)=>a-b);
+  const p25=ratings[Math.floor(ratings.length*0.25)];
+  const p50=ratings[Math.floor(ratings.length*0.50)];
+  const p75=ratings[Math.floor(ratings.length*0.75)];
+  return{bottom:Math.round(p25),middle:Math.round(p50),top:Math.round(p75)};
+}
+
+function updateNRLevelLabels(){
+  const lvls=calcNRLevelRatings();
+  const begSub=document.getElementById('nrl-beg-sub');
+  const midSub=document.getElementById('nrl-mid-sub');
+  const advSub=document.getElementById('nrl-adv-sub');
+  if(begSub)begSub.textContent=`~${lvls.bottom} · Default`;
+  if(midSub)midSub.textContent=`~${lvls.middle||'avg'}`;
+  if(advSub)advSub.textContent=`~${lvls.top}`;
+}
+
+let _nrLevel='beginner'; // default — must actively choose Intermediate or Advanced
+function setNRLevel(level){
+  _nrLevel=level;
+  ['beg','mid','adv'].forEach(k=>document.getElementById(`nrl-${k}`)?.classList.remove('sel'));
+  const map={beginner:'beg',intermediate:'mid',advanced:'adv'};
+  document.getElementById(`nrl-${map[level]}`)?.classList.add('sel');
+}
+
+/* ── NR promotion ── */
+function checkNRPromotion(id){
+  const p=gp(id),sp=gsp(id);if(!p||!sp||!p.isNR)return;
+  const games=sp.matchesPlayed||0;
+  if(games>=5){
+    p.isNR=false;p.isSeeding=false;
+    p.rating=Math.max(400,Math.round(sp.sRating));
+    sp.isNR=false;sp.isSeeding=false;
+    STORE.save();
+    toast(`🎯 ${esc(p.name)} rated at <strong>${p.rating}</strong>`,'ok',4500);
+  }else if(games>=3){p.isSeeding=true;sp.isSeeding=true;}
+}
+
+let _cfTick=null;
+
+const CF={
+  pairKey(a,b){return[a,b].sort().join('|');},
+  matchupKey(t1,t2){
+    // Encode team composition, not just player set.
+    // [A+B vs C+D] == [C+D vs A+B]  ← same matchup, flipped team label  ✓
+    // [A+B vs C+D] != [A+C vs B+D]  ← different partnerships             ✓
+    // Old: [...t1,...t2].sort() lost team info — all three arrangements of 4 players
+    //      produced the same key, causing false "repeat matchup" penalties.
+    const s1=[...t1].sort().join(',');
+    const s2=[...t2].sort().join(',');
+    return[s1,s2].sort().join('|');
+  },
+
+  // Hard pair cooldown:
+  // After 2 pairings together this session → 5-game cooldown.
+  // Cooldown expires when BOTH players have each played 3+ more games since last pairing.
+  // Hard filter — not a penalty. They are simply excluded from consideration.
+  // Exception: relaxed when active queue < 6 to prevent deadlock.
+  isPairOnCooldown(a,b){
+    const sess=S.session;if(!sess)return false;
+    const pk=this.pairKey(a,b);
+    const count=(sess.cfPairSessionCount||{})[pk]||0;
+    if(count<2)return false;
+    const queue=(sess.cfQueue||[]).filter(q=>q.id!==a&&q.id!==b);
+    if(queue.length<4)return false; // thin queue — relax to prevent deadlock
+    const lastAt=(sess.cfPairLastAt||{})[pk]||{};
+    const spA=gsp(a),spB=gsp(b);
+    const gamesA=(spA?.matchesPlayed||0),gamesB=(spB?.matchesPlayed||0);
+    const lastA=lastAt[a]||0,lastB=lastAt[b]||0;
+    const gamesSinceA=gamesA-lastA,gamesSinceB=gamesB-lastB;
+    // Cooldown active until BOTH have played 3+ more games since last pairing
+    return gamesSinceA<3||gamesSinceB<3;
+  },
+
+  // Round mode cooldown check (uses partnerHx count + matchesPlayed)
+  isRoundPairOnCooldown(a,b){
+    const sess=S.session;if(!sess)return false;
+    const pCount=(sess.partnerHx[a]?.[b]||0);
+    if(pCount<2)return false;
+    // For round mode store lastAt in same cfPairLastAt structure
+    const pk=this.pairKey(a,b);
+    const lastAt=(sess.cfPairLastAt||{})[pk]||{};
+    const spA=gsp(a),spB=gsp(b);
+    const gamesA=(spA?.matchesPlayed||0),gamesB=(spB?.matchesPlayed||0);
+    const lastA=lastAt[a]||0,lastB=lastAt[b]||0;
+    const gamesSinceA=gamesA-lastA,gamesSinceB=gamesB-lastB;
+    // Relaxed threshold for round mode: 2 rounds separation each (rounds ≈ longer)
+    const activePlayers=(sess.activePlayers||[]).filter(id=>{const sp=gsp(id);return sp&&sp.status!=='left';});
+    if(activePlayers.length<8)return false; // thin pool — relax
+    return gamesSinceA<2||gamesSinceB<2;
+  },
+
+  /* Effective rating — handles NR via session average */
+  cfRating(id){
+    const p=gp(id),sp=gsp(id);if(!p||!sp)return 1000;
+    if(p.isNR||sp.isNR){
+      if((sp.matchesPlayed||0)>=2)return Math.max(400,sp.sRating+((sp.wins||0)-(sp.losses||0))*25);
+      const rated=S.session.activePlayers
+        .map(id2=>gsp(id2)).filter(s=>s&&!s.isNR&&s.status!=='left').map(s=>s.sRating||1000);
+      return rated.length?Math.round(rated.reduce((a,b)=>a+b,0)/rated.length):1000;
+    }
+    const base=effectiveRating(id,S.session.cfMatchCount||1);
+    // Ringer regression: high-rating/low-games players regress toward session average
+    // so stale or inflated ratings don't dominate matchmaking
+    if(isRinger(p)){
+      const sessAvg=S.session.activePlayers
+        .map(id2=>gsp(id2)).filter(s=>s&&!s.isNR&&s.status!=='left').map(s=>s.sRating||1000)
+        .reduce((a,b,_,arr)=>a+b/arr.length,0)||1000;
+      return Math.round(base*0.75+sessAvg*0.25);
+    }
+    return base;
+  },
+
+  /* Wait-debt score: how much longer has a player been waiting vs playing */
+  waitDebt(id){
+    const sp=gsp(id);if(!sp)return 0;
+    const waited=sp.timeInQueueMs||0,played=sp.timeOnCourtMs||0;
+    if(played===0)return waited>0?1:0;
+    return waited/Math.max(1,played);
+  },
+
+  /* Queue priority — higher = picked sooner */
+  queuePriority(qEntry,courtAvg){
+    const waitMin=(Date.now()-qEntry.since)/60000;
+    const er=this.cfRating(qEntry.id);
+    const skillFit=Math.max(0,30-Math.abs(er-courtAvg)*0.12);
+    const debt=this.waitDebt(qEntry.id);
+    const debtBonus=debt>1.5?20*(debt-1):0;
+    const urgency=waitMin>20?(waitMin-20)*3:waitMin>15?(waitMin-15)*1.5:0;
+    const recentPenalty=waitMin<1?10:0;
+    return waitMin*2+skillFit+debtBonus+urgency-recentPenalty;
+  },
+
+  /* Init queue at session start */
+  initQueue(){
+    if(!S.session)return;
+    S.session.cfQueue=S.session.activePlayers
+      .filter(id=>{const sp=gsp(id);return sp&&sp.status!=='left';})
+      .map(id=>({id,since:Date.now(),consec:0}));
+    if(!S.session.cfCourts)S.session.cfCourts={};
+    if(!S.session.cfPaused)S.session.cfPaused=[];
+    S.session.cfSuggestions={};
+    const readyCourts=[];
+    const now=Date.now();
+    for(let c=1;c<=S.session.courts;c++){
+      // Preserve existing idle tracking if session is restored — only init fresh courts
+      if(!S.session.cfCourts[c]||S.session.cfCourts[c].status==='ready'){
+        S.session.cfCourts[c]={status:'ready',match:null,
+          idleStart:now,
+          totalIdleMs:S.session.cfCourts[c]?.totalIdleMs||0,
+          matchCount:S.session.cfCourts[c]?.matchCount||0};
+      }
+      readyCourts.push(c);
+    }
+    this.batchGenerateSuggestions(readyCourts,null);
+  },
+
+  enqueue(ids){
+    if(!S.session)return;
+    ids.forEach(id=>{
+      if(!S.session.cfQueue.find(q=>q.id===id)&&!(S.session.cfPaused||[]).find(q=>q.id===id))
+        S.session.cfQueue.push({id,since:Date.now(),consec:0});
+    });
+  },
+
+  dequeue(ids){if(S.session)S.session.cfQueue=S.session.cfQueue.filter(q=>!ids.includes(q.id));},
+
+  /* Score a candidate group of 4 — lower is better */
+  _scoreGroup(group,mustSplitPair){
+    const{t1,t2}=MM.bestPair(group);
+    const avg=arr=>arr.reduce((s,p)=>s+p.sr,0)/arr.length;
+    const crossImb=Math.abs(avg(t1)-avg(t2));
+    const rawT1gap=Math.abs(t1[0].sr-t1[1].sr);
+    const rawT2gap=Math.abs(t2[0].sr-t2[1].sr);
+    const t1gap=rawT1gap/40;
+    const t2gap=rawT2gap/40;
+    const partRpt=MM.pc(t1[0].id,t1[1].id)+MM.pc(t2[0].id,t2[1].id);
+    const oppRpt=t1.reduce((s,a)=>t2.reduce((ss,b)=>ss+MM.oc(a.id,b.id),s),0);
+    const mKey=this.matchupKey(t1.map(p=>p.id),t2.map(p=>p.id));
+    const matchRpt=(S.session.cfMatchupHx||{})[mKey]?30:0; // scaled down with new weights
+    const t1k=this.pairKey(t1[0].id,t1[1].id),t2k=this.pairKey(t2[0].id,t2[1].id);
+    const splitPen=(mustSplitPair&&(t1k===mustSplitPair||t2k===mustSplitPair))?15:0;
+    const consec=k=>(S.session.cfPairConsec||{})[k]||0;
+    const consecPen=(consec(t1k)>=2?30:consec(t1k)>=1?8:0)+(consec(t2k)>=2?30:consec(t2k)>=1?8:0);
+    const avgWait=group.reduce((s,p)=>s+p.waitMin,0)/4;
+    const waitBonus=-avgWait*0.6;
+    const debtBonus=-group.reduce((s,p)=>s+this.waitDebt(p.id),0)*4;
+    const total=crossImb+(t1gap+t2gap)+partRpt*3+oppRpt*5+matchRpt+splitPen+consecPen+waitBonus+debtBonus;
+    const meta={splitOverride:splitPen>0&&splitPen<200,repeatMatchup:matchRpt>0,
+      rawT1gap,rawT2gap};
+    // NR protection: for first 3 games, penalise pairings far from their estimated level
+    let nrProtPen=0;
+    const NR_PROTECT_GAMES=3;
+    const NR_GAP_LIMIT=200;
+    const nrHx=S.session.nrPairingHx||{};
+    group.forEach(p=>{
+      const sp=gsp(p.id),dbP=gp(p.id);
+      if(!sp||!dbP||!dbP.isNR||(sp.matchesPlayed||0)>=NR_PROTECT_GAMES)return;
+      const estR=dbP.nrLevelHint!=null?dbP.nrLevelHint:sp.sRating;
+      const groupMates=group.filter(g=>g.id!==p.id);
+      groupMates.forEach(gm=>{
+        const gap=Math.abs(gm.sr-estR);
+        if(gap>NR_GAP_LIMIT)nrProtPen+=Math.pow((gap-NR_GAP_LIMIT)/100,2)*50;
+        // Calibration tax distribution: penalise pairing with player who recently absorbed an NR game
+        const matchesSinceNR=(gsp(gm.id)?.matchesPlayed||0)-(nrHx[gm.id]||0);
+        if(matchesSinceNR>=0&&matchesSinceNR<3)nrProtPen+=20; // give this player a break from NR games
+      });
+    });
+    // Losing streak awareness: penalise pairing two session-losing players together.
+    // Two struggling players compound frustration — better to split them across teams
+    // so each has a stronger partner and fairer opponents.
+    // Threshold: -2 net session W/L (losing streak), penalty mild (won't override skill balance).
+    const sessNet=id=>{const sp=gsp(id);return sp?(sp.wins||0)-(sp.losses||0):0;};
+    const t1nets=[sessNet(t1[0].id),sessNet(t1[1].id)];
+    const t2nets=[sessNet(t2[0].id),sessNet(t2[1].id)];
+    const losingPairPen=
+      (t1nets[0]<=-2&&t1nets[1]<=-2?Math.min(20,Math.abs(t1nets[0]+t1nets[1])*2):0)+
+      (t2nets[0]<=-2&&t2nets[1]<=-2?Math.min(20,Math.abs(t2nets[0]+t2nets[1])*2):0);
+    return{score:total+nrProtPen+losingPairPen,meta,t1,t2};
+  },
+
+  /* Generate a suggestion for a court */
+  /* ── Joint batch optimizer ────────────────────────────────────────────
+     When N courts are ready simultaneously, solve all N at once from
+     the shared queue. Greedy per-court allocation always gives Court 1
+     the best players; joint allocation maximises total quality across
+     all courts together.
+
+     Strategy:
+       1. Collect all ready court numbers
+       2. Enumerate candidate allocations across those courts (up to a
+          time-safe search budget)
+       3. Pick the allocation with lowest total score across all courts
+       4. Store each court's suggestion from the winning allocation
+
+     For 1 ready court this is identical to the old single-court search.
+     For 2-3 courts it finds globally optimal splits that the greedy
+     approach misses.
+  ─────────────────────────────────────────────────────────────────── */
+  batchGenerateSuggestions(readyCourts, finishedMatchByCourtNum){
+    if(!S.session||!readyCourts.length)return;
+    const queue=[...S.session.cfQueue];
+    const nc=readyCourts.length;
+    const need=nc*4;
+
+    // Not enough players for even one court
+    if(queue.length<4){readyCourts.forEach(c=>{S.session.cfSuggestions[c]=null;});return;}
+
+    const mustSplit=S.session.cfMustSplitPair;
+    const nrIds=new Set(queue.filter(q=>gp(q.id)?.isNR||gsp(q.id)?.isNR).map(q=>q.id));
+
+    // Build pool with ratings + priority info
+    const courtAvg=queue.reduce((s,q)=>s+this.cfRating(q.id),0)/queue.length;
+    const pool=queue
+      .map(q=>({id:q.id,sr:this.cfRating(q.id),waitMin:(Date.now()-q.since)/60000,qEntry:q}))
+      .sort((a,b)=>this.queuePriority(b.qEntry,courtAvg)-this.queuePriority(a.qEntry,courtAvg));
+
+    // Single court path (no need for joint search)
+    if(nc===1){
+      this._generateSingleSuggestion(readyCourts[0], pool, mustSplit, nrIds,
+        finishedMatchByCourtNum?.[readyCourts[0]]);
+      return;
+    }
+
+    // Multi-court joint path
+    // Limit search: use top min(12, queueLen) priority players to keep it fast
+    const top=pool.slice(0,Math.min(12,pool.length));
+    const n=top.length;
+
+    if(n<need){
+      // Not enough for all courts — fill what we can greedily
+      const filled=[];
+      let remaining=[...top];
+      for(const c of readyCourts){
+        if(remaining.length<4){S.session.cfSuggestions[c]=null;continue;}
+        const sub=remaining.slice(0,Math.min(8,remaining.length));
+        const best=this._findBestGroup(sub,mustSplit,nrIds,n);
+        if(!best){S.session.cfSuggestions[c]=null;continue;}
+        filled.push({c,best});
+        remaining=remaining.filter(p=>!best.group.map(g=>g.id).includes(p.id));
+      }
+      filled.forEach(({c,best})=>this._storeSuggestion(c,best,finishedMatchByCourtNum?.[c]));
+      filled.forEach(({c})=>{setTimeout(()=>cfMaybeAutoConfirm(c),500);});
+      return;
+    }
+
+    // Joint search: generate all ways to partition top players into nc groups of 4
+    // To keep runtime bounded, use a branch-and-bound greedy: assign court 1, then 2, etc.
+    // but try multiple starting assignments for court 1 to avoid local minima
+    let bestAlloc=null,bestAllocScore=Infinity;
+    const tryAlloc=(courtIdx,remaining,currentAlloc,runningScore)=>{
+      if(courtIdx===nc){
+        if(runningScore<bestAllocScore){
+          bestAllocScore=runningScore;
+          bestAlloc=[...currentAlloc];
+        }
+        return;
+      }
+      // Try all C(remaining, 4) groups for this court
+      const r=remaining;const m=r.length;
+      for(let i=0;i<m-3;i++)for(let j=i+1;j<m-2;j++)for(let k=j+1;k<m-1;k++)for(let l=k+1;l<m;l++){
+        const group=[r[i],r[j],r[k],r[l]];
+        const nrCount=group.filter(p=>nrIds.has(p.id)).length;
+        if(nrCount>=2&&queue.length>need)continue;
+        const{score,meta,t1,t2}=this._scoreGroup(group,mustSplit);
+        if(!this._withinTeamGapOk(t1,t2,350))continue;
+        // Hard pair cooldown filter
+        if(this.isPairOnCooldown(t1[0].id,t1[1].id)||this.isPairOnCooldown(t2[0].id,t2[1].id))continue;
+        if(runningScore+score>=bestAllocScore)continue;
+        currentAlloc.push({group,meta,t1,t2});
+        tryAlloc(courtIdx+1,r.filter(p=>![r[i],r[j],r[k],r[l]].includes(p)),currentAlloc,runningScore+score);
+        currentAlloc.pop();
+      }
+    };
+    tryAlloc(0,top.slice(0,Math.min(8*nc,n)),[],0);
+
+    // If strict cap (350pt) found no valid allocation, retry with 400pt cap
+    if(!bestAlloc){
+      const tryAllocRelaxed=(courtIdx,remaining,currentAlloc,runningScore)=>{
+        if(courtIdx===nc){
+          if(runningScore<bestAllocScore){bestAllocScore=runningScore;bestAlloc=[...currentAlloc];}
+          return;
+        }
+        const r=remaining;const m=r.length;
+        for(let i=0;i<m-3;i++)for(let j=i+1;j<m-2;j++)for(let k=j+1;k<m-1;k++)for(let l=k+1;l<m;l++){
+          const group=[r[i],r[j],r[k],r[l]];
+          const{score,meta,t1,t2}=this._scoreGroup(group,mustSplit);
+          if(!this._withinTeamGapOk(t1,t2,400))continue;
+          if(this.isPairOnCooldown(t1[0].id,t1[1].id)||this.isPairOnCooldown(t2[0].id,t2[1].id))continue;
+          if(runningScore+score>=bestAllocScore)continue;
+          currentAlloc.push({group,meta,t1,t2});
+          tryAllocRelaxed(courtIdx+1,r.filter(p=>![r[i],r[j],r[k],r[l]].includes(p)),currentAlloc,runningScore+score);
+          currentAlloc.pop();
+        }
+      };
+      tryAllocRelaxed(0,top.slice(0,Math.min(8*nc,n)),[],0);
+    }
+
+    // Fallback to greedy if joint search found nothing
+    if(!bestAlloc){
+      let rem=[...top];
+      readyCourts.forEach(c=>{
+        if(rem.length<4){S.session.cfSuggestions[c]=null;return;}
+        const best=this._findBestGroup(rem.slice(0,8),mustSplit,nrIds,n);
+        if(best){this._storeSuggestion(c,best,finishedMatchByCourtNum?.[c]);rem=rem.filter(p=>!best.group.map(g=>g.id).includes(p.id));}
+        else S.session.cfSuggestions[c]=null;
+      });
+    }else{
+      // Assign best allocation to courts sorted by quality (best match → middle court via assignCourts logic)
+      const scored=bestAlloc.map((b,i)=>({courtIdx:i,b,q:this._groupQuality(b)}));
+      scored.sort((a,bx)=>bx.q-a.q); // best quality first
+      // Middle-first rotation for courts
+      const rot=(S.session.cfMatchCount||0)%nc;
+      const order=Array.from({length:nc},(_,i)=>(i+rot)%nc);
+      scored.forEach((item,rank)=>{
+        const c=readyCourts[order[rank]];
+        this._storeSuggestion(c,item.b,finishedMatchByCourtNum?.[c]);
+      });
+    }
+    readyCourts.forEach(c=>setTimeout(()=>cfMaybeAutoConfirm(c),500));
+  },
+
+  _groupQuality(best){
+    const avg=arr=>arr.reduce((s,p)=>s+(p.sr||p.sRating||1000),0)/arr.length;
+    const a1=avg(best.t1),a2=avg(best.t2);
+    return -(Math.abs(a1-a2))*2+(a1+a2)*0.3;
+  },
+
+  // Hard cap on within-team skill gap — good players must pair with good players
+  // 350pt cap enforced on all pairings; 400pt fallback if no valid groups exist
+  _withinTeamGapOk(t1,t2,cap=350){
+    return Math.abs(t1[0].sr-t1[1].sr)<=cap && Math.abs(t2[0].sr-t2[1].sr)<=cap;
+  },
+
+  _findBestGroup(candidates,mustSplit,nrIds,totalQueue){
+    let best=null,bestScore=Infinity;
+    const n=candidates.length;
+    // Helper: check if a scored group has any cooldown pair
+    const hasCooldownPair=(res)=>
+      this.isPairOnCooldown(res.t1[0].id,res.t1[1].id)||
+      this.isPairOnCooldown(res.t2[0].id,res.t2[1].id);
+    // Pass 1: strict 350pt gap cap + pair cooldown enforced
+    for(let i=0;i<n-3;i++)for(let j=i+1;j<n-2;j++)for(let k=j+1;k<n-1;k++)for(let l=k+1;l<n;l++){
+      const group=[candidates[i],candidates[j],candidates[k],candidates[l]];
+      if((nrIds.has(group[0].id)||nrIds.has(group[1].id)||nrIds.has(group[2].id)||nrIds.has(group[3].id))
+         &&group.filter(p=>nrIds.has(p.id)).length>=2&&totalQueue>4)continue;
+      const res=this._scoreGroup(group,mustSplit);
+      if(!this._withinTeamGapOk(res.t1,res.t2,350))continue;
+      if(hasCooldownPair(res))continue; // hard cooldown filter
+      if(res.score<bestScore){bestScore=res.score;best=res;}
+    }
+    if(best)return best;
+    // Pass 2: relax to 400pt gap cap (cooldown still enforced)
+    for(let i=0;i<n-3;i++)for(let j=i+1;j<n-2;j++)for(let k=j+1;k<n-1;k++)for(let l=k+1;l<n;l++){
+      const group=[candidates[i],candidates[j],candidates[k],candidates[l]];
+      const res=this._scoreGroup(group,mustSplit);
+      if(!this._withinTeamGapOk(res.t1,res.t2,400))continue;
+      if(hasCooldownPair(res))continue;
+      if(res.score<bestScore){bestScore=res.score;best=res;}
+    }
+    if(best)return best;
+    // Pass 3: relax gap cap AND cooldown — only fires when queue is extremely thin
+    for(let i=0;i<n-3;i++)for(let j=i+1;j<n-2;j++)for(let k=j+1;k<n-1;k++)for(let l=k+1;l<n;l++){
+      const group=[candidates[i],candidates[j],candidates[k],candidates[l]];
+      const res=this._scoreGroup(group,mustSplit);
+      if(res.score<bestScore){bestScore=res.score;best=res;}
+    }
+    if(!best&&candidates.length>=4){best=this._scoreGroup(candidates.slice(0,4),mustSplit);}
+    return best;
+  },
+
+  _storeSuggestion(courtNum,best,finishedMatch){
+    if(!best){S.session.cfSuggestions[courtNum]=null;return;}
+    const gap=Math.abs((best.t1[0].sr+best.t1[1].sr)/2-(best.t2[0].sr+best.t2[1].sr)/2);
+    const maxWait=Math.max(...best.group.map(p=>p.waitMin||0));
+    const shortGame=finishedMatch?.endTime&&finishedMatch?.startTime
+      &&(finishedMatch.endTime-finishedMatch.startTime)<9*60000;
+    S.session.cfSuggestions[courtNum]={
+      courtNum,t1:best.t1.map(p=>p.id),t2:best.t2.map(p=>p.id),
+      allIds:best.group.map(p=>p.id),
+      meta:{...best.meta,gap:Math.round(gap),gapWarn:gap>250,maxWait:Math.round(maxWait),
+            urgentWait:maxWait>=20,shortGameBoost:shortGame||false},
+      ts:Date.now()  // staleness timestamp
+    };
+  },
+
+  _generateSingleSuggestion(courtNum,pool,mustSplit,nrIds,finishedMatch){
+    const top=pool.slice(0,Math.min(8,pool.length));
+    const best=this._findBestGroup(top,mustSplit,nrIds,pool.length);
+    this._storeSuggestion(courtNum,best,finishedMatch);
+  },
+
+  // Legacy wrapper — routes to batch optimizer
+  generateSuggestion(courtNum,finishedMatch){
+    this.batchGenerateSuggestions([courtNum],finishedMatch?{[courtNum]:finishedMatch}:null);
+  },
+
+  /* Confirm a suggestion — start the match */
+  confirmSuggestion(courtNum){
+    if(!S.session)return;
+    const sug=S.session.cfSuggestions[courtNum];if(!sug)return;
+    // Track time in queue for each player
+    const now=Date.now();
+    sug.allIds.forEach(id=>{
+      const qEntry=S.session.cfQueue.find(q=>q.id===id);
+      const sp=gsp(id);
+      if(qEntry&&sp){sp.timeInQueueMs=(sp.timeInQueueMs||0)+(now-qEntry.since);}
+    });
+    this.dequeue(sug.allIds);
+    const match={id:uid(),courtNum,t1:sug.t1,t2:sug.t2,
+      s1:null,s2:null,status:'pending',eloDeltas:null,startTime:now,extended:false};
+    S.session.cfCourts[courtNum]={status:'playing',match};
+    // Track pair consecutive
+    if(!S.session.cfPairConsec)S.session.cfPairConsec={};
+    const t1k=this.pairKey(sug.t1[0],sug.t1[1]),t2k=this.pairKey(sug.t2[0],sug.t2[1]);
+    S.session.cfPairConsec[t1k]=(S.session.cfPairConsec[t1k]||0)+1;
+    S.session.cfPairConsec[t2k]=(S.session.cfPairConsec[t2k]||0)+1;
+    // Track session pairing count for hard cooldown threshold
+    if(!S.session.cfPairSessionCount)S.session.cfPairSessionCount={};
+    if(!S.session.cfPairLastAt)S.session.cfPairLastAt={};
+    S.session.cfPairSessionCount[t1k]=(S.session.cfPairSessionCount[t1k]||0)+1;
+    S.session.cfPairSessionCount[t2k]=(S.session.cfPairSessionCount[t2k]||0)+1;
+    // NOTE: cfPairLastAt is recorded in submitScore (after matchesPlayed++)
+    // Recording it here would capture the pre-game count, making the cooldown expire 1 game early
+    MM.recHx([match]);
+    delete S.session.cfSuggestions[courtNum];
+    STORE.save();renderLive();renderStandings();
+    toast(`Court ${courtNum} started 🏓`,'ok');
+  },
+
+  /* Submit score for a CF court */
+  submitScore(courtNum){
+    if(!S.session)return;
+    const court=S.session.cfCourts?.[courtNum];if(!court?.match)return;
+    const m=court.match;
+    const s1=parseInt(document.getElementById(`cf-s1-${courtNum}`)?.value);
+    const s2=parseInt(document.getElementById(`cf-s2-${courtNum}`)?.value);
+    if(isNaN(s1)||isNaN(s2)||s1<0||s2<0){toast('Enter valid scores','err');return;}
+    const now=Date.now();
+    m.s1=s1;m.s2=s2;m.status='done';m.endTime=now;
+    m.eloDeltas=ELO.calcIds(m.t1,m.t2,s1,s2);
+    const durMs=now-m.startTime;
+    const shortGame=durMs<9*60000;
+    // Apply ELO + stats
+    [...m.t1,...m.t2].forEach((id,i)=>{
+      const sp=gsp(id);if(!sp)return;
+      sp.sRating=Math.max(400,sp.sRating+m.eloDeltas[i]);sp.matchesPlayed++;
+      sp.timeOnCourtMs=(sp.timeOnCourtMs||0)+durMs;
+      if(i<2){sp.ptsFor+=s1;sp.ptsAgainst+=s2;}else{sp.ptsFor+=s2;sp.ptsAgainst+=s1;}
+      if(s1===s2)sp.ties=(sp.ties||0)+1;else if((i<2&&s1>s2)||(i>=2&&s2>s1))sp.wins++;else sp.losses++;
+    });
+    [...m.t1,...m.t2].forEach(id=>checkNRPromotion(id));
+    // Track NR pairing distribution
+    const hasNR=[...m.t1,...m.t2].some(mid=>gp(mid)?.isNR||gsp(mid)?.isNR);
+    if(hasNR){
+      if(!S.session.nrPairingHx)S.session.nrPairingHx={};
+      [...m.t1,...m.t2].forEach(mid=>{
+        if(!gp(mid)?.isNR)S.session.nrPairingHx[mid]=gsp(mid)?.matchesPlayed||0;
+      });
+    }
+    // Record pair last-at NOW (after matchesPlayed++) so cooldown counts are exact.
+    // Bug fix: was recorded at confirmSuggestion (pre-game), causing 1-game-short cooldowns.
+    const st1k=this.pairKey(m.t1[0],m.t1[1]),st2k=this.pairKey(m.t2[0],m.t2[1]);
+    const setLastAt=(pk,a,b)=>{
+      if(!S.session.cfPairLastAt)S.session.cfPairLastAt={};
+      if(!S.session.cfPairLastAt[pk])S.session.cfPairLastAt[pk]={};
+      S.session.cfPairLastAt[pk][a]=gsp(a)?.matchesPlayed||0;
+      S.session.cfPairLastAt[pk][b]=gsp(b)?.matchesPlayed||0;
+    };
+    setLastAt(st1k,m.t1[0],m.t1[1]);
+    setLastAt(st2k,m.t2[0],m.t2[1]);
+    _boostKCache=null; // game counts changed
+    _allMatchesCache=null; // session match list changed
+    // Winning pair split rule: track pair wins; split required after 2 consecutive wins together
+    const tie=s1===s2;
+    const winPair=tie?null:(s1>s2?m.t1:m.t2);
+    if(!S.session.cfPairWins)S.session.cfPairWins={};
+    if(winPair){
+      const wpk=this.pairKey(winPair[0],winPair[1]);
+      S.session.cfPairWins[wpk]=(S.session.cfPairWins[wpk]||0)+1;
+      if(S.session.cfPairWins[wpk]>=2){S.session.cfMustSplitPair=wpk;S.session.cfPairWins[wpk]=0;}
+      else S.session.cfMustSplitPair=null;
+      // Reset losers pair win streak
+      const losePair=s1>s2?m.t2:m.t1;
+      const lpk=this.pairKey(losePair[0],losePair[1]);
+      S.session.cfPairWins[lpk]=0;
+    }else{S.session.cfMustSplitPair=null;}
+    // Reset pair consecutive for players who just played
+    const allPlayed=new Set([...m.t1,...m.t2]);
+    Object.keys(S.session.cfPairConsec||{}).forEach(k=>{
+      const[a,b]=k.split('|');
+      if(allPlayed.has(a)||allPlayed.has(b))S.session.cfPairConsec[k]=0;
+    });
+    // Matchup history
+    if(!S.session.cfMatchupHx)S.session.cfMatchupHx={};
+    S.session.cfMatchupHx[this.matchupKey(m.t1,m.t2)]=(S.session.cfMatchCount||0);
+    S.session.cfMatchCount=(S.session.cfMatchCount||0)+1;
+    // Log
+    if(!S.session.cfLog)S.session.cfLog=[];
+    S.session.cfLog.push({...m});
+    // Return all 4 to queue with stagger (0–15s offsets to desync simultaneous finishes)
+    const prevCourt=S.session.cfCourts[courtNum]||{};
+    S.session.cfCourts[courtNum]={status:'ready',match:null,
+      idleStart:Date.now(),
+      totalIdleMs:prevCourt.totalIdleMs||0,
+      matchCount:prevCourt.matchCount||0};
+    [...m.t1,...m.t2].forEach((id,idx)=>{
+      if((S.session.cfPaused||[]).find(q=>q.id===id))return;
+      if(S.session.cfQueue.find(q=>q.id===id))return; // guard: no double-push on duplicate event
+      const staggerMs=idx*4000;
+      const boostMs=shortGame?5*60000:0;
+      S.session.cfQueue.push({id,since:Date.now()-boostMs+staggerMs,consec:0});
+    });
+
+    // Batch generate: collect all currently ready courts and solve together
+    const readyCourts=[courtNum,...Object.entries(S.session.cfCourts||{})
+      .filter(([c,ct])=>+c!==courtNum&&ct.status==='ready')
+      .map(([c])=>+c)];
+    // Small delay so any near-simultaneous score submissions can settle first
+    setTimeout(()=>{
+      if(!S.session)return;
+      // Invalidate stale suggestions for other ready courts before batch
+      readyCourts.filter(c=>c!==courtNum).forEach(c=>{
+        const sug=S.session.cfSuggestions[c];
+        if(sug&&Date.now()-sug.ts>90000)delete S.session.cfSuggestions[c]; // >90s stale
+      });
+      const alreadySuggested=readyCourts.filter(c=>c!==courtNum&&S.session.cfSuggestions[c]);
+      const needSuggestion=readyCourts.filter(c=>!S.session.cfSuggestions[c]);
+      if(needSuggestion.length)this.batchGenerateSuggestions(needSuggestion,{[courtNum]:m});
+      else this.batchGenerateSuggestions([courtNum],{[courtNum]:m});
+      STORE.save();renderLive();renderStandings();renderHistory();
+    },200);
+
+    // Match quality score and win probability context
+    const t1Avg=(this.cfRating(m.t1[0])+this.cfRating(m.t1[1]))/2;
+    const t2Avg=(this.cfRating(m.t2[0])+this.cfRating(m.t2[1]))/2;
+    const matchGap=Math.abs(t1Avg-t2Avg);
+    // Win probability context — was this result an upset or expected?
+    const preMatchExp=ELO.expTeam(m.t1,m.t2); // t1's win probability before score
+    const inT1Win=s1>s2;
+    const actualWinnerExp=tie?0.5:inT1Win?preMatchExp:(1-preMatchExp);
+    let contextMsg='';
+    if(!tie){
+      const winnerExp=Math.round(actualWinnerExp*100);
+      if(winnerExp<35)contextMsg=`🔥 Upset! Winners had only ${winnerExp}% chance`;
+      else if(winnerExp>70)contextMsg=`Expected result (${winnerExp}% favourite won)`;
+      else contextMsg=`${winnerExp}% → ${s1>s2?s1+'-'+s2:s2+'-'+s1}`;
+    }
+    const qualStars=matchGap<30?'⭐⭐⭐ Competitive':matchGap<80?'⭐⭐ Close':matchGap<150?'⭐ Uneven':'○ Mismatched';
+    const w=tie?null:(s1>s2?m.t1:m.t2).map(id=>gp(id)?.name||'?').join(' & ');
+    const dStr=[...m.t1,...m.t2].map((id,i)=>{const d=m.eloDeltas[i];return`${gp(id)?.name||'?'}: <strong style="color:${d>0?'var(--gr)':d<0?'var(--re)':'var(--mu)'}">${d>0?'+':''}${d}</strong>`;}).join(' · ');
+    toast(`${s1}–${s2} ${tie?'🤝':w+' win!'} <span style="font-size:.68rem;color:var(--mu)">${qualStars}${shortGame?' ⚡':''}</span>${contextMsg?`<br/><span style="font-size:.68rem;color:var(--m2)">${contextMsg}</span>`:''}<br/><span style="font-size:.71rem;opacity:.85">${dStr}</span>`,'ok');
+  },
+
+  /* Reshuffle — exclude current suggestion's players, re-run batch across all ready courts */
+  reshuffleSuggestion(courtNum){
+    if(!S.session)return;
+    cancelAutoConfirm(courtNum);
+    const prev=S.session.cfSuggestions[courtNum];
+    const excluded=prev?new Set(prev.allIds):new Set();
+    // Temporarily remove excluded players from queue, run batch, restore them
+    const held=S.session.cfQueue.filter(q=>excluded.has(q.id));
+    S.session.cfQueue=S.session.cfQueue.filter(q=>!excluded.has(q.id));
+    delete S.session.cfSuggestions[courtNum];
+    // Batch all currently ready courts so reshuffle doesn't break other suggestions
+    const allReady=[courtNum,...Object.entries(S.session.cfCourts||{})
+      .filter(([c,ct])=>+c!==courtNum&&ct.status==='ready'&&!S.session.cfSuggestions[+c])
+      .map(([c])=>+c)];
+    this.batchGenerateSuggestions(allReady,null);
+    S.session.cfQueue.push(...held); // restore held players
+    const next=S.session.cfSuggestions[courtNum];
+    const log=next
+      ?next.allIds.filter(id=>!excluded.has(id)).map(id=>gp(id)?.name||'?')
+          .reduce((s,n)=>s?s+', '+n:n,'') || 'different pick'
+      :'(not enough players)';
+    STORE.save();renderLive();
+    toast(`Court ${courtNum} reshuffled — swapped in ${log}`,'ok');
+  },
+
+  /* Manual override */
+  openManual(courtNum){
+    const queue=(S.session?.cfQueue||[]).map(q=>q.id);
+    const opts=queue.map(id=>`<option value="${id}">${esc(gp(id)?.name||'?')} (${Math.round(this.cfRating(id))})</option>`).join('');
+    openModal(`<div class="modal-title">✏️ Manual — Court ${courtNum}</div>
+      <p style="font-size:.74rem;color:var(--mu);margin-bottom:10px">Pick 4 players from the queue:</p>
+      ${['1','2','3','4'].map(n=>`<label>PLAYER ${n}</label><select id="man-p${n}" class="inp" style="margin-bottom:7px"><option value="">— select —</option>${opts}</select>`).join('')}
+      <div style="display:flex;gap:7px;margin-top:8px">
+        <button class="btn bp" style="flex:1" onclick="CF.confirmManual(${courtNum})">Assign</button>
+        <button class="btn bg2" onclick="closeModal()">Cancel</button>
+      </div>`);
+  },
+
+  confirmManual(courtNum){
+    const ids=['1','2','3','4'].map(n=>document.getElementById(`man-p${n}`)?.value).filter(Boolean);
+    if(new Set(ids).size!==4){toast('Select 4 different players','err');return;}
+    const players=ids.map(id=>({id,sr:this.cfRating(id),waitMin:0}));
+    const{t1,t2}=MM.bestPair(players);
+    const gap=Math.abs((t1[0].sr+t1[1].sr)/2-(t2[0].sr+t2[1].sr)/2);
+    S.session.cfSuggestions[courtNum]={courtNum,t1:t1.map(p=>p.id),t2:t2.map(p=>p.id),allIds:ids,
+      meta:{gap:Math.round(gap),gapWarn:gap>250,maxWait:0,urgentWait:false,splitOverride:false,repeatMatchup:false,shortGameBoost:false}};
+    closeModal();this.confirmSuggestion(courtNum);
+  },
+
+  /* ── Render CF live view ── */
+  renderLive(){
+    if(!S.session)return;
+    const el=document.getElementById('cf-sess-lbl');if(el)el.textContent=S.session.name||'CONTINUOUS FLOW';
+    const sub=document.getElementById('cf-sess-sub');
+    if(sub)sub.textContent=`${(S.session.cfLog||[]).length} matches · ${S.session.activePlayers.length} players · ${(S.session.cfQueue||[]).length} queued`;
+    const acBtn=document.getElementById('cf-ac-toggle');
+    if(acBtn){acBtn.classList.toggle('bc',!!S.session.cfAutoConfirm);acBtn.classList.toggle('bg2',!S.session.cfAutoConfirm);}
+
+    // Suggestions — show Confirm All banner if multiple courts ready
+    const sw=document.getElementById('cf-suggestions-wrap');
+    if(sw){
+      const sugs=Object.entries(S.session.cfSuggestions||{}).filter(([,s])=>s).sort(([a],[b])=>+a-+b);
+      let confirmAllHtml='';
+      if(sugs.length>=2){
+        confirmAllHtml=`<div style="background:rgba(52,217,116,.08);border:1px solid rgba(52,217,116,.3);border-radius:var(--ra);padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <div style="font-size:.78rem;font-weight:700;color:var(--gr)">${sugs.length} courts ready simultaneously</div>
+          <button class="btn bp sm" onclick="CF.confirmAll()">✓ Confirm All Courts</button>
+        </div>`;
+      }
+      sw.innerHTML=confirmAllHtml+sugs.map(([c,s])=>this._renderSug(+c,s)).join('');
+    }
+
+    const cw=document.getElementById('cf-courts-wrap');
+    if(cw){
+      let h='';
+      for(let c=1;c<=S.session.courts;c++){
+        const ct=S.session.cfCourts?.[c];
+        if(ct?.status==='playing'&&ct.match)h+=this._renderActiveCourt(c,ct);
+      }
+      cw.innerHTML=h;
+      for(let c=1;c<=S.session.courts;c++){
+        if(S.session.cfCourts?.[c]?.status==='playing')renderQS(`cf-qs-${c}`,`cf-s1-${c}`,`cf-s2-${c}`);
+      }
+    }
+    this._renderQueue();
+    // Session health panel
+    this._renderHealthPanel();
+  },
+
+  confirmAll(){
+    const courts=Object.keys(S.session.cfSuggestions||{})
+      .filter(c=>S.session.cfSuggestions[c]).map(Number).sort();
+    const usedIds=new Set();
+    let anyRegenerated=false;
+    courts.forEach(c=>{
+      const sug=S.session.cfSuggestions[c];if(!sug)return;
+      if(sug.allIds.some(id=>usedIds.has(id))){
+        delete S.session.cfSuggestions[c];
+        CF.generateSuggestion(c,null);
+        anyRegenerated=true;
+        toast(`Court ${c} refreshed — players reassigned`,'warn');
+        return;
+      }
+      sug.allIds.forEach(id=>usedIds.add(id));
+      cancelAutoConfirm(c);
+      CF.confirmSuggestion(c);
+    });
+    if(anyRegenerated)renderLive();
+  },
+
+  _renderSug(courtNum,sug){
+    const gn=id=>esc(gp(id)?.name||'?');
+    const gr=id=>{const sp=gsp(id);return sp?.isNR?'<span class="nr-badge">NR</span>':`${Math.round(this.cfRating(id))}`;};
+    const meta=sug.meta||{};
+    const t1r0=this.cfRating(sug.t1[0]),t1r1=this.cfRating(sug.t1[1]);
+    const t2r0=this.cfRating(sug.t2[0]),t2r1=this.cfRating(sug.t2[1]);
+    const t1Avg=Math.round((t1r0+t1r1)/2);
+    const t2Avg=Math.round((t2r0+t2r1)/2);
+    const t1pgap=Math.round(Math.abs(t1r0-t1r1));
+    const t2pgap=Math.round(Math.abs(t2r0-t2r1));
+    const staleMin=sug.ts?Math.floor((Date.now()-sug.ts)/60000):0;
+    const staleWarn=staleMin>=3;
+    // Cooldown status chip — show how fresh each pair is, or how close to cooldown
+    const cooldownChip=(ids,label)=>{
+      const [a,b]=ids;
+      const pk=this.pairKey(a,b);
+      const count=(S.session.cfPairSessionCount||{})[pk]||0;
+      if(count===0)return`<span class="cf-chip cf-chip-ok" title="First time partnering this session">✦ Fresh pair</span>`;
+      if(count===1){
+        const lastAt=(S.session.cfPairLastAt||{})[pk]||{};
+        const spA=gsp(a),spB=gsp(b);
+        const ga=(spA?.matchesPlayed||0)-(lastAt[a]||0);
+        const gb=(spB?.matchesPlayed||0)-(lastAt[b]||0);
+        return`<span class="cf-chip cf-chip-info" title="${label}: ${count} pairing this session">1× ${label}</span>`;
+      }
+      return''; // count>=2 means cooldown should have blocked this — pass 3 fallback
+    };
+    const t1CoolChip=cooldownChip(sug.t1,'P1');
+    const t2CoolChip=cooldownChip(sug.t2,'P2');
+    const chips=[
+      `<span class="cf-chip ${meta.gapWarn?'cf-chip-warn':'cf-chip-ok'}">Teams ${meta.gap}pts${meta.gapWarn?' ⚠':' ✓'}</span>`,
+      meta.urgentWait?`<span class="cf-chip cf-chip-warn">⏳ ${meta.maxWait}min wait</span>`:`<span class="cf-chip cf-chip-info">Wait ${meta.maxWait}min</span>`,
+      t1CoolChip,t2CoolChip,
+      meta.splitOverride?`<span class="cf-chip cf-chip-warn">⚠ Win pair kept</span>`:'',
+      meta.repeatMatchup?`<span class="cf-chip cf-chip-warn">⚠ Repeat matchup</span>`:'',
+      meta.shortGameBoost?`<span class="cf-chip cf-chip-info">⚡ Short-game boost</span>`:'',
+      staleWarn?`<span class="cf-chip cf-chip-warn">🕐 ${staleMin}min old — refresh?</span>`:'',
+      t1pgap>250?`<span class="cf-chip cf-chip-warn" title="P1 within-team gap: ${t1pgap}pts — consider reshuffling">⚠ P1</span>`:'',
+      t2pgap>250?`<span class="cf-chip cf-chip-warn" title="P2 within-team gap: ${t2pgap}pts — consider reshuffling">⚠ P2</span>`:'',
+    ].filter(Boolean).join('');
+    // Team tile: show avg only publicly. Partner gap in tooltip — not broadcast to bystanders.
+    const pTeam=(ids,avg,pgap)=>`<div style="background:var(--s2);border:1px solid ${pgap>250?'rgba(248,113,113,.3)':pgap>150?'rgba(251,147,60,.2)':'var(--bd)'};border-radius:var(--ra);padding:9px;text-align:center" title="Partner skill gap: ${pgap}pts${pgap>250?' ⚠ High — reshuffle recommended':''}">
+      ${ids.map(id=>`<span style="font-weight:600">${gn(id)}</span> <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span>`).join(' <span style="color:var(--m2)"> &amp; </span> ')}
+      <div style="font-size:.63rem;color:var(--m2);margin-top:3px">avg ${avg}</div></div>`;
+    return `<div class="cf-suggest" data-court="${courtNum}">
+      <div class="cf-suggest-hd">🏓 COURT ${courtNum} — READY</div>
+      <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:9px">
+        ${pTeam(sug.t1,t1Avg,t1pgap)}<div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--m2)">VS</div>${pTeam(sug.t2,t2Avg,t2pgap)}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:9px">${chips}</div>
+      <div class="cf-ac-wrap" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;min-height:22px">
+        ${_cfAutoConfirmTimers[courtNum]?`<span id="cf-ac-${courtNum}" style="font-size:.7rem;color:var(--mu)">Auto-starting…</span><button class="btn bg2 sm" style="font-size:.65rem;padding:2px 8px" onclick="cancelAutoConfirm(${courtNum})">Cancel</button>`:''}
+      </div>
+      <div style="display:flex;gap:7px">
+        <button class="btn bp" style="flex:2" onclick="cancelAutoConfirm(${courtNum});CF.confirmSuggestion(${courtNum})">✓ Confirm — Start Court ${courtNum}</button>
+        <button class="btn bs sm" title="Reshuffle" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleSuggestion(${courtNum})">↺ Reshuffle</button>
+        <button class="btn bg2 sm" title="Manual" onclick="cancelAutoConfirm(${courtNum});CF.openManual(${courtNum})">✏ Manual</button>
+      </div></div>`;
+  },
+
+  _renderActiveCourt(courtNum,court){
+    const m=court.match;
+    const gr=id=>Math.round(this.cfRating(id));
+    const gn=id=>esc(gp(id)?.name||'?');
+    const t1Avg=Math.round((gr(m.t1[0])+gr(m.t1[1]))/2),t2Avg=Math.round((gr(m.t2[0])+gr(m.t2[1]))/2);
+    const extSec=(S.session.extendedMin||16)*60;
+    const ext=m.extended;
+    const extTag=ext?`<span style="font-size:.62rem;font-weight:700;color:var(--or);background:rgba(251,147,60,.12);border:1px solid rgba(251,147,60,.3);border-radius:5px;padding:1px 5px">EXTENDED</span>`:'';
+    return `<div class="court-card ${ext?'extended':''}">
+      <div class="chead">
+        <span class="clbl">COURT ${courtNum}</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          ${extTag}
+          <span data-cf-elapsed="${courtNum}" class="ct-timer">--:--</span>
+          <span class="mbadge mb-p">⏱ LIVE</span>
+        </div>
+      </div>
+      <div class="cbody">
+        <div class="teams">
+          <div class="team">${m.t1.map(id=>`<div style="text-align:center;font-weight:600;font-size:.82rem">${gn(id)} <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span></div>`).join('')}<div class="team-avg">Avg ${t1Avg}</div></div>
+          <div class="vs-lbl">VS</div>
+          <div class="team">${m.t2.map(id=>`<div style="text-align:center;font-weight:600;font-size:.82rem">${gn(id)} <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span></div>`).join('')}<div class="team-avg">Avg ${t2Avg}</div></div>
+        </div>
+        <div class="srow" style="margin-top:10px">
+          <input class="sinp inp" id="cf-s1-${courtNum}" type="number" min="0" max="99" placeholder="0"/>
+          <span class="sdash">–</span>
+          <input class="sinp inp" id="cf-s2-${courtNum}" type="number" min="0" max="99" placeholder="0"/>
+        </div>
+        <div class="qs-row" id="cf-qs-${courtNum}"></div>
+        <button class="btn bp" style="width:100%;margin-top:8px" onclick="CF.submitScore(${courtNum})">✓ Submit Score</button>
+      </div></div>`;
+  },
+
+  _renderHealthPanel(){
+    const el=document.getElementById('cf-health-panel');if(!el)return;
+    const log=S.session?.cfLog||[];if(!log.length){el.style.display='none';return;}
+    el.style.display='block';
+
+    // Attendance context
+    const attendance=S.session.activePlayers.length;
+    const attendanceNote=attendance<18
+      ?`<div style="font-size:.68rem;color:var(--or);background:rgba(251,147,60,.08);border:1px solid rgba(251,147,60,.2);border-radius:5px;padding:5px 8px;margin-bottom:8px">⚠ Low turnout (${attendance}) — match quality is structurally limited. Consider 2 courts.</div>`
+      :attendance>=24
+      ?`<div style="font-size:.68rem;color:var(--gr);background:rgba(52,217,116,.06);border:1px solid rgba(52,217,116,.2);border-radius:5px;padding:5px 8px;margin-bottom:8px">✓ Good turnout (${attendance}) — optimal matchmaking conditions</div>`
+      :'';
+
+    // Games per player
+    const gameCounts={};
+    S.session.activePlayers.forEach(id=>{gameCounts[id]=0;});
+    log.forEach(m=>[...m.t1,...m.t2].forEach(id=>{gameCounts[id]=(gameCounts[id]||0)+1;}));
+    const counts=Object.values(gameCounts).filter(x=>x>0);
+    const minG=counts.length?Math.min(...counts):0,maxG=counts.length?Math.max(...counts):0;
+    const avgG=counts.length?Math.round(counts.reduce((a,b)=>a+b,0)/counts.length*10)/10:0;
+    const spread=maxG-minG;
+
+    // Average match gap
+    const completedGaps=log.filter(m=>m.eloDeltas).map(m=>{
+      const r1=this.cfRating(m.t1[0]),r2=this.cfRating(m.t1[1]),r3=this.cfRating(m.t2[0]),r4=this.cfRating(m.t2[1]);
+      return Math.abs((r1+r2)/2-(r3+r4)/2);
+    });
+    const avgGap=completedGaps.length?Math.round(completedGaps.reduce((a,b)=>a+b,0)/completedGaps.length):0;
+    const qualLabel=avgGap<40?'⭐⭐⭐ Excellent':avgGap<80?'⭐⭐ Good':avgGap<150?'⭐ Acceptable':'○ Needs work';
+
+    // Avg wait time — include live current waits
+    const allWaits=S.session.activePlayers.map(id=>{
+      const sp=gsp(id);if(!sp)return 0;
+      const acc=sp.timeInQueueMs||0;
+      const qEntry=S.session.cfQueue?.find(q=>q.id===id);
+      return acc+(qEntry?Math.max(0,Date.now()-qEntry.since):0);
+    }).filter(x=>x>0);
+    const avgWaitMin=allWaits.length?Math.round(allWaits.reduce((a,b)=>a+b,0)/allWaits.length/60000):0;
+
+    // Avg idle time per court between matches (= score-entry + confirm delay, per court per match)
+    const courtData=Object.values(S.session.cfCourts||{});
+    const totalIdleMs=courtData.reduce((s,c)=>s+(c.totalIdleMs||0),0);
+    const totalStarts=courtData.reduce((s,c)=>s+(c.matchCount||0),0);
+    const liveIdleMs=courtData.filter(c=>c.status==='ready'&&c.idleStart)
+      .reduce((s,c)=>s+(Date.now()-c.idleStart),0);
+    const avgIdleMin=totalStarts>0
+      ?Math.round((totalIdleMs+liveIdleMs)/totalStarts/60000*10)/10:null;
+
+    el.innerHTML=`<div class="ct" style="margin-bottom:8px">📈 Session Health</div>
+      ${attendanceNote}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;font-size:.74rem">
+        <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px">
+          <div style="color:var(--mu);font-size:.65rem;margin-bottom:3px">GAMES / PLAYER</div>
+          <div style="font-weight:700;color:var(--tx)">${avgG} avg <span style="color:${spread>3?'var(--or)':'var(--gr)'}">· spread ${spread}</span></div>
+          <div style="font-size:.67rem;color:var(--mu)">${minG}–${maxG} range</div>
+        </div>
+        <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px">
+          <div style="color:var(--mu);font-size:.65rem;margin-bottom:3px">MATCH QUALITY</div>
+          <div style="font-weight:700;color:var(--tx)">${qualLabel}</div>
+          <div style="font-size:.67rem;color:var(--mu)">avg ${avgGap}pt gap</div>
+        </div>
+        <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px">
+          <div style="color:var(--mu);font-size:.65rem;margin-bottom:3px">AVG WAIT TIME</div>
+          <div style="font-weight:700;color:${avgWaitMin>18?'var(--or)':'var(--tx)'}">${avgWaitMin} min</div>
+          <div style="font-size:.67rem;color:var(--mu)">${log.length} matches total</div>
+        </div>
+        <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px">
+          <div style="color:var(--mu);font-size:.65rem;margin-bottom:3px">AVG IDLE / MATCH</div>
+          <div style="font-weight:700;color:${avgIdleMin!==null&&avgIdleMin>4?'var(--or)':'var(--tx)'}">${avgIdleMin!==null?avgIdleMin+'min':'—'}</div>
+          <div style="font-size:.67rem;color:var(--mu)">between matches per court</div>
+        </div>
+      </div>`;
+  },
+
+  _renderQueue(){
+    const queue=S.session?.cfQueue||[];
+    const paused=S.session?.cfPaused||[];
+    const badge=document.getElementById('cf-queue-badge');if(badge)badge.textContent=queue.length;
+    const el=document.getElementById('cf-queue-list');
+    if(el){
+      if(!queue.length){el.innerHTML=`<div class="empty" style="padding:10px">All players on court 🏓</div>`;}
+      else{
+        const courtAvg=queue.reduce((s,q)=>s+this.cfRating(q.id),0)/queue.length;
+        const sorted=[...queue].sort((a,b)=>this.queuePriority(b,courtAvg)-this.queuePriority(a,courtAvg));
+        el.innerHTML=sorted.map((q,idx)=>{
+          const p=gp(q.id),sp=gsp(q.id);
+          const waitMin=Math.round((Date.now()-q.since)/60000);
+          const wcls=waitMin>=20?'cf-wait-hot':waitMin>=10?'cf-wait-warn':'cf-wait-ok';
+          const er=this.cfRating(q.id);
+          const rDisp=sp?.isNR?'<span class="nr-badge">NR</span>':Math.round(er);
+          const upNext=idx<2;
+          // Transparency reason — why is this player at this position?
+          const debt=this.waitDebt(q.id);
+          const reasons=[];
+          if(upNext)reasons.push(`<span style="font-size:.59rem;color:var(--gr);font-weight:700">▶ UP NEXT</span>`);
+          if(waitMin>=20)reasons.push(`<span style="font-size:.59rem;color:var(--re)">⏰ Long wait priority</span>`);
+          else if(debt>1.8)reasons.push(`<span style="font-size:.59rem;color:var(--or)">⚖ Wait-debt priority</span>`);
+          const gamesPlayed=sp?.matchesPlayed||0;
+          if(gamesPlayed===0)reasons.push(`<span style="font-size:.59rem;color:var(--pu)">✦ First game</span>`);
+          return `<div class="cf-queue-item" style="flex-direction:column;align-items:stretch;gap:3px">
+            <div style="display:flex;align-items:center;gap:7px">
+              <div style="font-size:.72rem;color:var(--m2);min-width:18px">${idx+1}</div>
+              <div style="flex:1;font-weight:600;font-size:.82rem">${esc(p?.name||'?')}${tagHtml(p)}</div>
+              <div style="font-size:.72rem;color:var(--mu)">${rDisp}</div>
+              <span class="cf-wait ${wcls}">${waitMin}m</span>
+              <button class="btn bg2 sm" style="padding:2px 7px;font-size:.65rem" onclick="cfPausePlayer('${q.id}')" title="Pause">⏸</button>
+            </div>
+            ${reasons.length?`<div style="display:flex;gap:5px;flex-wrap:wrap;padding-left:24px">${reasons.join('')}</div>`:''}</div>`;
+        }).join('');
+      }
+    }
+    // Paused players
+    const pw=document.getElementById('cf-paused-wrap');
+    const pl=document.getElementById('cf-paused-list');
+    if(pw&&pl){
+      pw.style.display=paused.length?'block':'none';
+      pl.innerHTML=paused.map(q=>{
+        const p=gp(q.id);
+        return `<div class="cf-paused-item">
+          <div style="flex:1;font-size:.82rem;font-weight:600">${esc(p?.name||'?')}</div>
+          <button class="btn bp sm" style="font-size:.65rem;padding:2px 8px" onclick="cfResumePlayer('${q.id}')">▶ Resume</button>
+        </div>`;
+      }).join('');
+    }
+  },
+};
+
+/* ── CF per-court elapsed timer + background tasks ── */
+const _cfAutoConfirmTimers={};  // courtNum → {countdown, intervalId}
+
+function cancelAutoConfirm(courtNum){
+  const t=_cfAutoConfirmTimers[courtNum];
+  if(t){clearInterval(t.intervalId);delete _cfAutoConfirmTimers[courtNum];}
+  const el=document.getElementById(`cf-ac-${courtNum}`);
+  if(el)el.remove();
+}
+
+function startAutoConfirm(courtNum){
+  cancelAutoConfirm(courtNum);
+  const dur=S.session?.cfAutoConfirmDur||30;
+  let countdown=dur;
+  const tick=()=>{
+    // Pause countdown if tab is not visible (organizer not looking)
+    if(document.hidden){return;}
+    countdown--;
+    const el=document.getElementById(`cf-ac-${courtNum}`);
+    if(el)el.textContent=`Auto-starting in ${countdown}s`;
+    if(countdown<=0){
+      cancelAutoConfirm(courtNum);
+      CF.confirmSuggestion(courtNum);
+    }
+  };
+  _cfAutoConfirmTimers[courtNum]={countdown,intervalId:setInterval(tick,1000)};
+  const sug=document.querySelector(`.cf-suggest[data-court="${courtNum}"] .cf-ac-wrap`);
+  if(sug)sug.innerHTML=`<span id="cf-ac-${courtNum}" style="font-size:.7rem;color:var(--mu)">Auto-starting in ${countdown}s</span><button class="btn bg2 sm" style="font-size:.65rem;padding:2px 8px" onclick="cancelAutoConfirm(${courtNum})">Cancel</button>`;
+}
+
+function startCFTick(){
+  if(_cfTick)return;
+  _cfTick=setInterval(()=>{
+    if(!S.session?.cfMode){clearInterval(_cfTick);_cfTick=null;return;}
+    const now=Date.now();
+    const extSec=(S.session.extendedMin||16)*60;
+
+    // 1. Per-court elapsed timers + extended flag
+    document.querySelectorAll('[data-cf-elapsed]').forEach(el=>{
+      const cn=parseInt(el.dataset.cfElapsed);
+      const ct=S.session.cfCourts?.[cn];if(!ct?.match?.startTime)return;
+      const elapsed=Math.floor((now-ct.match.startTime)/1000);
+      const m=Math.floor(elapsed/60),s=elapsed%60;
+      el.textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      el.className=`ct-timer${elapsed>extSec?' ovr':elapsed>extSec*0.85?' warn':''}`;
+      if(elapsed>extSec&&!ct.match.extended){
+        ct.match.extended=true;
+        const card=el.closest('.court-card');if(card)card.classList.add('extended');
+        toast(`Court ${cn} — extended ⏰`,'warn',4000);
+      }
+      // Score overdue: 3 min past expected game end → persistent alert on card
+      const overdueMs=(S.session.roundMin||12)*60*1000+3*60*1000;
+      if((now-ct.match.startTime)>overdueMs){
+        const card=el.closest('.court-card');
+        if(card&&!card.querySelector('.score-overdue')){
+          const banner=document.createElement('div');
+          banner.className='score-overdue';
+          banner.style.cssText='background:rgba(248,113,113,.15);border-top:1px solid rgba(248,113,113,.4);padding:6px 12px;font-size:.72rem;font-weight:700;color:var(--re);text-align:center';
+          banner.textContent='⚠ Score overdue — please submit';
+          card.appendChild(banner);
+        }
+      }
+    });
+
+    // 2. Refresh queue display every 20s to update wait times
+    if(now%20000<1100)CF._renderQueue();
+
+    // 3. Low queue depth check — alert if < courts playing × 1.5
+    const queueLen=(S.session.cfQueue||[]).length;
+    const activeCourts=Object.values(S.session.cfCourts||{}).filter(c=>c.status==='playing').length;
+    const minQueue=Math.ceil(activeCourts*1.5);
+    const ldEl=document.getElementById('cf-low-queue');
+    if(ldEl){
+      if(queueLen<4&&activeCourts>1){
+        ldEl.style.display='block';
+        ldEl.textContent=`⚠ Queue low (${queueLen} waiting, ${activeCourts} courts active) — consider dropping to ${activeCourts-1} court${activeCourts-1>1?'s':''}`;
+      }else ldEl.style.display='none';
+    }
+
+    // 4. Auto-confirm countdown ticks handled by their own intervals (startAutoConfirm)
+  },1000);
+}
+
+function toggleCFAutoConfirm(){
+  if(!S.session)return;
+  S.session.cfAutoConfirm=!S.session.cfAutoConfirm;
+  const btn=document.getElementById('cf-ac-toggle');
+  if(btn){btn.classList.toggle('bc',S.session.cfAutoConfirm);btn.classList.toggle('bg2',!S.session.cfAutoConfirm);}
+  toast(S.session.cfAutoConfirm?'Auto-confirm ON — 30s countdown per court ⚡':'Auto-confirm OFF',S.session.cfAutoConfirm?'ok':'warn');
+  STORE.save();
+}
+
+function cfMaybeAutoConfirm(courtNum){
+  if(!S.session?.cfAutoConfirm)return;
+  startAutoConfirm(courtNum);
+}
+
+
+
 function init(){
-  // Wire up UI controls (no data yet — Firebase delivers it)
   initCourtPills('cpills-setup',n=>{S.courts=n;renderRoster();updateRotationPreview();});
   initCourtPills('cpills-live',n=>{
-    S.courts=n;if(S.session){S.session.courts=n;STORE.save();}
-    toast(`Courts → ${n} (next round)`,'ok');
+    S.courts=n;if(S.session&&!S.session.cfMode){S.session.courts=n;STORE.save();}
+    if(S.session?.cfMode){
+      S.session.courts=n;STORE.save();
+      // Regenerate suggestions for newly active courts
+      for(let c=1;c<=n;c++){if(!S.session.cfCourts[c])S.session.cfCourts[c]={status:'ready',match:null};}
+      for(let c=1;c<=n;c++){if(S.session.cfCourts[c].status==='ready')CF.generateSuggestion(c,null);}
+      renderLive();
+    }
+    toast(`Courts → ${n}`,'ok');
   });
-
   document.querySelectorAll('.tb').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.tab)));
   document.getElementById('cfm-bg').addEventListener('click',function(e){if(e.target===this)document.getElementById('cfm-no').click();});
-
-  // initPlayerMode early so PLAYER_MODE flag is set before Firebase arrives
+  selectMode('round');
   initPlayerMode();
-
-  // Connect to Firebase — _applyRemote() handles first render + hides loading overlay
   SYNC._updateBadge('connecting');
   SYNC.autoConnect();
-
-
 }
 
 document.addEventListener('DOMContentLoaded',init);
