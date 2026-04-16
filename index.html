@@ -4211,7 +4211,7 @@ const CF={
     // redirect in almost all cases; won't block when the queue is thin (pass 3).
     const lastLost=S.session?.cfPairLastLost||{};
     const justLostPen=(lastLost[t1k]?60:0)+(lastLost[t2k]?60:0);
-    return{score:total+nrProtPen+losingPairPen+justLostPen,meta,t1,t2};
+    return{score:total+nrProtPen+losingPairPen+justLostPen,meta,t1,t2,group};
   },
 
   /* Generate a suggestion for a court */
@@ -4584,7 +4584,11 @@ const CF={
     //   - Single STORE.save() after generation: one Firebase write captures both the
     //     completed score state AND the new suggestion together, eliminating the race
     //     window where _applyRemote could wipe the score between two separate saves.
-    this.batchGenerateSuggestions([courtNum],{[courtNum]:m});
+    // CRITICAL: suggestion generation must NEVER block score saving.
+    // Wrap in try-catch — any runtime error in matchmaking is non-fatal.
+    // Score, ELO, queue re-entry and stats are already committed above this line.
+    try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
+    catch(e){console.error('CF suggestion error (non-fatal):',e);}
     STORE.save();renderLive();renderHistory();renderStandings();updateHeader();
 
     // Match quality score and win probability context
