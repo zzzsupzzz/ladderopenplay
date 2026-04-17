@@ -380,13 +380,12 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <div id="flow-mode-opts">
       <div style="margin-bottom:8px"><label>SESSION NAME</label><input id="sess-name-flow" class="inp" placeholder="Saturday Open Play…"/></div>
       <div class="g2" style="margin-bottom:8px">
-        <div><label>GAME DURATION (MIN)</label><input id="round-dur" class="inp" type="number" value="12" min="5" max="90" title="How long each game lasts — affects wait-debt priority"/></div>
-        <div><label>EXTENDED FLAG (MIN)</label><input id="extended-min" class="inp" type="number" value="16" min="8" max="60" title="Flag court as extended after this many minutes"/></div>
+        <div><label>EXTENDED FLAG (MIN)</label><input id="extended-min" class="inp" type="number" value="16" min="8" max="60" title="Flag a court as ⏰ Extended after this many minutes — visual warning only"/></div>
       </div>
       <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px;font-size:.74rem;color:var(--mu);line-height:1.7">
         <span style="color:var(--cy);font-weight:700">Skill-based queue</span> — best match pulled when a court opens.<br/>
         <span style="color:var(--gr);font-weight:700">NR players</span> — rated after 5 games; set level (NR-B/M/A) when adding.<br/>
-        <span style="color:var(--or);font-weight:700">Wait debt</span> — long-waiters get priority; players waiting ≥1 game always included.<br/>
+        <span style="color:var(--or);font-weight:700">Fair play</span> — everyone plays once before anyone plays twice; missed 3 rounds = guaranteed next spot.<br/>
         <span style="color:var(--go);font-weight:700">Partner split</span> — winning pair splits after 2 consecutive wins together.
       </div>
     </div>
@@ -415,6 +414,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
       <div style="margin-left:auto;display:flex;gap:5px">
         <button class="btn bg2 sm" onclick="openImportModal()">📥 Import</button>
         <button class="btn bg2 sm" onclick="openExportModal()">📤 Export</button>
+        <button class="btn bg2 sm" title="Reconstruct player records from archived sessions if database was wiped" onclick="rebuildDbFromArchive()">🔧 Rebuild</button>
       </div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
@@ -995,17 +995,17 @@ function startCourtTimer(matchId){
   tickCT();
 }
 function tickCT(){
-  const durSec=(S.session?.roundMin||12)*60;
+  // CF mode: play until done — timer counts UP, warns after extendedMin
+  const extMin=(S.session?.extendedMin||16)*60; // warn threshold in seconds
   Object.entries(CT).forEach(([id,ct])=>{
     if(!ct.running)return;
     const el=document.querySelector(`[data-ct="${id}"]`);if(!el)return;
-    const rem=durSec-Math.floor((Date.now()-ct.startMs)/1000);
-    if(rem<=0){el.textContent='⏰ TIME';el.className='ct-timer ovr';}
-    else{
-      const m=Math.floor(rem/60),s=rem%60;
-      el.textContent=`${m}:${String(s).padStart(2,'0')}`;
-      el.className='ct-timer'+(rem<=120?' warn':'');
-    }
+    const elapsed=Math.floor((Date.now()-ct.startMs)/1000);
+    const m=Math.floor(elapsed/60),s=elapsed%60;
+    el.textContent=`${m}:${String(s).padStart(2,'0')}`;
+    if(elapsed>=extMin){el.className='ct-timer ovr';}
+    else if(elapsed>=extMin-120){el.className='ct-timer warn';}
+    else{el.className='ct-timer';}
   });
 }
 function clearAllCT(){
@@ -1470,7 +1470,7 @@ function startSession(){
   _buildSessionTogetherCache(); // pre-warm before first match generation
   const arr=[...S.checkedIn];if(arr.length<4){toast('Need at least 4 players','err');return;}
   const isCF=true; // Round Mode removed — always Continuous Flow
-  S.roundMin=parseInt(document.getElementById('round-dur')?.value)||12;
+  S.roundMin=0; // CF mode: play until done — no fixed duration
   S.extendedMin=parseInt(document.getElementById('extended-min')?.value)||16;
   const nameEl=isCF?document.getElementById('sess-name-flow'):document.getElementById('sess-name');
   const name=(nameEl?.value||'').trim()||`Open Play — ${fmtDate()}`;
@@ -1492,14 +1492,14 @@ function startSession(){
     }),
     partnerHx:{},oppHx:{},oppHxTime:{},
     nrPairingHx:{},
-    cfQueue:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,
+    cfQueue:[],cfPinnedIds:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,
     cfMatchupHx:{},cfGroupHx:{},cfPairConsec:{},cfPairWins:{},cfMustSplitPair:null,cfPaused:[],
     cfPairSessionCount:{},cfPairLastAt:{},cfPairLastLost:{},
     neverPair:{},ratingOverrides:{},
     status:'active'
   };
   STORE.save();updateHeader();startElapsed();switchTab('live');
-  CF.initQueue();renderLive();toast('⚡ Continuous Flow started!','ok');
+  CF.initQueue();renderLive();renderStandings();renderHistory();toast('⚡ Continuous Flow started!','ok');
 }
 
 
@@ -1519,10 +1519,10 @@ function applyScore(m,s1,s2){
   [...m.t1,...m.t2].forEach((id,i)=>{
     const sp=gsp(id);if(!sp)return;
     sp.sRating=Math.max(400,sp.sRating+m.eloDeltas[i]);sp.matchesPlayed++;
-    // Track court time in round mode (approximate via roundMin — actual match time not recorded)
-    if(!S.session.cfMode){
-      const roundMs=(S.session.roundMin||12)*60000;
-      sp.timeOnCourtMs=(sp.timeOnCourtMs||0)+roundMs;
+    // Round-mode only: approximate court time from stored roundMin (archived sessions)
+    // Dead code for current CF sessions — CF tracks actual durMs from submitScore
+    if(!S.session.cfMode&&S.session.roundMin){
+      sp.timeOnCourtMs=(sp.timeOnCourtMs||0)+(S.session.roundMin*60000);
     }
     if(i<2){sp.ptsFor+=s1;sp.ptsAgainst+=s2;}else{sp.ptsFor+=s2;sp.ptsAgainst+=s1;}
     if(s1===s2)sp.ties=(sp.ties||0)+1;else if((i<2&&s1>s2)||(i>=2&&s2>s1))sp.wins++;else sp.losses++;
@@ -1694,7 +1694,7 @@ function midAdd(id){
   if(!S.session)return;const p=gp(id);if(!p)return;
   if(S.session.activePlayers.includes(id)){toast('Already in session','warn');return;}
   S.session.activePlayers.push(id);
-  const missed=Math.max(0,S.session.round-1);
+  const missed=Math.max(0,(S.session.round||0)-1);
   const startR=p.isNR?(()=>{const rated=S.session.players.filter(sp=>!sp.isNR).map(sp=>sp.sRating||1000);return rated.length?Math.round(rated.reduce((a,b)=>a+b,0)/rated.length):1000;})():(p.rating||1000);
   if(!gsp(id)){
     S.session.players.push({id,name:p.name,tag:p.tag||'',isNR:p.isNR||false,isSeeding:false,
@@ -1705,8 +1705,9 @@ function midAdd(id){
     // CF: add to queue with elevated priority — backdated by 1 full game duration
     // so they rank above just-returned players and get their first game quickly.
     if(!S.session.cfQueue)S.session.cfQueue=[];
-    const backdateMs=(S.session.roundMin||12)*60000; // 1 full game duration
-    S.session.cfQueue.push({id,since:Date.now()-backdateMs-missed*S.session.roundMin*60000*0.5,consec:0});
+    // Backdate by extended flag window so late joiners get priority over recently-returned players
+    const backdateMs=(S.session.extendedMin||16)*60000;
+    S.session.cfQueue.push({id,since:Date.now()-backdateMs,consec:0});
     // Regenerate suggestions for ready courts
     for(let c=1;c<=S.session.courts;c++){
       if(S.session.cfCourts?.[c]?.status==='ready')CF.generateSuggestion(c,null);
@@ -1730,6 +1731,30 @@ function midRemove(id){
     S.session.cfPaused=(S.session.cfPaused||[]).filter(q=>q.id!==id);
   }
   STORE.save();toast(`${p.name} marked as left`,'warn');renderLive();renderRosterModal();
+}
+
+function cfPinPlayer(id){
+  if(!S.session)return;
+  if(!S.session.cfPinnedIds)S.session.cfPinnedIds=[];
+  // Max 4 pins (one full court worth)
+  if(S.session.cfPinnedIds.length>=4){toast('Max 4 players can be pinned at once','warn');return;}
+  if(S.session.cfPinnedIds.includes(id)){toast('Already pinned','warn');return;}
+  // Only queue members can be pinned
+  if(!S.session.cfQueue.find(q=>q.id===id)){toast('Player must be in queue to pin','warn');return;}
+  S.session.cfPinnedIds.push(id);
+  STORE.save();renderLive();
+  toast('📌 '+esc(gp(id)?.name||'?')+' pinned to front of queue','ok');
+}
+
+function cfUnpinPlayer(id){
+  if(!S.session)return;
+  S.session.cfPinnedIds=(S.session.cfPinnedIds||[]).filter(x=>x!==id);
+  STORE.save();renderLive();
+}
+
+// Clear all pins (e.g. after a court is confirmed)
+function cfClearPins(){
+  if(S.session)S.session.cfPinnedIds=[];
 }
 
 function cfPausePlayer(id){
@@ -1780,7 +1805,7 @@ function toggleTimer(){S.timerRunning?stopTimer():startTimer();}
 function startTimer(){
   if(S.timerRunning)return;
   // Use session roundMin if available (correct even on page reload)
-  if(S.timerSec===0)S.timerSec=(S.session?.roundMin||parseInt(document.getElementById('round-dur')?.value)||S.roundMin)*60;
+  if(S.timerSec===0)S.timerSec=(S.session?.extendedMin||S.extendedMin||16)*60; // countdown from extended flag threshold
   S.timerRunning=true;
   const te=document.getElementById('htimer');if(te)te.style.display='block';
   document.getElementById('timer-btn').textContent='⏸ Pause';
@@ -1996,6 +2021,41 @@ function deleteMatch(matchId){
 // Given N players and C courts, returns sit-out and play-streak thresholds.
 // Always pure 4-player-per-court mode — partners rotate via smart grouping.
 /* ── ALL-TIME RATING RECALCULATION ───────────────── */
+function rebuildDbFromArchive(){
+  // Reconstruct S.db from archived + active session player records.
+  // Use case: db got wiped but archive sessions still have player history.
+  const allSessions=[...S.archive];
+  if(S.session)allSessions.push(S.session);
+  if(!allSessions.length){toast('No sessions in archive to rebuild from','warn');return;}
+
+  const seen=new Set(S.db.map(p=>p.id));
+  let added=0;
+  allSessions.forEach(sess=>{
+    (sess.players||[]).forEach(sp=>{
+      if(!seen.has(sp.id)){
+        // Reconstruct from session record — use startRating as the base rating
+        S.db.push({
+          id:sp.id,
+          name:sp.name||'Unknown',
+          tag:sp.tag||'',
+          rating:sp.startRating||1000,
+          baseRating:sp.startRating||1000,
+          isNR:sp.isNR||false,
+          nrLevelHint:sp.nrLevelHint||null,
+          isSeeding:false,
+          gamesPlayed:0,wins:0,losses:0,ties:0,
+          createdAt:sess.date||new Date().toISOString()
+        });
+        seen.add(sp.id);
+        added++;
+      }
+    });
+  });
+  recalcAllTimeRatings();
+  STORE.save();renderDB();renderAllTime();renderStandings();
+  toast(added>0?`✅ Rebuilt ${added} player${added>1?'s':''} from archive — ratings recalculated`:'✅ DB already had all players — ratings recalculated','ok');
+}
+
 function recalcAllTimeRatings(){
   _invalidateMatchmakingCaches();
   // Recompute S.db ratings/stats from remaining archived sessions + active session
@@ -3713,18 +3773,20 @@ const CF={
     return base;
   },
 
-  /* Wait-debt score: how much longer has a player been waiting vs playing */
-  waitDebt(id){
+  /* Match-Gap: how many session matches have run since this player last played.
+     Pure game-count — not affected by how fast/slow the organizer confirms scores.
+     Gap of 0 = just played. Gap of NC*3 = missed ~3 full "waves" = force-include. */
+  matchGap(id){
     const sp=gsp(id);if(!sp)return 0;
-    const qEntry=S.session?.cfQueue?.find(q=>q.id===id);
-    const liveWait=qEntry?Math.max(0,Date.now()-qEntry.since):0;
-    const waited=(sp.timeInQueueMs||0)+liveWait;
-    const played=sp.timeOnCourtMs||0;
-    // Never played: debt escalates with wait time, guaranteeing pool inclusion
-    // after ~1 game duration of waiting. Formula: 10 + minutesWaited grows quickly.
-    if(played===0)return waited>0?(10+waited/60000):0;
-    return waited/Math.max(1,played);
+    const current=S.session?.cfMatchCount||0;
+    // Never played: gap = current match count (been waiting since game 0)
+    if((sp.matchesPlayed||0)===0)return current+1; // +1 so 0 > any played player at start
+    const lastAt=sp.lastPlayedAtMatch??0;
+    return current-lastAt;
   },
+
+  /* Keep waitDebt as legacy alias — used for backwards compat in display only */
+  waitDebt(id){return this.matchGap(id);},
 
   /* Queue priority — higher = picked sooner */
   // Hunger score: how many fewer games this player has vs session average
@@ -3750,13 +3812,12 @@ const CF={
     // Old formula penalized outlier-rated players at t=0 causing permanent starvation.
     // New: 0–5 bonus for skill closeness, wait time always dominates.
     const skillFit=Math.max(0,5-Math.abs(er-courtAvg)*0.02);
-    const debt=this.waitDebt(qEntry.id);
-    const debtBonus=debt>1.2?15*(debt-1):0;
-    // Urgency ramps up sharply after 1.5× roundMin to force inclusion
-    const roundMin=S.session?.roundMin||12;
-    const urgency=waitMin>roundMin*1.5?(waitMin-roundMin*1.5)*4:waitMin>roundMin?(waitMin-roundMin)*2:0;
+    const gap=this.matchGap(qEntry.id);
+    const nc=S.session?.courts||1;
+    // MGL bonus: ramps steeply as gap exceeds NC*2, maxes at NC*3 (force-include territory)
+    const gapBonus=gap>nc*2?Math.min(200,(gap-nc*2)*25):gap>nc?gap*4:0;
     const hunger=this.hungerBoost(qEntry.id);
-    return waitMin*3+skillFit+debtBonus+urgency+hunger;
+    return waitMin*2+skillFit+gapBonus+hunger;
   },
 
   /* Init queue at session start */
@@ -3817,8 +3878,9 @@ const CF={
     const consecPen=(consec(t1k)>=2?30:consec(t1k)>=1?8:0)+(consec(t2k)>=2?30:consec(t2k)>=1?8:0);
     const avgWait=group.reduce((s,p)=>s+p.waitMin,0)/4;
     const waitBonus=-avgWait*0.6;
-    const debtBonus=-group.reduce((s,p)=>s+this.waitDebt(p.id),0)*4;
-    const total=crossImb+(t1gap+t2gap)+partRpt*3+oppRpt*5+matchRpt+splitPen+consecPen+waitBonus+debtBonus;
+    // MGL gap bonus: reduce penalty for players who've waited many matches
+    const gapBonus=-group.reduce((s,p)=>s+Math.min(this.matchGap(p.id)*2,40),0);
+    const total=crossImb+(t1gap+t2gap)+partRpt*3+oppRpt*5+matchRpt+splitPen+consecPen+waitBonus+gapBonus;
     const meta={splitOverride:splitPen>0&&splitPen<200,repeatMatchup:matchRpt>0,
       rawT1gap,rawT2gap};
     // NR protection: for first 3 games, penalise pairings far from their estimated level
@@ -3979,14 +4041,28 @@ const CF={
         currentAlloc.pop();
       }
     };
-    // Fair pool: force-include players waiting ≥ 1 game duration at the front.
-    // Prevents "stuck players" when organizer confirms quickly (1-2 min) — 
-    // those players would otherwise lose priority vs freshly-returned players.
-    const roundMs=(S.session.roundMin||12)*60000;
-    const forcedIn=pool.filter(p=>((Date.now()-p.qEntry.since)>=roundMs));
-    const forcedIds=new Set(forcedIn.map(p=>p.id));
-    const fairPool=[...forcedIn,...pool.filter(p=>!forcedIds.has(p.id))];
+    // TIER 0: Organizer-pinned players — absolute top, regardless of anything else
+    const pinnedIds=new Set(S.session.cfPinnedIds||[]);
+    const tier0=pool.filter(p=>pinnedIds.has(p.id));
+    const tier0Ids=new Set(tier0.map(p=>p.id));
+    // TIER 1: Players who haven't played any game yet — first-game guarantee
+    const tier1=pool.filter(p=>!tier0Ids.has(p.id)&&(gsp(p.id)?.matchesPlayed||0)===0);
+    const tier1Ids=new Set(tier1.map(p=>p.id));
+    // TIER 2: Players whose matchGap >= NC*3 — missed 3+ full waves, force them in
+    // This is pure game-count based: works regardless of confirmation speed
+    const mglThreshold=(S.session.courts||1)*3;
+    const tier2=pool.filter(p=>!tier1Ids.has(p.id)&&this.matchGap(p.id)>=mglThreshold);
+    const tier2Ids=new Set(tier2.map(p=>p.id));
+    // TIER 3: Everyone else in normal priority order
+    const tier3=pool.filter(p=>!tier1Ids.has(p.id)&&!tier2Ids.has(p.id));
+    // Compose: pinned → first-timers → MGL-waiters → normal pool
+    const fairPool=[...tier0,...tier1,...tier2,...tier3];
     const jointSearchCap=nc*4;
+    // Search pool: always include all priority tiers.
+    // tier0 (pinned) and tier1 (never-played) have priority via fairPool ordering.
+    // MGL/tier2 players are guaranteed to be in the window IF we use fairPool directly.
+    // Use fairPool as-is — the tier ordering already puts priority players first.
+    // The post-search MGL override (below) enforces that tier2 players aren't excluded.
     const searchPool=fairPool.slice(0,Math.min(jointSearchCap,n));
     const doJoint=(nc<=3);
     if(doJoint)tryAlloc(0,searchPool,[],0);
@@ -4013,18 +4089,43 @@ const CF={
       if(doJoint)tryAllocRelaxed(0,searchPool,[],0);
     }
 
-    // Fallback to greedy if joint search found nothing
+    // Post-joint-search: verify MGL/tier2 players are actually included.
+    // The joint optimizer may have excluded them for a better total score — override this.
+    if(bestAlloc&&tier2.length>0){
+      const allSelected=new Set(bestAlloc.flatMap(b=>b.group.map(p=>p.id)));
+      const unservedTier2=tier2.filter(p=>!allSelected.has(p.id));
+      if(unservedTier2.length>0){
+        // Force greedy path to ensure MGL-priority players get in
+        bestAlloc=null;
+      }
+    }
+    // Fallback to greedy if joint search found nothing OR MGL override triggered
     if(!bestAlloc){
-      // Greedy fallback: used for nc>=4 courts OR when joint search fails
-      // For nc>=4, doJoint=false so bestAlloc stays null and we always reach here.
+      // Greedy fallback: used for nc>=4 courts, MGL override, or joint search failure.
+      // Force-anchors on tier2 (MGL) and tier0 (pinned) players so they always get picked.
       let rem=[...fairPool];
       readyCourts.forEach(c=>{
         if(rem.length<4){S.session.cfSuggestions[c]=null;return;}
-        const best=this._findBestGroup(rem.slice(0,Math.min(12,rem.length)),mustSplit,nrIds,n);
+        // If any priority players (MGL / pinned) remain unserved, anchor group on them.
+        const unserved=rem.filter(p=>tier2.some(t=>t.id===p.id)||tier0.some(t=>t.id===p.id));
+        let best=null;
+        if(unserved.length>0){
+          const anchor=unserved[0];
+          const others=rem.filter(p=>p.id!==anchor.id);
+          let bScore=Infinity;
+          const olen=Math.min(others.length,14);
+          for(let i=0;i<olen-2;i++)for(let j=i+1;j<olen-1;j++)for(let k=j+1;k<olen;k++){
+            const g=[anchor,others[i],others[j],others[k]];
+            const res=this._scoreGroup(g,mustSplit);
+            if(!this._withinTeamGapOk(res.t1,res.t2,500))continue;
+            if(res.score<bScore){bScore=res.score;best={...res,group:g};}
+          }
+        }
+        if(!best)best=this._findBestGroup(rem.slice(0,Math.min(12,rem.length)),mustSplit,nrIds,n);
         if(best){
           this._storeSuggestion(c,best,finishedMatchByCourtNum?.[c]);
           const usedIds=new Set(best.group.map(g=>g.id));
-          rem=rem.filter(p=>!usedIds.has(p.id));  // strict dedup
+          rem=rem.filter(p=>!usedIds.has(p.id));
         } else S.session.cfSuggestions[c]=null;
       });
     }else{
@@ -4107,13 +4208,21 @@ const CF={
   },
 
   _generateSingleSuggestion(courtNum,pool,mustSplit,nrIds,finishedMatch){
-    // Fairness guarantee: if any player has been starving (high hunger = played far
-    // fewer games than avg), force them into this suggestion regardless of skill gap.
-    // Without this, 700-rated players in a 1000+ queue can never form a valid team
-    // within the 350pt gap cap, so they'd wait forever despite hunger boost.
-    const starving=pool.find(p=>this.hungerBoost(p.id)>=50);
+    // Apply same tier ordering as multi-court: first-timers → MGL-waiters → normal
+    // This ensures the single-court path also respects the first-game guarantee
+    const pinnedSg=new Set(S.session.cfPinnedIds||[]);
+    const tier0p=pool.filter(p=>pinnedSg.has(p.id));
+    const tier0pIds=new Set(tier0p.map(p=>p.id));
+    const tier1p=pool.filter(p=>!tier0pIds.has(p.id)&&(gsp(p.id)?.matchesPlayed||0)===0);
+    const tier1pIds=new Set(tier1p.map(p=>p.id));
+    const mgl=(S.session.courts||1)*3;
+    const tier2p=pool.filter(p=>!tier0pIds.has(p.id)&&!tier1pIds.has(p.id)&&this.matchGap(p.id)>=mgl);
+    const tier2pIds=new Set(tier2p.map(p=>p.id));
+    const tier3p=pool.filter(p=>!tier0pIds.has(p.id)&&!tier1pIds.has(p.id)&&!tier2pIds.has(p.id));
+    const orderedPool=[...tier0p,...tier1p,...tier2p,...tier3p];
+    const starving=orderedPool.find(p=>this.hungerBoost(p.id)>=50);
     if(starving){
-      const others=pool.filter(p=>p.id!==starving.id).slice(0,15);
+      const others=orderedPool.filter(p=>p.id!==starving.id).slice(0,15);
       const n=others.length;
       let best=null,bestScore=Infinity;
       for(let i=0;i<n-2;i++)for(let j=i+1;j<n-1;j++)for(let k=j+1;k<n;k++){
@@ -4125,14 +4234,14 @@ const CF={
       }
       if(best){this._storeSuggestion(courtNum,best,finishedMatch);return;}
     }
-    // Normal path: sorted pool, high-hunger players first
-    const highHunger=pool.filter(p=>this.hungerBoost(p.id)>10)
-                         .sort((a,b)=>this.hungerBoost(b.id)-this.hungerBoost(a.id));
-    const highHungerIds=new Set(highHunger.map(p=>p.id));
-    const normalPool=pool.filter(p=>!highHungerIds.has(p.id));
-    const merged=[...highHunger,...normalPool];
-    const top=merged.slice(0,Math.min(Math.max(16,highHunger.length+8),merged.length));
-    const best=this._findBestGroup(top,mustSplit,nrIds,pool.length);
+    // HARD FIRST-GAME GUARANTEE: if >=4 first-timers exist, search ONLY within them.
+    // This prevents the optimizer from "accidentally" picking a better match that
+    // includes already-played players when un-played players are available.
+    const tier1Only=tier1p.length>=4;
+    const constrainedPool=tier1Only?tier1p:orderedPool;
+    const top=constrainedPool.slice(0,Math.min(Math.max(16,constrainedPool.length),constrainedPool.length));
+    const best=this._findBestGroup(top,mustSplit,nrIds,orderedPool.length)||
+               (tier1Only?this._findBestGroup(orderedPool.slice(0,16),mustSplit,nrIds,orderedPool.length):null);
     this._storeSuggestion(courtNum,best,finishedMatch);
   },
 
@@ -4174,6 +4283,10 @@ const CF={
       if(qEntry&&sp){sp.timeInQueueMs=(sp.timeInQueueMs||0)+(now-qEntry.since);}
     });
     this.dequeue(sug.allIds);
+    // Clear any pins that were satisfied by this confirmation
+    if(S.session.cfPinnedIds){
+      S.session.cfPinnedIds=S.session.cfPinnedIds.filter(id=>!sug.allIds.includes(id));
+    }
     const prevCourt=S.session.cfCourts[courtNum]||{};
     const idleMs=prevCourt.idleStart?Math.max(0,now-prevCourt.idleStart):0;
     const match={id:uid(),courtNum,t1:sug.t1,t2:sug.t2,
@@ -4270,6 +4383,10 @@ const CF={
     Object.keys(S.session.cfPairConsec||{}).forEach(k=>{
       const[a,b]=k.split('|');
       if(allPlayed.has(a)||allPlayed.has(b))S.session.cfPairConsec[k]=0;
+    });
+    // Record lastPlayedAtMatch for MGL system (before cfMatchCount increments)
+    [...m.t1,...m.t2].forEach(id=>{
+      const sp=gsp(id);if(sp)sp.lastPlayedAtMatch=S.session.cfMatchCount||0;
     });
     // Matchup history
     if(!S.session.cfMatchupHx)S.session.cfMatchupHx={};
@@ -4659,12 +4776,15 @@ const CF={
           const er=this.cfRating(q.id);
           const rDisp=sp?.isNR?'<span class="nr-badge">NR</span>':Math.round(er);
           const upNext=idx<2;
+          const isPinned=(S.session.cfPinnedIds||[]).includes(q.id);
           // Transparency reason — why is this player at this position?
           const debt=this.waitDebt(q.id);
           const reasons=[];
-          if(upNext)reasons.push(`<span style="font-size:.59rem;color:var(--gr);font-weight:700">▶ UP NEXT</span>`);
+          if(isPinned)reasons.push(`<span style="font-size:.59rem;color:var(--pu);font-weight:700">📌 PINNED</span>`);
+          else if(upNext)reasons.push(`<span style="font-size:.59rem;color:var(--gr);font-weight:700">▶ UP NEXT</span>`);
           if(waitMin>=20)reasons.push(`<span style="font-size:.59rem;color:var(--re)">⏰ Long wait priority</span>`);
-          else if(debt>1.8)reasons.push(`<span style="font-size:.59rem;color:var(--or)">⚖ Wait-debt priority</span>`);
+          const gap2=CF.matchGap(q.id);const nc2=S.session?.courts||1;
+          if(gap2>=nc2*3)reasons.push(`<span style="font-size:.59rem;color:var(--or)">⚖ Missed ${gap2} matches — priority</span>`);
           const gamesPlayed=sp?.matchesPlayed||0;
           if(gamesPlayed===0)reasons.push(`<span style="font-size:.59rem;color:var(--pu)">✦ First game</span>`);
           return `<div class="cf-queue-item" style="flex-direction:column;align-items:stretch;gap:3px">
@@ -4673,7 +4793,10 @@ const CF={
               <div style="flex:1;font-weight:600;font-size:.82rem">${esc(p?.name||'?')}${tagHtml(p)}</div>
               <div style="font-size:.72rem;color:var(--mu)">${rDisp}</div>
               <span class="cf-wait ${wcls}">${waitMin}m</span>
-              <button class="btn bg2 sm" style="padding:2px 7px;font-size:.65rem" onclick="cfPausePlayer('${q.id}')" title="Pause">⏸</button>
+              <button class="btn bg2 sm" style="padding:2px 7px;font-size:.65rem" onclick="cfPausePlayer('${q.id}')" title="Take a break">⏸</button>
+              ${isPinned?
+                `<button class="btn" style="padding:2px 7px;font-size:.65rem;background:rgba(168,85,247,.15);border-color:var(--pu);color:var(--pu)" onclick="cfUnpinPlayer('${q.id}')" title="Remove pin">📌</button>`:
+                `<button class="btn bg2 sm" style="padding:2px 7px;font-size:.65rem" onclick="cfPinPlayer('${q.id}')" title="Pin to front of queue">📌</button>`}
             </div>
             ${reasons.length?`<div style="display:flex;gap:5px;flex-wrap:wrap;padding-left:24px">${reasons.join('')}</div>`:''}</div>`;
         }).join('');
@@ -4746,7 +4869,7 @@ function startCFTick(){
         toast(`Court ${cn} — extended ⏰`,'warn',4000);
       }
       // Score overdue: 3 min past expected game end → persistent alert on card
-      const overdueMs=(S.session.roundMin||12)*60*1000+3*60*1000;
+      const overdueMs=(S.session.extendedMin||16)*60*1000+5*60*1000; // extended + 5min grace
       if((now-ct.match.startTime)>overdueMs){
         const card=el.closest('.court-card');
         if(card&&!card.querySelector('.score-overdue')){
