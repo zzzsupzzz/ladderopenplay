@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>🏓 Pickleball Ladder V19</title>
+<title>🏓 Pickleball Ladder V20</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
@@ -749,6 +749,14 @@ const SYNC={
       const localSugs = S.session?.cfSuggestions
         ? Object.fromEntries(Object.entries(S.session.cfSuggestions).filter(([,v])=>v))
         : {};
+      // Preserve playing court matches — Firebase echo can arrive with stale 'ready' state
+      // before the confirm write is acknowledged, causing on-court players to reappear in queue
+      const localPlayingCourts = {};
+      if(S.session?.cfMode&&S.session.cfCourts){
+        Object.entries(S.session.cfCourts).forEach(([c,ct])=>{
+          if(ct.status==='playing'&&ct.match)localPlayingCourts[c]=ct;
+        });
+      }
       S.db=remote.db||[];
       S.session=remote.session||null;
       S.archive=remote.archive||[];
@@ -760,6 +768,18 @@ const SYNC={
           Object.entries(localSugs).forEach(([c,sug])=>{
             if(!S.session.cfSuggestions[c])S.session.cfSuggestions[c]=sug;
           });
+          // Restore locally-playing courts: if remote shows 'ready' but we locally
+          // confirmed a match 100ms ago, keep our playing state until Firebase catches up
+          S.session.cfCourts=S.session.cfCourts||{};
+          Object.entries(localPlayingCourts).forEach(([c,ct])=>{
+            const remote=S.session.cfCourts[c];
+            if(!remote||remote.status==='ready')S.session.cfCourts[c]=ct;
+          });
+          // Remove from queue any players who are now confirmed on a court
+          const onCourtIds=new Set(Object.values(S.session.cfCourts)
+            .filter(ct=>ct.status==='playing'&&ct.match)
+            .flatMap(ct=>[...ct.match.t1,...ct.match.t2]));
+          if(onCourtIds.size)S.session.cfQueue=(S.session.cfQueue||[]).filter(q=>!onCourtIds.has(q.id));
         }
         // Guard all session fields — safe for sessions saved before these fields existed
         S.session.soStreak=S.session.soStreak||{};
@@ -1104,7 +1124,7 @@ const ELO={
 // Why keep all-time at all? Prevents wild over-reaction in rounds 1-2 where
 // one lucky win would shuffle the courts completely.
 function effectiveRating(id, round){
-  const TRANSITION_ROUNDS=2;
+  const TRANSITION_ROUNDS=3; // fully session-blended after 4 personal games
   const p=gp(id),sp=gsp(id);
   const allTime=p?.rating||1000;
   if(!sp||!round||round<1)return allTime;
@@ -1204,7 +1224,17 @@ const MM={
     const lastLost=S.session?.cfPairLastLost||{};
     const t1rk=CF.pairKey(t1[0].id,t1[1].id),t2rk=CF.pairKey(t2[0].id,t2[1].id);
     const justLostPen=(lastLost[t1rk]?60:0)+(lastLost[t2rk]?60:0);
-    return rp_pen+ro_pen+crossImb+(t1gap+t2gap)+neverRpt+justLostPen;
+    // Round-mode matchup repeat: use oppHxTime for recency decay
+    const now2=S.session?.round||0;
+    const lastT1T2=Math.max(
+      (S.session?.oppHxTime?.[t1[0].id]?.[t2[0].id]||0),
+      (S.session?.oppHxTime?.[t1[0].id]?.[t2[1].id]||0),
+      (S.session?.oppHxTime?.[t1[1].id]?.[t2[0].id]||0),
+      (S.session?.oppHxTime?.[t1[1].id]?.[t2[1].id]||0)
+    );
+    const roundsSince=lastT1T2>0?now2-lastT1T2:999;
+    const matchRptPen=roundsSince<3?Math.max(0,90-roundsSince*30):0;
+    return rp_pen+ro_pen+crossImb+(t1gap+t2gap)+neverRpt+justLostPen+matchRptPen;
   },
   bestPair(four){
     const[a,b,c,d]=four;
@@ -1515,7 +1545,7 @@ function startSession(){
     round:0,rounds:[],sitOutHx:{},soStreak:{},plStreak:{},partnerHx:{},oppHx:{},oppHxTime:{},
     nrPairingHx:{},
     cfQueue:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,
-    cfMatchupHx:{},cfPairConsec:{},cfPairWins:{},cfMustSplitPair:null,cfPaused:[],
+    cfMatchupHx:{},cfGroupHx:{},cfPairConsec:{},cfPairWins:{},cfMustSplitPair:null,cfPaused:[],
     cfPairSessionCount:{},cfPairLastAt:{},cfPairLastLost:{},
     neverPair:{},ratingOverrides:{},
     status:'active'
@@ -1884,14 +1914,17 @@ function midAdd(id){
   }else{gsp(id).status='late';}
   S.checkedIn.add(id);
   if(S.session.cfMode){
-    // CF: add to queue with high priority (joined late so they've been waiting)
+    // CF: add to queue with elevated priority — backdated by 1 full game duration
+    // so they rank above just-returned players and get their first game quickly.
     if(!S.session.cfQueue)S.session.cfQueue=[];
-    S.session.cfQueue.push({id,since:Date.now()-missed*S.session.roundMin*60000*0.5,consec:0});
+    const backdateMs=(S.session.roundMin||12)*60000; // 1 full game duration
+    S.session.cfQueue.push({id,since:Date.now()-backdateMs-missed*S.session.roundMin*60000*0.5,consec:0});
     // Regenerate suggestions for ready courts
     for(let c=1;c<=S.session.courts;c++){
       if(S.session.cfCourts?.[c]?.status==='ready')CF.generateSuggestion(c,null);
     }
-    toast(`${p.name} joined queue 🏓`,'ok');
+    const nrTag=p.isNR?` (NR)`:'';
+    toast(`${p.name}${nrTag} joined queue 🏓`,'ok');
   }else{
     S.session.sitOutHx[id]=missed;
     S.session.soStreak[id]=2;
@@ -1988,7 +2021,14 @@ function renderDB(){
     const chk=S.checkedIn.has(p.id),ed=S.editId===p.id;
     const wr=p.gamesPlayed>0?Math.round((p.wins/p.gamesPlayed)*100)+'%':'—';
     const pd=p.gamesPlayed>0?(p.wins-p.losses>=0?'+':'')+(p.wins-p.losses):'';
-    const rtgDisplay=p.isNR?`<span class="nr-badge">NR</span>`:p.isSeeding?`<span class="nr-seed">~${Math.round(p.rating)}</span>`:`${Math.round(p.rating)}`;
+    const nrLvl=(()=>{
+      if(!p.isNR||!p.nrLevelHint)return'';
+      const lvls=calcNRLevelRatings();
+      if(p.nrLevelHint>=lvls.top-30)return' <span class="nr-badge" style="background:rgba(52,217,116,.2);color:var(--gr);border-color:rgba(52,217,116,.4)" title="NR — Advanced starting level">NR-A</span>';
+      if(p.nrLevelHint>=(lvls.middle||950)-30)return' <span class="nr-badge" style="background:rgba(251,191,36,.2);color:var(--go);border-color:rgba(251,191,36,.4)" title="NR — Intermediate starting level">NR-M</span>';
+      return' <span class="nr-badge" style="background:rgba(34,211,238,.15);color:var(--cy);border-color:rgba(34,211,238,.3)" title="NR — Beginner starting level">NR-B</span>';
+    })();
+    const rtgDisplay=p.isNR?`<span class="nr-badge">NR</span>${nrLvl}`:p.isSeeding?`<span class="nr-seed">~${Math.round(p.rating)}</span>`:`${Math.round(p.rating)}`;
     const staleWeeks=p.gamesPlayed>0?sessionsSinceLastPlayed(p.id):0;
     const staleBadge=staleWeeks>=4?`<span title="Away ${staleWeeks}w — K boosted on return" style="font-size:.6rem;color:var(--or);cursor:default;margin-left:2px">🔄</span>`:'';
     const ringerBadge=isRinger(p)?`<span title="High rating, few games — rating may be inflating" style="font-size:.6rem;color:var(--pu);cursor:default;margin-left:2px">⚡</span>`:'';
@@ -2153,7 +2193,7 @@ function renderCourt(m,totalCourts){
     const staleBadge=p.id&&sessionsSinceLastPlayed(p.id)>=4?`<span title="Returning after ${sessionsSinceLastPlayed(p.id)}w away — K boosted" style="font-size:.58rem;cursor:default">🔄</span>`:'';
     const ringerBadge=p.id&&isRinger(p)?`<span title="High rating, few games" style="font-size:.58rem;cursor:default">⚡</span>`:'';
     return `<div style="display:flex;align-items:center;gap:4px;justify-content:center;margin-bottom:${pi===0?'3px':'0'}">
-      <span style="font-size:.78rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;text-align:center">${esc(p.name)}${tagHtml(p)}${staleBadge}${ringerBadge}</span>
+      <span style="font-size:.78rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;text-align:center">${nameWithTag}${staleBadge}${ringerBadge}</span>
       ${!done?`<button style="flex-shrink:0;background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.3);border-radius:5px;padding:1px 5px;font-size:.6rem;color:var(--cy);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600" onclick="event.stopPropagation();openSwapModal('${m.id}',${ti},${pi})">↔</button>`:''}
     </div>`;
   };
@@ -2417,7 +2457,7 @@ function deleteArchiveSess(sessId){
 function renderHistory(){
   const el=document.getElementById('history-wrap');
   if(!S.session){el.innerHTML=`<div class="empty">No rounds yet this session.</div>`;return;}
-  const gn=id=>{const sp=gsp(id);if(sp?.name)return esc(sp.name+(sp.tag?` ${sp.tag}`:''));return esc(gp(id)?.name||'?');};
+  const gn=id=>{const p=gp(id);const sp=gsp(id);const name=sp?.name||p?.name||'?';const tag=sp?.tag||p?.tag||'';return esc(name)+(tag?`<span class="ptag">${esc(tag)}</span>`:'');};
   // CF mode: flat match log
   if(S.session.cfMode){
     const log=S.session.cfLog||[];
@@ -4089,7 +4129,11 @@ const CF={
         .map(id2=>gsp(id2)).filter(s=>s&&!s.isNR&&s.status!=='left').map(s=>s.sRating||1000);
       return rated.length?Math.round(rated.reduce((a,b)=>a+b,0)/rated.length):1000;
     }
-    const base=effectiveRating(id,S.session.cfMatchCount||1);
+    // Use individual matchesPlayed as the blend factor — not global cfMatchCount.
+    // A player who's played 0 games has zero personal evidence regardless of how many
+    // total session matches happened. This ensures "on fire" detection is earned.
+    const personalGames=(sp.matchesPlayed||0)+1; // +1 so first game uses blend, not pure allTime
+    const base=effectiveRating(id,personalGames);
     // Ringer regression: high-rating/low-games players regress toward session average
     // so stale or inflated ratings don't dominate matchmaking
     if(isRinger(p)){
@@ -4104,25 +4148,47 @@ const CF={
   /* Wait-debt score: how much longer has a player been waiting vs playing */
   waitDebt(id){
     const sp=gsp(id);if(!sp)return 0;
-    // timeInQueueMs is only updated on confirm — add live current queue time too
     const qEntry=S.session?.cfQueue?.find(q=>q.id===id);
     const liveWait=qEntry?Math.max(0,Date.now()-qEntry.since):0;
     const waited=(sp.timeInQueueMs||0)+liveWait;
     const played=sp.timeOnCourtMs||0;
-    if(played===0)return waited>0?1:0;
+    // Never played: debt escalates with wait time, guaranteeing pool inclusion
+    // after ~1 game duration of waiting. Formula: 10 + minutesWaited grows quickly.
+    if(played===0)return waited>0?(10+waited/60000):0;
     return waited/Math.max(1,played);
   },
 
   /* Queue priority — higher = picked sooner */
+  // Hunger score: how many fewer games this player has vs session average
+  // Players well below average get a significant urgency boost
+  hungerBoost(id){
+    const sp=gsp(id);if(!sp)return 0;
+    const myGames=sp.matchesPlayed||0;
+    const allGames=S.session.players.filter(p=>p.status!=='left').map(p=>p.matchesPlayed||0);
+    if(!allGames.length)return 0;
+    const avgGames=allGames.reduce((a,b)=>a+b,0)/allGames.length;
+    const deficit=avgGames-myGames;
+    // Players with 0 games get aggressive exponential boost to guarantee pool inclusion:
+    // avg=1 → +20, avg=3 → +60, avg=10 → +200 (cap). Ensures they always rank
+    // in top-nc*4 of the pool after being left out once.
+    if(myGames===0&&avgGames>0)return Math.min(200,avgGames*20);
+    return deficit>0?Math.min(80,deficit*8):0;
+  },
+
   queuePriority(qEntry,courtAvg){
     const waitMin=(Date.now()-qEntry.since)/60000;
     const er=this.cfRating(qEntry.id);
-    const skillFit=Math.max(0,30-Math.abs(er-courtAvg)*0.12);
+    // skillFit is a MILD tiebreaker only — never negative, never blocks entry.
+    // Old formula penalized outlier-rated players at t=0 causing permanent starvation.
+    // New: 0–5 bonus for skill closeness, wait time always dominates.
+    const skillFit=Math.max(0,5-Math.abs(er-courtAvg)*0.02);
     const debt=this.waitDebt(qEntry.id);
-    const debtBonus=debt>1.5?20*(debt-1):0;
-    const urgency=waitMin>20?(waitMin-20)*3:waitMin>15?(waitMin-15)*1.5:0;
-    const recentPenalty=waitMin<1?10:0;
-    return waitMin*2+skillFit+debtBonus+urgency-recentPenalty;
+    const debtBonus=debt>1.2?15*(debt-1):0;
+    // Urgency ramps up sharply after 1.5× roundMin to force inclusion
+    const roundMin=S.session?.roundMin||12;
+    const urgency=waitMin>roundMin*1.5?(waitMin-roundMin*1.5)*4:waitMin>roundMin?(waitMin-roundMin)*2:0;
+    const hunger=this.hungerBoost(qEntry.id);
+    return waitMin*3+skillFit+debtBonus+urgency+hunger;
   },
 
   /* Init queue at session start */
@@ -4171,7 +4237,12 @@ const CF={
     const partRpt=MM.pc(t1[0].id,t1[1].id)+MM.pc(t2[0].id,t2[1].id);
     const oppRpt=t1.reduce((s,a)=>t2.reduce((ss,b)=>ss+MM.oc(a.id,b.id),s),0);
     const mKey=this.matchupKey(t1.map(p=>p.id),t2.map(p=>p.id));
-    const matchRpt=(S.session.cfMatchupHx||{})[mKey]?30:0; // scaled down with new weights
+    // Time-decayed repeat penalty: 150pts when just played, decays 15pts per game since.
+    // After 10 games = fully fresh. This prevents "all options penalised equally" deadlock
+    // in exact-fill sessions (12p/3c etc.) where every matchup eventually repeats.
+    const lastPlayed=(S.session.cfMatchupHx||{})[mKey]??null;
+    const gamesSince=lastPlayed!==null?(S.session.cfMatchCount||0)-lastPlayed:null;
+    const matchRpt=gamesSince!==null?Math.max(0,150-gamesSince*15):0;
     const t1k=this.pairKey(t1[0].id,t1[1].id),t2k=this.pairKey(t2[0].id,t2[1].id);
     const splitPen=(mustSplitPair&&(t1k===mustSplitPair||t2k===mustSplitPair))?15:0;
     const consec=k=>(S.session.cfPairConsec||{})[k]||0;
@@ -4252,7 +4323,14 @@ const CF={
     const courtAvg=queue.reduce((s,q)=>s+this.cfRating(q.id),0)/queue.length;
     const pool=queue
       .map(q=>({id:q.id,sr:this.cfRating(q.id),waitMin:(Date.now()-q.since)/60000,qEntry:q}))
-      .sort((a,b)=>this.queuePriority(b.qEntry,courtAvg)-this.queuePriority(a.qEntry,courtAvg));
+      .sort((a,b)=>{
+        // Primary sort: large hunger difference (>10) forces hungry player first —
+        // guarantees 0-game / far-behind players are in the search window.
+        const ha=this.hungerBoost(a.id),hb=this.hungerBoost(b.id);
+        if(Math.abs(ha-hb)>10)return hb-ha;
+        // Secondary: composite wait+skill priority
+        return this.queuePriority(b.qEntry,courtAvg)-this.queuePriority(a.qEntry,courtAvg);
+      });
 
     // Single court path (no need for joint search)
     if(nc===1){
@@ -4262,28 +4340,43 @@ const CF={
     }
 
     // Multi-court joint path
-    // Base pool: nc×4 + 4 extra so low-priority waiting players aren't permanently excluded.
-    // Force-include any player waiting longer than 1 round (fairness guarantee).
-    const roundMin=S.session.roundMin||12;
-    const urgentIds=new Set(pool.filter(p=>p.waitMin>=roundMin*0.9).map(p=>p.id));
-    const baseCap=Math.min(Math.max(nc*4+4,12),pool.length);
-    // Build top pool: start with base cap, then append any urgent players not yet included
-    let top=pool.slice(0,baseCap);
-    const topIds=new Set(top.map(p=>p.id));
-    pool.forEach(p=>{if(urgentIds.has(p.id)&&!topIds.has(p.id)){top.push(p);topIds.add(p.id);}});
+    // Re-sort pool so hungry players (played far fewer games than avg) come FIRST.
+    // This ensures they're within the searchCap window even with large queues.
+    const topHungry=pool.filter(p=>this.hungerBoost(p.id)>10)
+                        .sort((a,b)=>this.hungerBoost(b.id)-this.hungerBoost(a.id));
+    const topHungryIds=new Set(topHungry.map(p=>p.id));
+    const topNormal=pool.filter(p=>!topHungryIds.has(p.id));
+    const top=[...topHungry,...topNormal];
     const n=top.length;
 
     if(n<need){
-      // Not enough for all courts — fill what we can greedily
+      // Not enough players for all courts — fill as many as possible greedily.
+      // Key: only use each player once. Courts that can't be filled get null (wait for more).
       const filled=[];
       let remaining=[...top];
       for(const c of readyCourts){
         if(remaining.length<4){S.session.cfSuggestions[c]=null;continue;}
-        const sub=remaining.slice(0,Math.min(12,remaining.length));
-        const best=this._findBestGroup(sub,mustSplit,nrIds,n);
+        const subRaw=remaining.slice(0,Math.min(12,remaining.length));
+        // Starving player in sub? pre-assign them with relaxed gap cap
+        const subStarving=subRaw.find(p=>this.hungerBoost(p.id)>=50);
+        let best=null;
+        if(subStarving){
+          const subOthers=subRaw.filter(p=>p.id!==subStarving.id);
+          const so=subOthers.length;
+          let bScore=Infinity;
+          for(let i=0;i<so-2;i++)for(let j=i+1;j<so-1;j++)for(let k=j+1;k<so;k++){
+            const g=[subStarving,subOthers[i],subOthers[j],subOthers[k]];
+            const res=this._scoreGroup(g,mustSplit);
+            if(!this._withinTeamGapOk(res.t1,res.t2,600))continue;
+            if(res.score<bScore){bScore=res.score;best={...res,group:g};}
+          }
+        }
+        if(!best)best=this._findBestGroup(subRaw,mustSplit,nrIds,n);
         if(!best){S.session.cfSuggestions[c]=null;continue;}
         filled.push({c,best});
-        remaining=remaining.filter(p=>!best.group.map(g=>g.id).includes(p.id));
+        // Remove assigned players so they aren't used twice across courts
+        const usedIds=new Set(best.group.map(g=>g.id));
+        remaining=remaining.filter(p=>!usedIds.has(p.id));
       }
       filled.forEach(({c,best})=>this._storeSuggestion(c,best,finishedMatchByCourtNum?.[c]));
       filled.forEach(({c})=>{setTimeout(()=>cfMaybeAutoConfirm(c),500);});
@@ -4347,12 +4440,16 @@ const CF={
 
     // Fallback to greedy if joint search found nothing
     if(!bestAlloc){
+      // Greedy fallback: assign courts one by one, strictly removing used players
       let rem=[...top];
       readyCourts.forEach(c=>{
         if(rem.length<4){S.session.cfSuggestions[c]=null;return;}
         const best=this._findBestGroup(rem.slice(0,Math.min(12,rem.length)),mustSplit,nrIds,n);
-        if(best){this._storeSuggestion(c,best,finishedMatchByCourtNum?.[c]);rem=rem.filter(p=>!best.group.map(g=>g.id).includes(p.id));}
-        else S.session.cfSuggestions[c]=null;
+        if(best){
+          this._storeSuggestion(c,best,finishedMatchByCourtNum?.[c]);
+          const usedIds=new Set(best.group.map(g=>g.id));
+          rem=rem.filter(p=>!usedIds.has(p.id));  // strict dedup
+        } else S.session.cfSuggestions[c]=null;
       });
     }else{
       // Assign best allocation to courts sorted by quality (best match → middle court via assignCourts logic)
@@ -4434,9 +4531,31 @@ const CF={
   },
 
   _generateSingleSuggestion(courtNum,pool,mustSplit,nrIds,finishedMatch){
-    // Use all available players — no artificial cap that starves low-priority players.
-    // _findBestGroup's 3-pass search handles quality vs fairness trade-off.
-    const top=pool.slice(0,Math.min(16,pool.length));
+    // Fairness guarantee: if any player has been starving (high hunger = played far
+    // fewer games than avg), force them into this suggestion regardless of skill gap.
+    // Without this, 700-rated players in a 1000+ queue can never form a valid team
+    // within the 350pt gap cap, so they'd wait forever despite hunger boost.
+    const starving=pool.find(p=>this.hungerBoost(p.id)>=50);
+    if(starving){
+      const others=pool.filter(p=>p.id!==starving.id).slice(0,15);
+      const n=others.length;
+      let best=null,bestScore=Infinity;
+      for(let i=0;i<n-2;i++)for(let j=i+1;j<n-1;j++)for(let k=j+1;k<n;k++){
+        const group=[starving,others[i],others[j],others[k]];
+        const res=this._scoreGroup(group,mustSplit);
+        // Relax gap cap for starving players — any playable match beats never playing
+        if(!this._withinTeamGapOk(res.t1,res.t2,600))continue;
+        if(res.score<bestScore){bestScore=res.score;best={...res,group};}
+      }
+      if(best){this._storeSuggestion(courtNum,best,finishedMatch);return;}
+    }
+    // Normal path: sorted pool, high-hunger players first
+    const highHunger=pool.filter(p=>this.hungerBoost(p.id)>10)
+                         .sort((a,b)=>this.hungerBoost(b.id)-this.hungerBoost(a.id));
+    const highHungerIds=new Set(highHunger.map(p=>p.id));
+    const normalPool=pool.filter(p=>!highHungerIds.has(p.id));
+    const merged=[...highHunger,...normalPool];
+    const top=merged.slice(0,Math.min(Math.max(16,highHunger.length+8),merged.length));
     const best=this._findBestGroup(top,mustSplit,nrIds,pool.length);
     this._storeSuggestion(courtNum,best,finishedMatch);
   },
@@ -4450,6 +4569,27 @@ const CF={
   confirmSuggestion(courtNum){
     if(!S.session)return;
     const sug=S.session.cfSuggestions[courtNum];if(!sug)return;
+    // ── SAFETY: detect stale suggestions ──────────────────────────────
+    // When courts are confirmed individually (not via confirmAll), an earlier
+    // court's confirm may have dequeued players that are still listed in this
+    // court's suggestion. Confirming a stale suggestion puts the same player
+    // on two courts simultaneously — the bug shown in screenshots.
+    const onCourtIds=new Set(
+      Object.entries(S.session.cfCourts||{})
+        .filter(([c,ct])=>+c!==courtNum&&ct.status==='playing'&&ct.match)
+        .flatMap(([,ct])=>[...ct.match.t1,...ct.match.t2])
+    );
+    const notInQueue=sug.allIds.filter(id=>!S.session.cfQueue.some(q=>q.id===id));
+    const stolen=sug.allIds.filter(id=>onCourtIds.has(id));
+    if(stolen.length>0||notInQueue.length>0){
+      // Stale — regenerate immediately from current queue
+      delete S.session.cfSuggestions[courtNum];
+      CF.generateSuggestion(courtNum,null);
+      const fresh=S.session.cfSuggestions[courtNum];
+      if(!fresh){toast(`Court ${courtNum} — refreshing, queue too small`,'warn');renderLive();return;}
+      CF.confirmSuggestion(courtNum); // recurse once with validated fresh suggestion
+      return;
+    }
     // Track time in queue for each player
     const now=Date.now();
     sug.allIds.forEach(id=>{
@@ -4557,7 +4697,9 @@ const CF={
     });
     // Matchup history
     if(!S.session.cfMatchupHx)S.session.cfMatchupHx={};
-    S.session.cfMatchupHx[this.matchupKey(m.t1,m.t2)]=(S.session.cfMatchCount||0);
+    S.session.cfMatchupHx[this.matchupKey(m.t1,m.t2)]=(S.session.cfMatchCount||0)+1; // +1: 0 is falsy, would bypass penalty
+    if(!S.session.cfGroupHx)S.session.cfGroupHx={};
+    S.session.cfGroupHx[[...m.t1,...m.t2].sort().join(',')]=(S.session.cfMatchCount||0)+1;
     S.session.cfMatchCount=(S.session.cfMatchCount||0)+1;
     // Log
     if(!S.session.cfLog)S.session.cfLog=[];
@@ -4752,12 +4894,20 @@ const CF={
         anyChange=true;
       }
     }
-    // confirmSuggestion already calls renderLive; only force a re-render if only regeneration happened
-    if(anyChange)renderLive();
+    // After confirming/regenerating, refresh any remaining ready courts whose
+    // suggestions might still show the now-dequeued players (stale visual state)
+    if(anyChange){
+      // Regenerate suggestions for ready courts that still have null/stale suggestions
+      const readyNeedRefresh=Object.entries(S.session.cfCourts||{})
+        .filter(([c,ct])=>!courts.includes(+c)&&ct.status==='ready'&&!S.session.cfSuggestions[+c])
+        .map(([c])=>+c);
+      if(readyNeedRefresh.length)CF.batchGenerateSuggestions(readyNeedRefresh,null);
+      renderLive();
+    }
   },
 
   _renderSug(courtNum,sug){
-    const gn=id=>esc(gp(id)?.name||'?');
+    const gn=id=>{const p=gp(id);return p?esc(p.name)+(p.tag?` <span class="ptag">${esc(p.tag)}</span>`:''):'?';};
     const gr=id=>{const sp=gsp(id);return sp?.isNR?'<span class="nr-badge">NR</span>':`${Math.round(this.cfRating(id))}`;};
     const meta=sug.meta||{};
     const t1r0=this.cfRating(sug.t1[0]),t1r1=this.cfRating(sug.t1[1]);
@@ -4819,7 +4969,9 @@ const CF={
   _renderActiveCourt(courtNum,court){
     const m=court.match;
     const gr=id=>Math.round(this.cfRating(id));
-    const gn=id=>esc(gp(id)?.name||'?');
+    // Show tag in live court so Eric VN vs Eric TH are distinguishable
+    // FIX: esc() applied to name only — not the span wrapper (otherwise tag shows as escaped text)
+    const gn=id=>{const p=gp(id);return p?(esc(p.name)+(p.tag?` <span style="font-size:.68rem;background:rgba(251,147,60,.18);color:var(--or);border-radius:4px;padding:1px 4px;font-weight:700">${esc(p.tag)}</span>`:'')):esc('?');};
     const t1Avg=Math.round((gr(m.t1[0])+gr(m.t1[1]))/2),t2Avg=Math.round((gr(m.t2[0])+gr(m.t2[1]))/2);
     const extSec=(S.session.extendedMin||16)*60;
     const ext=m.extended;
