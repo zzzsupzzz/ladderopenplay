@@ -602,7 +602,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 
 <script>
 // ================================================================
-//  🏓 PICKLEBALL LADDER V15
+//  🏓 PICKLEBALL LADDER V20
 //  ── V15 CHANGES ──────────────────────────────────────────────
 //  • NEW: Real-time cross-device sync via Firebase Realtime DB
 //    — Multiple admins on laptop, phone, tablet all stay in sync
@@ -4411,10 +4411,14 @@ const CF={
         currentAlloc.pop();
       }
     };
-    // Search window: nc*4 players (exact need) + 4 extra for fairness.
-    // Capped at 16 for performance — C(16,4)≈1820 per level is safe.
-    const searchCap=Math.min(n,Math.max(nc*4+4,12));
-    tryAlloc(0,top.slice(0,searchCap),[],0);
+    // Search window: EXACTLY nc*4 players (minimum needed) for joint search.
+    // This caps complexity at C(nc*4,4)*C((nc-1)*4,4)*... which is manageable:
+    // nc=1: C(4,4)=1; nc=2: C(8,4)*C(4,4)=70; nc=3: C(12,4)*C(8,4)*C(4,4)=34650
+    // nc=4+: too expensive — use greedy instead (handled below)
+    // The hunger/debt ordering already ensures the most deserving players are in top-nc*4.
+    const jointSearchCap=nc*4; // exact fill — quality players already sorted to front by hunger
+    const doJoint=(nc<=3); // joint search only for ≤3 courts; 4+ courts use greedy
+    if(doJoint)tryAlloc(0,top.slice(0,Math.min(jointSearchCap,n)),[],0);
 
     // If strict cap (350pt) found no valid allocation, retry with 400pt cap
     if(!bestAlloc){
@@ -4435,12 +4439,13 @@ const CF={
           currentAlloc.pop();
         }
       };
-      tryAllocRelaxed(0,top.slice(0,searchCap),[],0);
+      if(doJoint)tryAllocRelaxed(0,top.slice(0,Math.min(jointSearchCap,n)),[],0);
     }
 
     // Fallback to greedy if joint search found nothing
     if(!bestAlloc){
-      // Greedy fallback: assign courts one by one, strictly removing used players
+      // Greedy fallback: used for nc>=4 courts OR when joint search fails
+      // For nc>=4, doJoint=false so bestAlloc stays null and we always reach here.
       let rem=[...top];
       readyCourts.forEach(c=>{
         if(rem.length<4){S.session.cfSuggestions[c]=null;return;}
