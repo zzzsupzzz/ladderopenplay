@@ -377,27 +377,17 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <div style="display:flex;gap:8px;margin-bottom:12px">
       <div style="font-size:.75rem;color:var(--cy);font-weight:700;padding:4px 0">⚡ Continuous Flow — each court finishes independently</div>
     </div>
-    <div id="round-mode-opts">
-      <div class="g2">
-        <div><label>SESSION NAME</label><input id="sess-name" class="inp" placeholder="Saturday Open Play…"/></div>
-        <div><label>ROUND DURATION (MIN)</label><input id="round-dur" class="inp" type="number" value="12" min="5" max="90"/></div>
-      </div>
-      <div class="dv"></div>
-      <div id="rotation-preview" style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px 12px;margin-bottom:10px;display:none">
-        <div style="font-size:.65rem;font-weight:700;color:var(--mu);letter-spacing:.06em;margin-bottom:5px">🔄 ROTATION (auto-calculated)</div>
-        <div id="rotation-desc" style="font-size:.78rem;color:var(--tx);line-height:1.6"></div>
-      </div>
-    </div>
     <div id="flow-mode-opts">
-      <div class="g2">
-        <div><label>SESSION NAME</label><input id="sess-name-flow" class="inp" placeholder="Saturday Open Play…"/></div>
+      <div style="margin-bottom:8px"><label>SESSION NAME</label><input id="sess-name-flow" class="inp" placeholder="Saturday Open Play…"/></div>
+      <div class="g2" style="margin-bottom:8px">
+        <div><label>GAME DURATION (MIN)</label><input id="round-dur" class="inp" type="number" value="12" min="5" max="90" title="How long each game lasts — affects wait-debt priority"/></div>
         <div><label>EXTENDED FLAG (MIN)</label><input id="extended-min" class="inp" type="number" value="16" min="8" max="60" title="Flag court as extended after this many minutes"/></div>
       </div>
-      <div style="margin-top:8px;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px;font-size:.74rem;color:var(--mu);line-height:1.7">
+      <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px;font-size:.74rem;color:var(--mu);line-height:1.7">
         <span style="color:var(--cy);font-weight:700">Skill-based queue</span> — best match pulled when a court opens.<br/>
-        <span style="color:var(--gr);font-weight:700">NR players</span> — placed in middle bracket, rated after 5 games.<br/>
-        <span style="color:var(--or);font-weight:700">Wait debt</span> — long-waiters get priority; short games trigger re-queue boost.<br/>
-        <span style="color:var(--go);font-weight:700">Partner split</span> — winning pair must split after 2 consecutive wins together.
+        <span style="color:var(--gr);font-weight:700">NR players</span> — rated after 5 games; set level (NR-B/M/A) when adding.<br/>
+        <span style="color:var(--or);font-weight:700">Wait debt</span> — long-waiters get priority; players waiting ≥1 game always included.<br/>
+        <span style="color:var(--go);font-weight:700">Partner split</span> — winning pair splits after 2 consecutive wins together.
       </div>
     </div>
     <label style="margin-top:10px;display:block">NUMBER OF COURTS</label>
@@ -406,14 +396,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
       <div class="cpill" data-c="3">3</div><div class="cpill" data-c="4">4</div>
       <div class="cpill" data-c="5">5</div><div class="cpill" data-c="6">6</div>
     </div>
-    <div id="round-rotation-rules" style="margin-top:10px">
-      <label>ROTATION RULES</label>
-      <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px;font-size:.74rem;color:var(--mu);line-height:1.7">
-        <span style="color:var(--gr);font-weight:700">Max 3 consecutive games</span> — everyone rotates out after 3 in a row, no exceptions.<br/>
-        <span style="color:var(--cy);font-weight:700">No back-to-back sits</span> — if you sat last round, you play next round.<br/>
-        <span style="color:var(--go);font-weight:700">Fair rotation</span> — sit-out order based on games played &amp; rest count, not skill level.
-      </div>
-    </div>
+    
   </div>
 
   <div class="card" id="admin-pin-card">
@@ -476,7 +459,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 <div id="tab-live" class="tp">
   <div id="live-empty" class="empty" style="display:none"><div style="font-size:2rem;margin-bottom:8px">🏓</div><div>No session active — go to Setup.</div></div>
   <!-- CF Live View -->
-  <div id="cf-live-wrap" style="display:none">
+  <div id="cf-live-wrap">
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:7px">
         <div><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--tx)" id="cf-sess-lbl">CONTINUOUS FLOW</div><div style="font-size:.71rem;color:var(--mu)" id="cf-sess-sub">—</div></div>
@@ -504,41 +487,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
       </div>
     </div>
   </div>
-  <div id="live-wrap" style="display:none">
-    <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:7px">
-        <div>
-          <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--tx)" id="round-lbl">ROUND 1</div>
-          <div style="font-size:.71rem;color:var(--mu)" id="round-sub">—</div>
-        </div>
-        <div style="display:flex;gap:5px;flex-wrap:wrap">
-          <button class="btn bs sm" id="timer-btn" onclick="toggleTimer()">⏱ Timer</button>
-          <button class="btn bs sm" onclick="openRosterModal()">👤 Players ±</button>
-          <button class="btn bs sm" onclick="window.print()">🖨 Print</button>
-          <button class="btn bc" onclick="doNextRound()">▶ Next Round</button>
-          <button class="btn bd2" onclick="doEndSession()">🏁 End</button>
-        </div>
-      </div>
-      <div class="dv" style="margin:9px 0 7px"></div>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span style="font-size:.68rem;color:var(--mu);font-weight:700;letter-spacing:.05em">COURTS:</span>
-        <div class="cpills" id="cpills-live">
-          <div class="cpill sel" data-c="1">1</div><div class="cpill" data-c="2">2</div>
-          <div class="cpill" data-c="3">3</div><div class="cpill" data-c="4">4</div>
-          <div class="cpill" data-c="5">5</div><div class="cpill" data-c="6">6</div>
-        </div>
-      </div>
-    </div>
-    <div id="sitout-card" class="card" style="display:none">
-      <div class="ct">💤 Sitting Out This Round</div>
-      <div id="sitout-list"></div>
-    </div>
-    <div id="nrp-wrap"></div>
-    <div id="courts-wrap"></div>
-  </div>
-</div>
-
-<!-- ══ STANDINGS ══ -->
+  <!-- ══ STANDINGS ══ -->
 <div id="tab-standings" class="tp">
   <div class="g2">
     <div class="card"><div class="ct"><div class="pulse"></div>Session</div><div id="sess-std"></div></div>
@@ -624,7 +573,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 //  • Pickles & Ladders icon embedded
 // ================================================================
 
-const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,roundMin:12,sessionMode:'round',extendedMin:16,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
+const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,roundMin:12,sessionMode:'flow',extendedMin:16,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
 
 /* ── CF simultaneous-finish batch debounce ─────────────── */
 // scheduleCFBatch removed in V19: suggestions are now generated synchronously
@@ -1525,13 +1474,13 @@ function startSession(){
   S.extendedMin=parseInt(document.getElementById('extended-min')?.value)||16;
   const nameEl=isCF?document.getElementById('sess-name-flow'):document.getElementById('sess-name');
   const name=(nameEl?.value||'').trim()||`Open Play — ${fmtDate()}`;
-  const{minPlayAfterSit}=calcRotation(arr.length,S.courts);
+  // minPlayAfterSit removed (round mode only)
   // NR start rating = session average of rated players
   const ratedRatings=arr.filter(id=>!gp(id)?.isNR).map(id=>gp(id)?.rating||1000);
   const sessAvg=ratedRatings.length?Math.round(ratedRatings.reduce((a,b)=>a+b,0)/ratedRatings.length):1000;
   S.session={
     id:uid(),name,date:new Date().toISOString(),courts:S.courts,roundMin:S.roundMin,
-    minPlayAfterSit,courtGroupSize:4,cfMode:isCF,extendedMin:S.extendedMin,
+    courtGroupSize:4,cfMode:true,extendedMin:S.extendedMin,
     sessionStart:Date.now(),
     activePlayers:[...arr],
     players:arr.map(id=>{
@@ -1541,7 +1490,7 @@ function startSession(){
              sRating:startR,startRating:startR,wins:0,losses:0,ties:0,
              matchesPlayed:0,ptsFor:0,ptsAgainst:0,timeOnCourtMs:0,timeInQueueMs:0,status:'active'};
     }),
-    round:0,rounds:[],sitOutHx:{},soStreak:{},plStreak:{},partnerHx:{},oppHx:{},oppHxTime:{},
+    partnerHx:{},oppHx:{},oppHxTime:{},
     nrPairingHx:{},
     cfQueue:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,
     cfMatchupHx:{},cfGroupHx:{},cfPairConsec:{},cfPairWins:{},cfMustSplitPair:null,cfPaused:[],
@@ -1550,17 +1499,9 @@ function startSession(){
     status:'active'
   };
   STORE.save();updateHeader();startElapsed();switchTab('live');
-  if(isCF){CF.initQueue();renderLive();toast('⚡ Continuous Flow started!','ok');}
-  else{nextRound();toast('Session started! 🎉','ok');}
+  CF.initQueue();renderLive();toast('⚡ Continuous Flow started!','ok');
 }
 
-function submitScore(matchId){
-  const rnd=curRnd();if(!rnd)return;
-  const m=rnd.matches.find(x=>x.id===matchId);if(!m)return;
-  const s1=parseInt(document.getElementById(`s1-${matchId}`)?.value),s2=parseInt(document.getElementById(`s2-${matchId}`)?.value);
-  if(isNaN(s1)||isNaN(s2)||s1<0||s2<0){toast('Enter valid scores','err');return;}
-  applyScore(m,s1,s2);
-}
 
 function applyScore(m,s1,s2){
   if(m.eloDeltas&&m.status==='done'){
@@ -1944,7 +1885,7 @@ function renderRoster(){
     if(arr.length<4){btn.disabled=true;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=`Need ${4-arr.length} more.`;}
     else{btn.disabled=false;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=hintText;}
   }
-  updateRotationPreview();
+  
 }
 
 /* ── RENDER: LIVE ────────────────────────────────── */
@@ -1955,43 +1896,6 @@ function renderLive(){
   if(none){if(cfw)cfw.style.display='none';return;}
   if(cfw)cfw.style.display='block';
   CF.renderLive();startCFTick();
-  if(false){ // round mode removed
-  if(lw)lw.style.display='block';if(cfw)cfw.style.display='none';
-  const rnd=curRnd();if(!rnd)return;
-  const done=rnd.matches.filter(m=>m.status==='done'||m.status==='skipped').length;
-  document.getElementById('round-lbl').textContent=`ROUND ${rnd.number}`;
-  document.getElementById('round-sub').textContent=`${done}/${rnd.matches.length} submitted · ${S.session.name}`;
-  syncCourtPills('cpills-live',S.session.courts);
-
-  // Sit outs
-  const sc=document.getElementById('sitout-card'),sl=document.getElementById('sitout-list');
-  if(rnd.sitOuts?.length){
-    sc.style.display='block';
-    sl.innerHTML=(rnd.sitOuts||[]).map(id=>{
-      const p=gp(id),cnt=S.session.sitOutHx[id]||0,soSt=S.session.soStreak[id]||0;
-      const plSt=S.session.plStreak?.[id]||0;
-      const MAX_CONSEC=3;
-      const warn=soSt>=1;
-      // Transparent reason for organizer too
-      let tag='';
-      if(warn)tag='PLAYS NEXT';
-      else if(plSt>=MAX_CONSEC)tag=`${plSt}-game cap`;
-      else if(S.session.activePlayers.length>S.session.courts*4)tag='rotation';
-      return `<div class="so-chip ${warn?'so-warn':''}">${p?.name||'?'}${tagHtml(p)}<span class="so-n${warn?' warn':''}">${cnt}x${tag?' — '+tag:''}</span></div>`;
-    }).join('');
-  }else sc.style.display='none';
-
-  const nc=rnd.matches.length;
-  document.getElementById('courts-wrap').innerHTML=[...rnd.matches].sort((a,b)=>a.court-b.court).map(m=>renderCourt(m,nc)).join('');
-  [...rnd.matches].filter(m=>m.status!=='done'&&m.status!=='skipped').forEach(m=>renderQS(`qs-${m.id}`,`s1-${m.id}`,`s2-${m.id}`));
-
-  // Restart running timers after re-render (DOM was replaced)
-  if(_ctTick){clearInterval(_ctTick);_ctTick=null;}
-  const hasCT=Object.values(CT).some(c=>c.running);
-  if(hasCT)_ctTick=setInterval(tickCT,500);
-  tickCT();
-
-  } // end if(false)
 }
 
 /* ── RENDER: STANDINGS ───────────────────────────── */
@@ -2136,11 +2040,13 @@ function recalcAllTimeRatings(){
   if(S.session?.status==='active'){
     S.session.players.forEach(sp=>{
       const dbP=S.db.find(p=>p.id===sp.id);if(!dbP)return;
-      // sp.startRating = what was in db when session started
-      // After recalc above, dbP.rating = rating BEFORE current session
-      // So we only add the active session's in-progress delta
+      // Apply in-progress ELO delta + W/L/games from current session
       const activeDelta=Math.round(sp.sRating-sp.startRating);
       dbP.rating=Math.max(400,dbP.rating+activeDelta);
+      dbP.wins=(dbP.wins||0)+(sp.wins||0);
+      dbP.losses=(dbP.losses||0)+(sp.losses||0);
+      dbP.ties=(dbP.ties||0)+(sp.ties||0);
+      dbP.gamesPlayed=(dbP.gamesPlayed||0)+(sp.matchesPlayed||0);
     });
   }
 }
@@ -2163,39 +2069,24 @@ function deleteArchiveSess(sessId){
 function renderHistory(){
   const el=document.getElementById('history-wrap');
   if(!S.session){el.innerHTML=`<div class="empty">No rounds yet this session.</div>`;return;}
-  const gn=id=>{const p=gp(id);const sp=gsp(id);const name=sp?.name||p?.name||'?';const tag=sp?.tag||p?.tag||'';return esc(name)+(tag?`<span class="ptag">${esc(tag)}</span>`:'');};
-  // CF mode: flat match log
-  if(S.session.cfMode){
-    const log=S.session.cfLog||[];
-    if(!log.length){el.innerHTML=`<div class="empty">No matches yet.</div>`;return;}
-    el.innerHTML=[...log].slice().reverse().map((m,ri)=>{
-      const origIdx=log.length-1-ri;
-      const t1n=m.t1.map(gn).join(' & '),t2n=m.t2.map(gn).join(' & ');
-      const sc=`${m.s1}–${m.s2}`,tie=m.s1===m.s2,t1w=m.s1>m.s2;
-      const durMs=m.endTime&&m.startTime?m.endTime-m.startTime:0;
-      const durMin=durMs?Math.round(durMs/60000)+'min':'';
-      const extTag=m.extended?`<span style="font-size:.62rem;color:var(--or)"> extended</span>`:'';
-      return `<div class="hm" style="flex-wrap:wrap;gap:4px">
-        <span style="font-size:.65rem;color:var(--cy);min-width:46px">C${m.courtNum}</span>
-        <div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div>
-        <div class="hscore" style="${tie?'color:var(--go)':''}">${sc}</div>
-        <div style="flex:1;text-align:right;font-weight:${!t1w&&!tie?700:400};color:${!t1w&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div>
-        <span style="font-size:.63rem;color:var(--m2)">${durMin}${extTag}</span>
-        <button class="sedit" style="width:auto;margin-top:0" onclick="openEditScoreCF(${origIdx})">✏️</button>
-      </div>`;
-    }).join('');
-    return;
-  }
-  // Round mode
-  if(!S.session.rounds.length){el.innerHTML=`<div class="empty">No rounds yet this session.</div>`;return;}
-  el.innerHTML=[...S.session.rounds].reverse().map(r=>{
-    const ms=r.matches.map(m=>{
-      const t1n=m.t1.map(gn).join(' & '),t2n=m.t2.map(gn).join(' & ');
-      const sc=m.status==='done'?`${m.s1}–${m.s2}`:'—',tie=m.status==='done'&&m.s1===m.s2,t1w=m.status==='done'&&m.s1>m.s2;
-      return `<div class="hm"><div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div><div class="hscore" style="${tie?'color:var(--go)':''}">${sc}</div><div style="flex:1;text-align:right;font-weight:${!t1w&&m.status==='done'&&!tie?700:400};color:${!t1w&&m.status==='done'&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div><button class="sedit" style="width:auto" onclick="openEditScore('${m.id}')">✏️</button>${m.status==='done'?`<button class="del-btn" title="Delete this match result" onclick="deleteMatch('${m.id}')">🗑</button>`:''}</div>`;
-    }).join('');
-    const sos=r.sitOuts?.length?` · 💤 ${r.sitOuts.map(gn).join(', ')}`:' ';
-    return `<div class="hr"><div class="hrhd" onclick="this.nextElementSibling.classList.toggle('open')"><span>ROUND ${r.number}</span><span>${new Date(r.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}${sos}&nbsp;<button class="del-btn" title="Delete round" onclick="event.stopPropagation();deleteRound(${r.number})" style="font-size:.65rem;vertical-align:middle">🗑</button> ▾</span></div><div class="hr-body open">${ms}</div></div>`;
+  const gn=id=>{const sp=gsp(id);if(sp?.name)return esc(sp.name+(sp.tag?` ${sp.tag}`:''));return esc(gp(id)?.name||'?');};
+  const log=S.session.cfLog||[];
+  if(!log.length){el.innerHTML=`<div class="empty">No matches yet.</div>`;return;}
+  el.innerHTML=[...log].slice().reverse().map((m,ri)=>{
+    const origIdx=log.length-1-ri;
+    const t1n=m.t1.map(gn).join(' & '),t2n=m.t2.map(gn).join(' & ');
+    const sc=`${m.s1}–${m.s2}`,tie=m.s1===m.s2,t1w=m.s1>m.s2;
+    const durMs=m.endTime&&m.startTime?m.endTime-m.startTime:0;
+    const durMin=durMs?Math.round(durMs/60000)+'min':'';
+    const extTag=m.extended?`<span style="font-size:.62rem;color:var(--or)"> extended</span>`:'';
+    return `<div class="hm" style="flex-wrap:wrap;gap:4px">
+      <span style="font-size:.65rem;color:var(--cy);min-width:46px">C${m.courtNum}</span>
+      <div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div>
+      <div class="hscore" style="${tie?'color:var(--go)':''}">${sc}</div>
+      <div style="flex:1;text-align:right;font-weight:${!t1w&&!tie?700:400};color:${!t1w&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div>
+      <span style="font-size:.63rem;color:var(--m2)">${durMin}${extTag}</span>
+      <button class="sedit" style="width:auto;margin-top:0" onclick="openEditScoreCF(${origIdx})">✏️</button>
+    </div>`;
   }).join('');
 }
 
@@ -2456,11 +2347,11 @@ function renderPlayerView(){
       const soStrk=S.session.soStreak?.[id]||0;
       const MAX_CONSEC=3;
       let sitReason='';
-      if(plStrk>=MAX_CONSEC)sitReason=`You played ${plStrk} games in a row — system rotated you out. You play next round.`;
+      if(plStrk>=MAX_CONSEC)sitReason=`You played ${plStrk} games in a row — system rotated you out. You're back in the queue.`;
       else if(S.session.activePlayers.length>S.session.courts*4){
         const surplus=S.session.activePlayers.length-S.session.courts*4;
         sitReason=`${surplus} player${surplus>1?'s':''} always sit each round. You'll be prioritised next.`;
-      }else sitReason='Rotation rest — you play next round.';
+      }else sitReason="Rotation rest — you're back in the queue.";
       currentMatchHtml=`<div class="card" style="text-align:center">
         <div style="font-size:1.5rem;margin-bottom:6px">💤</div>
         <div style="font-size:.85rem;color:var(--or)">Sitting out Round ${rnd.number}</div>
@@ -2962,7 +2853,7 @@ function openSyncModal(){
     <div style="font-size:.73rem;color:var(--mu);margin-bottom:12px">
       <strong style="color:var(--tx)">How to add another admin device:</strong><br/>
       Open this app on the other device — it will auto-connect to room <strong style="color:var(--gr)">${esc(roomId)}</strong> automatically.<br/>
-      Every score, player change or next round syncs to everyone instantly.
+      Every score and player change syncs to everyone instantly.
     </div>
     <button class="btn bd2 sm" style="width:100%;margin-bottom:6px"
       onclick="showCfm('Disconnect live sync on this device?','Disconnect','bd2',()=>{SYNC.clearConfig();closeModal();toast('Sync disconnected','warn');})">
@@ -4892,7 +4783,7 @@ function cfMaybeAutoConfirm(courtNum){
 
 
 function init(){
-  initCourtPills('cpills-setup',n=>{S.courts=n;renderRoster();updateRotationPreview();});
+  initCourtPills('cpills-setup',n=>{S.courts=n;renderRoster();});
   initCourtPills('cpills-live',n=>{
     S.courts=n;if(S.session&&!S.session.cfMode){S.session.courts=n;STORE.save();}
     if(S.session?.cfMode){
