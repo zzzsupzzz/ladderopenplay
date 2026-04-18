@@ -469,7 +469,9 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
   <div id="cf-live-wrap">
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:7px">
-        <div><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--tx)" id="cf-sess-lbl">CONTINUOUS FLOW</div><div style="font-size:.71rem;color:var(--mu)" id="cf-sess-sub">—</div></div>
+        <div><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--tx)" id="cf-sess-lbl">CONTINUOUS FLOW</div><div style="font-size:.71rem;color:var(--mu)" id="cf-sess-sub">—</div>
+          <span id="live-last-saved" style="display:none;font-size:.64rem;color:var(--gr);margin-top:3px;font-weight:600"></span>
+        </div>
         <div style="display:flex;gap:5px;flex-wrap:wrap">
           <button class="btn bs sm" onclick="openRosterModal()">👤 Players ±</button>
           <button id="cf-ac-toggle" class="btn bg2 sm" onclick="toggleCFAutoConfirm()" title="Auto-confirm suggestions after timer">⚡ Auto</button>
@@ -2211,23 +2213,31 @@ function deleteArchiveSess(sessId){
 
 /* ── Score confidence helpers ───────────────────── */
 let _lastMatchSavedTs=0;
+let _lastMatchSummary=''; // short human-readable string for Live tab badge
 
+// Option A: stay on Live after submit.
+// If the user is already on History, flash the newest row in place.
+// Never force a tab switch — that was causing the roster/setup render race.
 function flashLatestMatch(){
-  // Switch to History tab and highlight the newest match row
-  switchTab('history');
-  // Give renderHistory a tick to finish, then apply the flash class + scroll
-  setTimeout(()=>{
-    const el=document.getElementById('history-wrap');
-    if(!el)return;
-    const first=el.querySelector('.hm');
-    if(first){
-      first.classList.remove('hm-new'); // reset if already animating
-      void first.offsetWidth;           // force reflow to restart animation
-      first.classList.add('hm-new');
-      first.scrollIntoView({behavior:'smooth',block:'nearest'});
-    }
+  if(isActiveTab('history')){
+    // User is already on History — flash the top row
+    setTimeout(()=>{
+      const el=document.getElementById('history-wrap');
+      if(!el)return;
+      const first=el.querySelector('.hm');
+      if(first){
+        first.classList.remove('hm-new');
+        void first.offsetWidth; // force reflow to restart animation
+        first.classList.add('hm-new');
+        first.scrollIntoView({behavior:'smooth',block:'nearest'});
+      }
+      _updateLastSavedBanner();
+    },80);
+  } else {
+    // User is on Live (or anywhere else) — just update the banner for when they visit History
     _updateLastSavedBanner();
-  },80);
+    _updateLiveSavedBadge();
+  }
 }
 
 function _updateLastSavedBanner(){
@@ -2238,7 +2248,18 @@ function _updateLastSavedBanner(){
   const ago=mins<=0?'just now':`${mins}m ago`;
   wrap.style.display='flex';
   wrap.innerHTML=`<span style="font-size:.68rem;color:var(--gr)">✅ Match saved ${ago}</span>
-    <button style="background:none;border:none;font-size:.68rem;color:var(--cy);cursor:pointer;padding:0 0 0 8px;font-family:'DM Sans',sans-serif;font-weight:600" onclick="flashLatestMatch()">↓ Jump to latest</button>`;
+    <button style="background:none;border:none;font-size:.68rem;color:var(--cy);cursor:pointer;padding:0 0 0 8px;font-family:'DM Sans',sans-serif;font-weight:600" onclick="(()=>{switchTab('history');setTimeout(()=>{const f=document.getElementById('history-wrap')?.querySelector('.hm');if(f){f.classList.remove('hm-new');void f.offsetWidth;f.classList.add('hm-new');f.scrollIntoView({behavior:'smooth',block:'nearest'});}},80);})()">↓ Jump to latest</button>`;
+}
+
+// Subtle "last saved" pill shown inside the Live tab so organisers get visual confirmation
+// without leaving the action screen.
+function _updateLiveSavedBadge(){
+  const el=document.getElementById('live-last-saved');
+  if(!el||!_lastMatchSavedTs)return;
+  const mins=Math.round((Date.now()-_lastMatchSavedTs)/60000);
+  const ago=mins<=0?'just now':`${mins}m ago`;
+  el.textContent=`✅ Last match saved ${ago}`;
+  el.style.display='inline-block';
 }
 
 /* ── RENDER: HISTORY ─────────────────────────────── */
@@ -2249,12 +2270,12 @@ function renderHistory(){
   const gn=id=>{const sp=gsp(id);if(sp?.name)return esc(sp.name+(sp.tag?` ${sp.tag}`:''));return esc(gp(id)?.name||'?');};
   const log=S.session.cfLog||[];
   if(!log.length){
-    // Show players even before first match
-    const pList=S.session.players.slice().sort((a,b)=>b.sRating-a.sRating)
-      .map(sp=>`<span style="font-size:.73rem;color:var(--mu)">${esc(sp.name)}</span>`).join(' · ');
-    el.innerHTML=`<div class="empty" style="text-align:left;padding:10px">
-      <div style="margin-bottom:6px;font-size:.72rem;color:var(--cy);font-weight:700">Session started — no matches yet</div>
-      <div style="line-height:1.8">${pList}</div></div>`;
+    const count=S.session.players?.length||0;
+    el.innerHTML=`<div class="empty" style="text-align:center;padding:18px 10px">
+      <div style="font-size:1.8rem;margin-bottom:8px">🏓</div>
+      <div style="font-size:.82rem;color:var(--tx);font-weight:600;margin-bottom:4px">No matches yet</div>
+      <div style="font-size:.72rem;color:var(--mu)">${count} player${count!==1?'s':''} checked in — match history will appear here after the first score is submitted.</div>
+    </div>`;
     return;
   }
   el.innerHTML=[...log].slice().reverse().map((m,ri)=>{
@@ -3607,7 +3628,7 @@ function switchTab(id){
   tabEl.setAttribute('style','display:block'); // clear the force-none, .on CSS takes over
   // Always re-render on every switch to pick up latest data
   if(id==='standings'){renderStandings();}
-  if(id==='history'){renderHistory();renderArchive();}
+  if(id==='history'){renderHistory();renderArchive();_updateLastSavedBanner();}
   if(id==='live'){renderLive();}
   if(id==='setup'){renderDB();renderRoster();}
   if(id==='player'){renderPlayerView();}
