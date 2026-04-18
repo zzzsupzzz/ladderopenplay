@@ -627,19 +627,22 @@ function _getOrCreateRoomId(){
   if(!id||id.length<4){id=_generateRoomId();localStorage.setItem('pb_room_id',id);}
   return id;
 }
+// ACTION 2 — Join / Switch Room
+// Local only. No write to old room, no write to new room until Firebase first-load.
+// Other devices on the old room are unaffected.
 function generateNewRoom(){
   showCfm(
-    `<strong>Generate a new room?</strong><br/>
-    <span style="font-size:.74rem;color:var(--mu)">This device will disconnect from the current room and join a new one. Other devices will stay on the old room until you share the new code.</span>`,
+    `<strong>Switch to a new room?</strong><br/>
+    <span style="font-size:.74rem;color:var(--mu)">This device leaves the current room and connects to a fresh one. <strong>Other devices are not affected</strong> — the old room data stays intact.</span>`,
     '🔀 New Room','bc',()=>{
       const prevRoomId=SYNC.roomId||localStorage.getItem('pb_room_id')||'local';
       const newId=_generateRoomId();
-      // Clear old room's local backup and admin token before switching
+      // Clear this device's local data for the old room — no Firebase write
       localStorage.removeItem('pb_local_backup');
       localStorage.removeItem(`pb_adm_${prevRoomId}`);
       localStorage.setItem('pb_room_id',newId);
       SYNC.clearConfig();
-      SYNC.autoConnect();
+      SYNC.autoConnect(); // connects to new room; reads whatever is there (probably empty)
       closeModal();
     }
   );
@@ -675,26 +678,46 @@ const SYNC={
     this._updateBadge();
   },
 
-  // Full leave: detach Firebase, clear all local keys, reset app state, reload-safe
+  // ACTION 1 — Leave Device Only
+  // Local only. No Firebase write. Room data stays intact for other devices.
+  // Clears this device's listener, localStorage keys, and in-memory state.
   leaveRoom(){
     const prevRoomId=this.roomId||localStorage.getItem('pb_room_id')||'local';
     this.clearConfig();
-    // Clear room key so next load generates a fresh one
     localStorage.removeItem('pb_room_id');
-    // Clear local backup to avoid re-populating stale state
     localStorage.removeItem('pb_local_backup');
-    // Clear admin session token
-    const adminKey=`pb_adm_${prevRoomId}`;
-    localStorage.removeItem(adminKey);
-    // Reset app state
+    localStorage.removeItem(`pb_adm_${prevRoomId}`);
+    // Reset local in-memory state only — no STORE.save(), no Firebase write
     S.db=[];S.session=null;S.archive=[];S.checkedIn.clear();
     ADMIN_UNLOCKED=false;
-    // Reset UI
     renderDB();renderRoster();renderHistory();renderArchive();renderStandings();
     updateHeader();updatePinStatus();_updateRoomBadge();
     switchTab('setup');
     _setSaveStatus('idle');
-    toast('Room left — ready to join a new room','ok');
+    toast('Left room — data intact for other devices','ok');
+  },
+
+  // ACTION 3 — Reset Shared Room Data
+  // Destructive global action. Writes null to Firebase — wipes room for ALL devices.
+  // Must be called after explicit confirmation only.
+  resetSharedRoom(){
+    if(!this.ready||!this.ref){toast('Not connected — cannot reset room','err');return;}
+    this.ref.set(null).then(()=>{
+      const prevRoomId=this.roomId||localStorage.getItem('pb_room_id')||'local';
+      this.clearConfig();
+      localStorage.removeItem('pb_room_id');
+      localStorage.removeItem('pb_local_backup');
+      localStorage.removeItem(`pb_adm_${prevRoomId}`);
+      S.db=[];S.session=null;S.archive=[];S.checkedIn.clear();
+      ADMIN_UNLOCKED=false;
+      renderDB();renderRoster();renderHistory();renderArchive();renderStandings();
+      updateHeader();updatePinStatus();_updateRoomBadge();
+      switchTab('setup');
+      _setSaveStatus('idle');
+      toast('Room wiped — all devices will see empty state','warn',5000);
+    }).catch(e=>{
+      toast('Reset failed: '+e.message,'err');
+    });
   },
 
   _loadScript(src){
@@ -2423,10 +2446,17 @@ function openSyncModal(){
 
     <div class="dv" style="margin:10px 0"></div>
 
+    <div style="font-size:.72rem;color:var(--mu);font-weight:700;margin-bottom:4px">DEVICE ACTIONS <span style="font-weight:400;color:var(--m2)">— local only, no Firebase write</span></div>
     <div style="display:flex;gap:6px;margin-bottom:10px">
-      <button class="btn bc sm" style="flex:1" onclick="closeModal();generateNewRoom()">🔀 New Room</button>
-      <button class="btn bd2 sm" style="flex:1" onclick="closeModal();SYNC.leaveRoom()">🚪 Leave Room</button>
+      <button class="btn bc sm" style="flex:1" onclick="closeModal();generateNewRoom()" title="Leave this room and connect to a new empty one. Other devices unaffected.">🔀 New Room</button>
+      <button class="btn bs sm" style="flex:1" onclick="closeModal();SYNC.leaveRoom()" title="Disconnect this device. Room data stays intact for others.">🚪 Leave Room</button>
     </div>
+
+    <div style="font-size:.72rem;color:var(--re);font-weight:700;margin-bottom:4px">⚠️ SHARED ROOM RESET <span style="font-weight:400;color:var(--m2)">— wipes data for ALL devices</span></div>
+    <button class="btn bd2 sm" style="width:100%;margin-bottom:10px"
+      onclick="showCfm('<strong>Wipe this room for ALL devices?</strong><br/><span style=\\'font-size:.73rem;color:var(--mu)\\'>This deletes all players, sessions and history from Firebase. Cannot be undone. Other devices will lose all data immediately.</span>','🗑 Wipe Room','bd2',()=>{closeModal();SYNC.resetSharedRoom();})">
+      🗑 Wipe Shared Room Data
+    </button>
 
     <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px;font-size:.7rem;color:var(--mu)">
       <strong style="color:var(--tx)">Firebase:</strong> ladder-open-play &nbsp;·&nbsp;
