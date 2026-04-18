@@ -4645,27 +4645,145 @@ function renderStandings(){
 }
 
 function renderPlayerView(){
-  _assertOwner('pv-content','renderPlayerView'); // My Stats owns: pv-podium(gone), pv-content
+  _assertOwner('pv-content','renderPlayerView');
   if(!isActiveTab('player')&&!PLAYER_MODE)return;
-  initCourtPills('cpills-setup',n=>{S.courts=n;renderRoster();});
-  initCourtPills('cpills-live',n=>{
-    S.courts=n;if(S.session&&!S.session.cfMode){S.session.courts=n;STORE.save();}
-    if(S.session?.cfMode){
-      S.session.courts=n;STORE.save();
-      // Regenerate suggestions for newly active courts
-      for(let c=1;c<=n;c++){if(!S.session.cfCourts[c])S.session.cfCourts[c]={status:'ready',match:null};}
-      for(let c=1;c<=n;c++){if(S.session.cfCourts[c].status==='ready')CF.generateSuggestion(c,null);}
-      renderLive();
+  const sel=document.getElementById('pv-select');
+  const el=document.getElementById('pv-content');
+  if(!el)return;
+
+  const id=sel?.value||'';
+  if(!id){
+    el.innerHTML=`<div class="empty" style="text-align:center;padding:24px">
+      <div style="font-size:2rem;margin-bottom:8px">👤</div>
+      <div style="font-weight:600;margin-bottom:5px">${PLAYER_MODE?'Pick your name above':'Select a player above'}</div>
+      <div style="font-size:.75rem;color:var(--mu)">${PLAYER_MODE?'Select YOUR name from the list to see your match, rank and stats.':'Choose a player to view their stats.'}</div>
+    </div>`;
+    return;
+  }
+
+  const p=gp(id);
+  if(!p){el.innerHTML='';return;}
+
+  const sp=S.session?.status==='active'?gsp(id):null;
+  const sessFilter=document.getElementById('pv-sess-filter')?.value||'';
+
+  // ── Current match / queue status ───────────────────────────────
+  let statusHtml='';
+  if(S.session?.status==='active'&&S.session.cfMode){
+    // Check if on court
+    const onCourtEntry=Object.entries(S.session.cfCourts||{})
+      .find(([,ct])=>ct.match&&[...ct.match.t1,...ct.match.t2].includes(id));
+    const inQueue=S.session.cfQueue?.find(q=>q.id===id);
+    const paused=S.session.cfPaused?.find(q=>q.id===id);
+
+    if(onCourtEntry){
+      const [cNum,ct]=onCourtEntry;
+      const m=ct.match;
+      const inT1=m.t1.includes(id);
+      const partner=gp((inT1?m.t1:m.t2).find(x=>x!==id));
+      const opps=(inT1?m.t2:m.t1).map(x=>gp(x)?.name||'?').join(' & ');
+      statusHtml=`<div class="pv-match-now">
+        <div style="font-size:.68rem;font-weight:700;color:var(--cy);letter-spacing:.08em;margin-bottom:6px">▶ ON COURT ${cNum}</div>
+        <div style="font-size:.82rem;color:var(--mu);margin-bottom:3px">Partner: <strong style="color:var(--tx)">${partner?esc(partner.name):'?'}</strong></div>
+        <div style="font-size:.82rem;color:var(--mu)">vs <strong style="color:var(--re)">${esc(opps)}</strong></div>
+      </div>`;
+    }else if(paused){
+      statusHtml=`<div class="pv-match-now" style="border-color:rgba(251,147,60,.3)">
+        <div style="font-size:.68rem;font-weight:700;color:var(--or);letter-spacing:.08em;margin-bottom:4px">⏸ PAUSED</div>
+        <div style="font-size:.74rem;color:var(--mu)">You're taking a break. Ask the organiser to resume you.</div>
+      </div>`;
+    }else if(inQueue){
+      const qi=(S.session.cfQueue||[]).findIndex(q=>q.id===id);
+      const totalQ=(S.session.cfQueue||[]).length;
+      const waitMin=Math.round((Date.now()-inQueue.since)/60000);
+      const upNext=qi<2;
+      statusHtml=`<div class="pv-match-now" style="border-color:${upNext?'var(--gr)':'rgba(34,211,238,.3)'}">
+        <div style="font-size:.68rem;font-weight:700;color:${upNext?'var(--gr)':'var(--cy)'};letter-spacing:.08em;margin-bottom:6px">${upNext?'🏓 UP NEXT!':'⏳ IN QUEUE'}</div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:2.2rem;color:${upNext?'var(--gr)':'var(--cy)'}">#${qi+1} <span style="font-size:1rem;color:var(--mu)">of ${totalQ}</span></div>
+        <div style="font-size:.74rem;color:var(--mu);margin-top:4px">Waited ${waitMin} min</div>
+      </div>`;
+    }else if(sp&&sp.status==='left'){
+      statusHtml=`<div class="pv-match-now" style="border-color:rgba(248,113,113,.3)">
+        <div style="font-size:.74rem;color:var(--re)">Marked as left this session.</div>
+      </div>`;
     }
-    toast(`Courts → ${n}`,'ok');
-  });
-  document.querySelectorAll('.tb').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.tab)));
-  document.getElementById('cfm-bg').addEventListener('click',function(e){if(e.target===this)document.getElementById('cfm-no').click();});
-  // CF mode only — round mode removed
-  initPlayerMode();
-  _updateRoomBadge(); // show room code immediately, before Firebase connects
-  SYNC._updateBadge('connecting');
-  SYNC.autoConnect();
+  }
+
+  // ── Session stats ───────────────────────────────────────────────
+  let sessHtml='';
+  if(sp){
+    const d=sp.sRating-sp.startRating;
+    const pd=sp.ptsFor-sp.ptsAgainst;
+    const nrTag=sp.isNR?`<span class="nr-badge">NR</span>`:sp.isSeeding?`<span class="nr-seed">~${Math.round(sp.sRating)}</span>`:'';
+    sessHtml=`<div class="pv-hero">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;color:var(--tx)">${esc(p.name)}${p.tag?`<span class="ptag">${esc(p.tag)}</span>`:''}</div>
+      <div class="pv-sub">TODAY'S SESSION</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:2.4rem;color:var(--cy);margin:6px 0">${sp.isNR?'NR':Math.round(sp.sRating)} ${nrTag}</div>
+      <div style="display:flex;gap:10px;justify-content:center;margin-top:6px">
+        <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--gr)">${sp.wins}</div><div style="font-size:.62rem;color:var(--mu)">WINS</div></div>
+        <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--re)">${sp.losses}</div><div style="font-size:.62rem;color:var(--mu)">LOSSES</div></div>
+        <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:${d>=0?'var(--gr)':'var(--re)'}">${d>=0?'+':''}${d}</div><div style="font-size:.62rem;color:var(--mu)">RTG Δ</div></div>
+        <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--mu)">${pd>=0?'+':''}${pd}</div><div style="font-size:.62rem;color:var(--mu)">PTS DIFF</div></div>
+      </div>
+    </div>`;
+  }else if(p){
+    sessHtml=`<div class="pv-hero">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;color:var(--tx)">${esc(p.name)}${p.tag?`<span class="ptag">${esc(p.tag)}</span>`:''}</div>
+      <div class="pv-sub">ALL-TIME RATING</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:2.4rem;color:var(--cy);margin:6px 0">${p.isNR?'NR':Math.round(p.rating)}</div>
+      <div style="font-size:.72rem;color:var(--mu)">${p.gamesPlayed}G · ${p.wins}W / ${p.losses}L</div>
+    </div>`;
+  }
+
+  // ── Match log ──────────────────────────────────────────────────
+  // Collect matches involving this player from selected session(s)
+  const matchRows=[];
+  const addMatches=(log,sessName,sessId)=>{
+    (log||[]).filter(m=>m.t1?.includes(id)||m.t2?.includes(id)).forEach(m=>{
+      const inT1=m.t1.includes(id);
+      const partner=gp((inT1?m.t1:m.t2).find(x=>x!==id));
+      const opps=(inT1?m.t2:m.t1);
+      const won=inT1?m.s1>m.s2:m.s2>m.s1;
+      const tie=m.s1===m.s2;
+      const d=m.eloDeltas?.[inT1?[...m.t1,...m.t2].indexOf(id):[...m.t1,...m.t2].indexOf(id)]||0;
+      const dVal=m.eloDeltas?m.eloDeltas[[...m.t1,...m.t2].indexOf(id)]:null;
+      const oppsNames=opps.map(oid=>{
+        const sp2=sessId==='__current__'?gsp(oid):null;
+        const p2=sp2||gp(oid)||{name:oid};
+        return esc(p2.name||oid);
+      }).join(' & ');
+      const partnerName=partner?esc(partner.name):'?';
+      matchRows.push({won,tie,partner:partnerName,opps:oppsNames,s1:m.s1,s2:m.s2,dVal,sessName});
+    });
+  };
+
+  if(sessFilter==='__current__'||!sessFilter){
+    if(S.session?.cfLog?.length)addMatches(S.session.cfLog,'Today',sessFilter);
+  }
+  if(sessFilter!=='__current__'){
+    S.archive.forEach(sess=>{
+      if(sessFilter&&sess.id!==sessFilter)return;
+      addMatches(sess.cfLog,esc(sess.name),sess.id);
+    });
+  }
+
+  let matchHtml='';
+  if(matchRows.length){
+    matchHtml=`<div class="card" style="margin-bottom:11px">
+      <div class="ct" style="margin-bottom:8px">📜 Match History</div>
+      ${matchRows.map(m=>`
+        <div class="hm" style="flex-wrap:wrap;gap:4px">
+          <span style="font-size:.7rem;font-weight:700;color:${m.won?'var(--gr)':m.tie?'var(--go)':'var(--re)'};min-width:38px">${m.won?'WIN':m.tie?'TIE':'LOSS'}</span>
+          <div style="flex:1;font-size:.77rem">${m.partner} <span style="color:var(--mu)">vs</span> ${m.opps}</div>
+          <div class="hscore" style="${m.tie?'color:var(--go)':''}">${m.s1}–${m.s2}</div>
+          ${m.dVal!=null?`<span style="font-size:.68rem;color:${m.dVal>0?'var(--gr)':m.dVal<0?'var(--re)':'var(--mu)'}">${m.dVal>0?'+':''}${m.dVal}</span>`:''}
+        </div>`).join('')}
+    </div>`;
+  }else{
+    matchHtml=`<div class="card"><div class="empty" style="padding:10px">${sessFilter?'No matches in this session yet.':'No match history yet.'}</div></div>`;
+  }
+
+  el.innerHTML=statusHtml+sessHtml+matchHtml;
 }
 
 
