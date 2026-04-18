@@ -583,7 +583,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 //  • Pickles & Ladders icon embedded
 // ================================================================
 
-const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,roundMin:0,sessionMode:'flow',extendedMin:16,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
+const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,extendedMin:16,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
 let _pageFirstLoad=true; // true only once — blocks reconnection from forcing tab switch
 
 /* ── Room ID management ─────────────────────────────
@@ -712,23 +712,21 @@ const SYNC={
     }
   },
 
-  push(){
+  push(segment='all'){
     if(!this.ready||!this.ref)return;
-    S._lastSaveTs=Date.now(); // used by stale-write guard in _applyRemote
-    let payload;
-    try{
-      payload={
-        db:S.db,
-        session:S.session?JSON.parse(JSON.stringify(S.session)):null,
-        archive:S.archive,
-        adminPin:S.adminPin||'',
-        _by:DEVICE_ID,
-        _ts:Date.now()
-      };
-    }catch(e){console.error('STORE.push serialize error',e);return;}
-    this.ref.set(payload).catch(e=>{
+    S._lastSaveTs=Date.now();
+    // Meta always accompanies any write so listeners know who wrote and when
+    const meta={_by:DEVICE_ID,_ts:S._lastSaveTs,adminPin:S.adminPin||''};
+    const updates={meta};
+    // Only write the changed segment — prevents stale devices overwriting unrelated data
+    if(segment==='all'||segment==='session')
+      updates.session=S.session?JSON.parse(JSON.stringify(S.session)):null;
+    if(segment==='all'||segment==='db')
+      updates.db=S.db;
+    if(segment==='all'||segment==='archive')
+      updates.archive=S.archive;
+    this.ref.update(updates).catch(e=>{
       console.error('Firebase write failed:',e);
-      // Show persistent error so organiser knows data isn't saving
       const badge=document.getElementById('sync-badge');
       if(badge){badge.textContent='❌ Save failed';badge.style.cssText='display:inline-flex;align-items:center;gap:3px;font-size:.65rem;font-weight:700;padding:3px 8px;border-radius:20px;background:rgba(248,113,113,.15);border:1px solid rgba(248,113,113,.4);color:var(--re);cursor:pointer';}
       toast('⚠️ Data not saved — check connection: '+e.message,'err');
@@ -756,11 +754,13 @@ const SYNC={
         });
       }
       // ── Phase 1 Sync Safety ──────────────────────────────────
-      // (1) Timestamp guard — reject payloads older than what we last saved.
-      //     Protects against a stale device reconnecting and overwriting fresh data.
-      const remoteTs=remote._ts||0;
+      // Backwards-compat: new writes put _ts/_by inside meta{}, old writes put them at root
+      const remoteTs=(remote.meta?._ts)||remote._ts||0;
+      const remoteBy=(remote.meta?._by)||remote._by||'';
+      const adminPinVal=(typeof remote.meta?.adminPin!=='undefined')?remote.meta.adminPin:
+                        (typeof remote.adminPin!=='undefined'?remote.adminPin:'');
       const localTs=S._lastSaveTs||0;
-      const isStale=!isFirstLoad&&remoteTs>0&&remoteTs<localTs-2000; // 2s grace for clock skew
+      const isStale=!isFirstLoad&&remoteTs>0&&remoteTs<localTs-2000;
       if(isStale){
         console.warn(`[sync] Rejected stale remote write (remote _ts ${remoteTs} < local ${localTs})`);
         return;
@@ -792,7 +792,7 @@ const SYNC={
 
       // Restore preserved cfLog after session is assigned
       if(preservedCfLog&&S.session)S.session.cfLog=preservedCfLog;
-      if(typeof remote.adminPin!=='undefined') S.adminPin=remote.adminPin;
+      if(typeof adminPinVal!=='undefined') S.adminPin=adminPinVal;
       if(S.session){
         // Merge: keep local suggestions that Firebase data doesn't have yet
         if(S.session.cfMode){
@@ -837,7 +837,6 @@ const SYNC={
           S.session.cfPairLastAt=S.session.cfPairLastAt||{};
           S.session.cfPairLastLost=S.session.cfPairLastLost||{};
         }
-        if(S.session.roundMin)S.roundMin=S.session.roundMin;
         S.checkedIn.clear();
         S.session.activePlayers?.forEach(id=>S.checkedIn.add(id));
         // Restore CF tick if session is active and in CF mode
@@ -847,39 +846,37 @@ const SYNC={
       _invalidateMatchmakingCaches();
 
       // PB-004: Auto-seeding disabled — demo data must be loaded explicitly.
-      // (Removed: seedExampleData() was auto-pushed to Firebase on any fresh room,
-      //  which polluted live events with fake players.)
 
-      // Re-render everything
-      updatePvSelect();updatePvSessFilter();renderDB();renderRoster();renderAllTime();
-      renderHistory();renderArchive();updateHeader();updatePinStatus();
-      if(!PLAYER_MODE){
-        if(S.session?.status==='active'){
-          S.courts=S.session.courts||1;
-          S.extendedMin=S.session.extendedMin||16;
-          syncCourtPills('cpills-setup',S.courts);syncCourtPills('cpills-live',S.courts);
-          renderLive();
-        }else{renderLive();}
+      // Always-safe lightweight state sync (no DOM render, just data)
+      updateHeader();
+      updatePinStatus();
+      updatePvSelect();
+      updatePvSessFilter();
+      if(S.session?.status==='active'){
+        S.courts=S.session.courts||1;
+        S.extendedMin=S.session.extendedMin||16;
+        syncCourtPills('cpills-setup',S.courts);
+        syncCourtPills('cpills-live',S.courts);
       }
-      if(isActiveTab('player'))renderPlayerView();
 
-      // Hide loading overlay on first load; show sync toast on subsequent remote updates
       if(isFirstLoad){
+        // First load: render all tabs so they're initialized before the user navigates
+        renderDB();renderRoster();renderAllTime();
+        renderHistory();renderArchive();
+        if(!PLAYER_MODE)renderLive();
         const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
-        // Only switch to live on the very first page load — never on reconnections.
-        // _pageFirstLoad is set to false after first successful sync (module-level).
         if(_pageFirstLoad&&S.session?.status==='active'&&!PLAYER_MODE){
           switchTab('live');startElapsed();updateProgress();
         }
         _pageFirstLoad=false;
         checkAdminAccess();
       }else{
-        // Re-render active tab with fresh Firebase data (no tab switch)
-        if(isActiveTab('standings'))renderStandings();
-        if(isActiveTab('history')){renderHistory();renderArchive();}
-        if(isActiveTab('player'))renderPlayerView();
-        // Don't toast on own-device echoes (too noisy during active session)
-        if(!data||data._by!==DEVICE_ID)toast('🔄 Synced from another device','ok');
+        // Subsequent remote updates: render ONLY the active tab.
+        // Other tabs render fresh on demand when the user navigates via switchTab.
+        // This is the structural fix for cross-tab render contamination.
+        _renderActiveTab();
+        const remoteBy=data?.meta?._by||data?._by||'';
+        if(remoteBy&&remoteBy!==DEVICE_ID)toast('🔄 Synced from another device','ok');
       }
     }catch(e){console.error('_applyRemote error',e);}
   },
@@ -948,12 +945,12 @@ const SYNC={
 // No BroadcastChannel — Firebase real-time listener covers all tab sync
 
 const STORE={
-  save(){
-    SYNC.push();
-    // Flash sync indicator
+  // segment: 'session' | 'db' | 'archive' | 'all' (default)
+  // Pass the narrowest segment that changed to avoid overwriting unrelated data.
+  save(segment='all'){
+    SYNC.push(segment);
     const si=document.getElementById('sync-status');
     if(si){si.textContent='⏳';si.title='Syncing…';clearTimeout(si._t);si._t=setTimeout(()=>{si.textContent='✓';si.title='Synced';},1200);}
-    // Firebase handles all sync — no local broadcast
   }
 };
 
@@ -976,12 +973,9 @@ let _allMatchesCacheKey = -1;     // cfMatchCount or round number when cache was
 function _getSessionMatches(){
   if(!S.session)return[];
   // Key: total completed matches in session (changes after every submitScore/applyScore)
-  const key=(S.session.cfMatchCount||0)+(S.session.round||0)*1000;
+  const key=S.session.cfMatchCount||0;
   if(_allMatchesCache!==null&&_allMatchesCacheKey===key)return _allMatchesCache;
-  _allMatchesCache=[
-    ...(S.session.rounds||[]).flatMap(r=>r.matches.filter(m=>m.status==='done')),
-    ...(S.session.cfLog||[])
-  ];
+  _allMatchesCache=[...(S.session.cfLog||[])];
   _allMatchesCacheKey=key;
   return _allMatchesCache;
 }
@@ -1507,7 +1501,7 @@ function addPlayer(){
   if(!name){toast('Enter a name','err');return;}
   if(S.db.some(p=>p.name.toLowerCase()===name.toLowerCase()&&(p.tag||'').toLowerCase()===tag.toLowerCase())){toast('Name+Tag already exists','err');return;}
   S.db.push({id:uid(),name,tag,rating,baseRating:rating,isNR:isNR||false,nrLevelHint:nrLevelRating,isSeeding:false,gamesPlayed:0,wins:0,losses:0,ties:0,createdAt:new Date().toISOString()});
-  STORE.save();renderDB();renderRoster();renderAllTime();updatePvSelect();
+  STORE.save('db');renderDB();renderRoster();renderAllTime();updatePvSelect();
   document.getElementById('np-name').value='';document.getElementById('np-tag').value='';
   const nrCb=document.getElementById('np-nr');if(nrCb){nrCb.checked=false;toggleNRInput(false);}
   const rInp=document.getElementById('np-rating');if(rInp)rInp.value='1000';
@@ -1519,7 +1513,7 @@ function deletePlayer(id){
   const p=gp(id);if(!p)return;
   showCfm(`Delete <strong>${plainName(p)}</strong>?<br/><span style="font-size:.75rem;color:var(--mu)">Cannot be undone.</span>`,'Delete','bd2',()=>{
     S.db=S.db.filter(x=>x.id!==id);S.checkedIn.delete(id);if(S.editId===id)S.editId=null;
-    STORE.save();renderDB();renderRoster();renderAllTime();updatePvSelect();toast('Deleted','warn');
+    STORE.save('db');renderDB();renderRoster();renderAllTime();updatePvSelect();toast('Deleted','warn');
   });
 }
 
@@ -1534,7 +1528,7 @@ function savePlayerEdit(id){
   if(S.db.some(x=>x.id!==id&&x.name.toLowerCase()===name.toLowerCase()&&(x.tag||'').toLowerCase()===tag.toLowerCase())){toast('Another player has that name+tag','err');return;}
   if(rating<400||rating>2000){toast('Rating 400–2000','err');return;}
   p.name=name;p.tag=tag;p.rating=rating;S.editId=null;
-  STORE.save();renderDB();renderRoster();renderAllTime();updatePvSelect();toast('Updated ✓','ok');
+  STORE.save('db');renderDB();renderRoster();renderAllTime();updatePvSelect();toast('Updated ✓','ok');
 }
 
 function toggleCheckIn(id){
@@ -1555,17 +1549,15 @@ function startSession(){
   _invalidateMatchmakingCaches();
   _buildSessionTogetherCache(); // pre-warm before first match generation
   const arr=[...S.checkedIn];if(arr.length<4){toast('Need at least 4 players','err');return;}
-  const isCF=true; // Round Mode removed — always Continuous Flow
-  S.roundMin=0; // CF mode: play until done — no fixed duration
   S.extendedMin=parseInt(document.getElementById('extended-min')?.value)||16;
-  const nameEl=isCF?document.getElementById('sess-name-flow'):document.getElementById('sess-name');
+  const nameEl=document.getElementById('sess-name-flow');
   const name=(nameEl?.value||'').trim()||`Open Play — ${fmtDate()}`;
   // minPlayAfterSit removed (round mode only)
   // NR start rating = session average of rated players
   const ratedRatings=arr.filter(id=>!gp(id)?.isNR).map(id=>gp(id)?.rating||1000);
   const sessAvg=ratedRatings.length?Math.round(ratedRatings.reduce((a,b)=>a+b,0)/ratedRatings.length):1000;
   S.session={
-    id:uid(),name,date:new Date().toISOString(),courts:S.courts,roundMin:S.roundMin,
+    id:uid(),name,date:new Date().toISOString(),courts:S.courts,
     courtGroupSize:4,cfMode:true,extendedMin:S.extendedMin,
     sessionStart:Date.now(),
     activePlayers:[...arr],
@@ -1584,7 +1576,7 @@ function startSession(){
     neverPair:{},ratingOverrides:{},
     status:'active'
   };
-  STORE.save();updateHeader();startElapsed();switchTab('live');
+  STORE.save('session');updateHeader();startElapsed();switchTab('live');
   CF.initQueue();renderLive();renderStandings();renderHistory();toast('⚡ Continuous Flow started!','ok');
 }
 
@@ -1605,11 +1597,6 @@ function applyScore(m,s1,s2){
   [...m.t1,...m.t2].forEach((id,i)=>{
     const sp=gsp(id);if(!sp)return;
     sp.sRating=Math.max(400,sp.sRating+m.eloDeltas[i]);sp.matchesPlayed++;
-    // Round-mode only: approximate court time from stored roundMin (archived sessions)
-    // Dead code for current CF sessions — CF tracks actual durMs from submitScore
-    if(!S.session.cfMode&&S.session.roundMin){
-      sp.timeOnCourtMs=(sp.timeOnCourtMs||0)+(S.session.roundMin*60000);
-    }
     if(i<2){sp.ptsFor+=s1;sp.ptsAgainst+=s2;}else{sp.ptsFor+=s2;sp.ptsAgainst+=s1;}
     if(s1===s2)sp.ties=(sp.ties||0)+1;else if((i<2&&s1>s2)||(i>=2&&s2>s1))sp.wins++;else sp.losses++;
   });
@@ -1645,7 +1632,7 @@ function applyScore(m,s1,s2){
   }
   _boostKCache=null; // player game counts changed — refresh K-boost detection
   _allMatchesCache=null; // session match list changed — invalidate effectiveRating cache
-  STORE.save();renderLive();renderStandings();renderHistory();
+  STORE.save('session');renderLive();renderStandings();renderHistory();
   if(isActiveTab('player'))renderPlayerView();
   // Toast with ELO deltas
   const tie=s1===s2,w=tie?null:(s1>s2?m.t1:m.t2).map(id=>gp(id)?.name||'?').join(' & ');
@@ -1663,7 +1650,6 @@ function renderQS(cId,s1Id,s2Id){
   el.innerHTML=p.map(([a,b])=>`<span class="qs" onclick="document.getElementById('${s1Id}').value='${a}';document.getElementById('${s2Id}').value='${b}'">${a}–${b}</span>${a!==b?`<span class="qs" onclick="document.getElementById('${s1Id}').value='${b}';document.getElementById('${s2Id}').value='${a}'">${b}–${a}</span>`:''}`).join('');
 }
 
-function curRnd(){return S.session?.rounds[S.session.rounds.length-1];}
 
 /* ── MID-MATCH PLAYER SWAP ───────────────────────── */
 /* ── MID-SESSION ROSTER ──────────────────────────── */
@@ -1757,7 +1743,7 @@ function saveNeverPair(id){
     if(cb&&!hasIt)S.session.neverPair[oid].push(id);
     else if(!cb&&hasIt)S.session.neverPair[oid]=S.session.neverPair[oid].filter(x=>x!==id);
   });
-  STORE.save();renderRosterModal();toast('Never-pair list saved ✓','ok');
+  STORE.save('session');renderRosterModal();toast('Never-pair list saved ✓','ok');
 }
 
 function midAddWarm(id){
@@ -1806,7 +1792,7 @@ function midAdd(id){
     S.session.plStreak[id]=0;
     toast(`${p.name} joined — credited ${missed} sit-out round${missed!==1?'s':''}, plays immediately 🏓`,'ok');
   }
-  STORE.save();renderLive();renderRosterModal();
+  STORE.save('session');renderLive();renderRosterModal();
 }
 
 function midRemove(id){
@@ -1828,14 +1814,14 @@ function cfPinPlayer(id){
   // Only queue members can be pinned
   if(!S.session.cfQueue.find(q=>q.id===id)){toast('Player must be in queue to pin','warn');return;}
   S.session.cfPinnedIds.push(id);
-  STORE.save();renderLive();
+  STORE.save('session');renderLive();
   toast('📌 '+esc(gp(id)?.name||'?')+' pinned to front of queue','ok');
 }
 
 function cfUnpinPlayer(id){
   if(!S.session)return;
   S.session.cfPinnedIds=(S.session.cfPinnedIds||[]).filter(x=>x!==id);
-  STORE.save();renderLive();
+  STORE.save('session');renderLive();
 }
 
 // Clear all pins (e.g. after a court is confirmed)
@@ -1851,7 +1837,7 @@ function cfPausePlayer(id){
   const [entry]=S.session.cfQueue.splice(qi,1);
   if(!S.session.cfPaused)S.session.cfPaused=[];
   S.session.cfPaused.push({...entry,pausedAt:Date.now()});
-  STORE.save();renderLive();toast(`${p.name} paused ⏸`,'warn');
+  STORE.save('session');renderLive();toast(`${p.name} paused ⏸`,'warn');
 }
 
 function cfResumePlayer(id){
@@ -1862,7 +1848,7 @@ function cfResumePlayer(id){
   const [entry]=S.session.cfPaused.splice(pi,1);
   // Re-enter queue preserving wait time (since is kept from original)
   S.session.cfQueue.push({id:entry.id,since:entry.since,consec:entry.consec||0});
-  STORE.save();renderLive();toast(`${p.name} back in queue ✓`,'ok');
+  STORE.save('session');renderLive();toast(`${p.name} back in queue ✓`,'ok');
 }
 
 function midRejoin(id){
@@ -1883,7 +1869,7 @@ function midRejoin(id){
       }
     }
   }
-  STORE.save();toast(`${p.name} rejoined! 🏓`,'ok');renderLive();renderRosterModal();
+  STORE.save('session');toast(`${p.name} rejoined! 🏓`,'ok');renderLive();renderRosterModal();
 }
 
 /* ── TIMER ───────────────────────────────────────── */
@@ -2017,10 +2003,7 @@ function renderSessStd(){
 
   // Build strength-of-schedule: avg opponent rating faced this session
   const sosMap={};
-  const allMatches=[
-    ...(S.session.rounds||[]).flatMap(r=>r.matches.filter(m=>m.status==='done')),
-    ...(S.session.cfLog||[])
-  ];
+  const allMatches=[...(S.session.cfLog||[])];
   S.session.players.forEach(sp=>{
     const myMatches=allMatches.filter(m=>[...m.t1,...m.t2].includes(sp.id));
     if(!myMatches.length){sosMap[sp.id]=null;return;}
@@ -2098,7 +2081,7 @@ function deleteMatch(matchId){
       const m=targetRnd.matches.find(x=>x.id===matchId);
       if(m){m.s1=null;m.s2=null;m.status='pending';m.eloDeltas=null;}
       recalcSessionELO();
-      STORE.save();renderLive();renderHistory();renderStandings();
+      STORE.save('session');renderLive();renderHistory();renderStandings();
       toast('Match result cleared — ratings recalculated ✓','ok');
     });
 }
@@ -2138,7 +2121,7 @@ function rebuildDbFromArchive(){
     });
   });
   recalcAllTimeRatings();
-  STORE.save();renderDB();renderAllTime();renderStandings();
+  STORE.save('db');renderDB();renderAllTime();renderStandings();
   toast(added>0?`✅ Rebuilt ${added} player${added>1?'s':''} from archive — ratings recalculated`:'✅ DB already had all players — ratings recalculated','ok');
 }
 
@@ -2303,47 +2286,37 @@ function renderArchive(){
   S.archive.map(sess=>{
     const d=new Date(sess.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
     const top=[...sess.players].sort((a,b)=>b.sRating-a.sRating).slice(0,3);
+    // CF is the only active mode. Legacy round-mode sessions in archive get a simplified read-only view.
     const isCF=!!sess.cfMode;
-    const rCount=isCF?null:(sess.rounds||[]).length;
-    const mCount=isCF
-      ?(sess.cfLog||[]).length
-      :(sess.rounds||[]).reduce((s,r)=>s+r.matches.filter(m=>m.status==='done').length,0);
+    const cfMatches=sess.cfLog||[];
+    const legacyMatches=(sess.rounds||[]).flatMap(r=>r.matches.filter(m=>m.status==='done'));
+    const mCount=isCF?cfMatches.length:legacyMatches.length;
     const metaLabel=isCF
       ?`${d} · ⚡ CF · ${mCount} matches · ${sess.players.length} players`
-      :`${d} · ${rCount} round${rCount!==1?'s':''} · ${mCount} matches · ${sess.players.length} players`;
+      :`${d} · Legacy · ${mCount} matches · ${sess.players.length} players`;
 
     const stdRows=[...sess.players].sort((a,b)=>{if(b.wins!==a.wins)return b.wins-a.wins;const pda=a.ptsFor-a.ptsAgainst,pdb=b.ptsFor-b.ptsAgainst;if(pdb!==pda)return pdb-pda;return b.sRating-a.sRating;}).map((sp,i)=>{
       const d2=sp.sRating-sp.startRating,pd=(sp.ptsFor||0)-(sp.ptsAgainst||0);
       return `<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.78rem">${esc(sp.name||'?')}${sp.tag?`<span class="ptag">${esc(sp.tag)}</span>`:''}</td><td style="font-size:.72rem;color:var(--mu)">${sp.wins}W/${sp.losses}L${sp.ties?'/'+sp.ties+'T':''}</td><td style="font-size:.7rem;color:var(--mu)">${pd>=0?'+':''}${pd}</td><td><span class="dl ${d2>0?'du':d2<0?'dd':'dz'}">${d2>=0?'+':''}${d2}</span></td><td><span class="rv">${Math.round(sp.sRating)}</span></td></tr>`;
     }).join('');
 
-    // Build match history — handle both round and CF modes
-    let matchHistory='';
-    if(isCF){
-      const cfMatches=sess.cfLog||[];
-      matchHistory=cfMatches.length
-        ?`<div class="hr"><div class="hrhd" onclick="this.nextElementSibling.classList.toggle('open')"><span>ALL MATCHES (${cfMatches.length}) ▸</span><span style="font-size:.69rem">⚡ Continuous Flow</span></div><div class="hr-body open">${
-          cfMatches.map((m,mi)=>{
-            const gn=id=>esc(getArchiveName(id,sess.players));
-            const t1n=m.t1.map(gn).join(' & '),t2n=m.t2.map(gn).join(' & ');
-            const tie=m.s1===m.s2,t1w=m.s1>m.s2;
-            return `<div class="hm"><div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div><div class="hscore" style="${tie?'color:var(--go)':''}">${m.s1}–${m.s2}</div><div style="flex:1;text-align:right;font-weight:${!t1w&&!tie?700:400};color:${!t1w&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div><button class="sedit" style="width:auto;margin-top:0" onclick="openEditScoreArchiveCF(${mi},'${sess.id}')">✏️</button></div>`;
-          }).join('')
-        }</div></div>`
-        :'<div class="empty">No matches recorded</div>';
-    }else{
-      matchHistory=(sess.rounds||[]).map(r=>{
-        const gn=id=>esc(getArchiveName(id,sess.players));
-        const ms=r.matches.map(m=>{
-          const t1n=m.t1.map(gn).join(' & ');
-          const t2n=m.t2.map(gn).join(' & ');
-          const sc=m.status==='done'?`${m.s1}–${m.s2}`:'—',tie=m.status==='done'&&m.s1===m.s2,t1w=m.status==='done'&&m.s1>m.s2;
-          return `<div class="hm"><div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div><div class="hscore" style="${tie?'color:var(--go)':''}">${sc}</div><div style="flex:1;text-align:right;font-weight:${!t1w&&m.status==='done'&&!tie?700:400};color:${!t1w&&m.status==='done'&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div><button class="sedit" style="width:auto;margin-top:0" onclick="openEditScoreArchive('${m.id}','${sess.id}')">✏️</button></div>`;
+    // Match log — CF sessions get full edit support; legacy sessions are read-only
+    const matchRows=isCF
+      ?cfMatches.map((m,mi)=>{
+          const gn=id=>esc(getArchiveName(id,sess.players));
+          const t1n=m.t1.map(gn).join(' & '),t2n=m.t2.map(gn).join(' & ');
+          const tie=m.s1===m.s2,t1w=m.s1>m.s2;
+          return `<div class="hm"><div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div><div class="hscore" style="${tie?'color:var(--go)':''}">${m.s1}–${m.s2}</div><div style="flex:1;text-align:right;font-weight:${!t1w&&!tie?700:400};color:${!t1w&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div><button class="sedit" style="width:auto;margin-top:0" onclick="openEditScoreArchiveCF(${mi},'${sess.id}')">✏️</button></div>`;
+        }).join('')
+      :legacyMatches.map(m=>{
+          const gn=id=>esc(getArchiveName(id,sess.players));
+          const t1n=m.t1.map(gn).join(' & '),t2n=m.t2.map(gn).join(' & ');
+          const tie=m.s1===m.s2,t1w=m.s1>m.s2;
+          return `<div class="hm"><div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div><div class="hscore"style="${tie?'color:var(--go)':''}">${m.s1}–${m.s2}</div><div style="flex:1;text-align:right;font-weight:${!t1w&&!tie?700:400};color:${!t1w&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div></div>`;
         }).join('');
-        const sos=r.sitOuts?.length?` · 💤 ${r.sitOuts.map(id=>esc(getArchiveName(id,sess.players))).join(', ')}` : '';
-        return `<div class="hr"><div class="hrhd" onclick="this.nextElementSibling.classList.toggle('open')"><span>ROUND ${r.number} ▸</span><span style="font-size:.69rem">${new Date(r.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}${sos}</span></div><div class="hr-body open">${ms}</div></div>`;
-      }).join('');
-    }
+    const matchHistory=matchRows
+      ?`<div class="hr"><div class="hrhd" onclick="this.nextElementSibling.classList.toggle('open')"><span>${isCF?`ALL MATCHES (${mCount})`:'LEGACY MATCHES (read-only)'} ▸</span><span style="font-size:.69rem">${isCF?'⚡ CF':'📦 Legacy'}</span></div><div class="hr-body open">${matchRows}</div></div>`
+      :'<div class="empty">No matches recorded</div>';
 
     return `<div class="arch-sess">
       <div class="arch-hdr" onclick="this.nextElementSibling.classList.toggle('open')">
@@ -2353,7 +2326,7 @@ function renderArchive(){
       <div class="arch-body">
         <div class="ct" style="margin-bottom:8px">🏆 Final Standings</div>
         <table class="stbl" style="margin-bottom:14px"><thead><tr><th>#</th><th>PLAYER</th><th>W/L</th><th>PD</th><th>Δ RTG</th><th>FINAL</th></tr></thead><tbody>${stdRows}</tbody></table>
-        <div class="ct" style="margin-bottom:8px">📜 Match Log <span style="font-size:.68rem;color:var(--mu);font-weight:400">(click round header to collapse)</span></div>
+        <div class="ct" style="margin-bottom:8px">📜 Match Log</div>
         ${matchHistory}
         <div style="margin-top:14px;border-top:1px solid var(--bd);padding-top:10px">
           <button class="btn bd2 sm" onclick="deleteArchiveSess('${sess.id}')">🗑 Delete This Session Record</button>
@@ -2454,7 +2427,7 @@ function renderPlayerView(){
 
   const p=gp(id);if(!p){el.innerHTML='';return;}
   const sp=S.session?.status==='active'?gsp(id):null;
-  const rnd=curRnd();
+  const rnd=null; // round mode removed — always null in CF sessions
 
   // No live session — show helpful message instead of empty space
   if(!S.session&&PLAYER_MODE){
@@ -2580,7 +2553,7 @@ function renderPlayerView(){
   function addMatchesFromSess(sess,sessName,sessDate,sessPlayerList,isCFSess){
     const matchList=isCFSess
       ?(sess.cfLog||[]).map(m=>({...m,round:null}))
-      :(sess.rounds||[]).flatMap(r=>r.matches.map(m=>({...m,round:r.number})));
+      :(sess.cfLog||[]);
     matchList.forEach(m=>{
       if(!(m.t1?.includes(id)||m.t2?.includes(id)))return;
       if(!isCFSess&&m.status!=='done')return;
@@ -2627,8 +2600,7 @@ function renderPlayerView(){
       const rank=sorted.findIndex(x=>x.id===id)+1;
       const d=sp.sRating-sp.startRating,pd=sp.ptsFor-sp.ptsAgainst;
       // Session quality wins (wins against stronger opponents)
-      const sessMatches=[...(S.session.rounds||[]).flatMap(r=>r.matches.filter(m=>m.status==='done')),
-        ...(S.session.cfLog||[])].filter(m=>m.t1?.includes(id)||m.t2?.includes(id));
+      const sessMatches=[...(S.session.cfLog||[])].filter(m=>m.t1?.includes(id)||m.t2?.includes(id));
       let sessQW=0,sessLoseStreak=0,curLStreak=0;
       sessMatches.forEach(m=>{
         const inT1=m.t1?.includes(id);
@@ -3173,8 +3145,8 @@ function stopElapsed(){
 /* ── PROGRESS BAR ─────────────────────────────────── */
 function updateProgress(){
   const bar=document.getElementById('prog-bar');if(!bar||!S.session)return;
-  const estRounds=Math.max(1,Math.floor(180/Math.max(5,S.session.roundMin||15)));
-  bar.style.width=Math.min(100,Math.round((S.session.round/estRounds)*100))+'%';
+  // Progress bar not used in CF mode (no fixed round count)
+  bar.style.width='0%';
 }
 
 /* ── doNextRound (with pending-score protection) ─── */
@@ -3220,11 +3192,10 @@ function buildSessionReport(){
     const gn=id=>{const sp=(sess.players||[]).find(p=>p.id===id);return sp?(sp.name+(sp.tag?` ${sp.tag}`:'')):gp(id)?plainName(gp(id)):id;};
     const width=62;
     const hr='-'.repeat(width);
-    const isCF=!!sess.cfMode;
     const lines=[sess.name,`${'='.repeat(sess.name.length)}`,
       new Date(sess.date).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'}),
       '⚡ Continuous Flow Mode',hr,''];
-    if(isCF){
+    {
       // CF session: flat match log grouped by court
       const cfLog=sess.cfLog||[];
       lines.push(`${cfLog.length} matches played`,'');
@@ -3239,7 +3210,8 @@ function buildSessionReport(){
       lines.push('');
     }else{
       // Round mode
-      (sess.rounds||[]).forEach(r=>{
+      // Legacy round sessions: no detailed export
+      if(false){
         lines.push(`Round ${r.number}`,'');
         r.matches.forEach(m=>{
           const s1=m.status==='done'?String(m.s1):'?';
@@ -3411,7 +3383,6 @@ function doEndSession(){
     const isCF=S.session.cfMode;
     const arch={id:S.session.id,name:S.session.name,date:S.session.date,cfMode:isCF||false,
       players:S.session.players.map(sp=>{const p=gp(sp.id)||{};return{id:sp.id,name:sp.name||p.name||'?',tag:sp.tag||p.tag||'',sRating:sp.sRating,startRating:sp.startRating,wins:sp.wins,losses:sp.losses,ties:sp.ties,matchesPlayed:sp.matchesPlayed,ptsFor:sp.ptsFor,ptsAgainst:sp.ptsAgainst};}),
-      rounds:JSON.parse(JSON.stringify(S.session.rounds||[])),
       cfLog:JSON.parse(JSON.stringify(S.session.cfLog||[]))};
     S.archive.unshift(arch);if(S.archive.length>30)S.archive.pop();
     const top=[...arch.players].sort((a,b)=>b.sRating-a.sRating).slice(0,3);
@@ -3422,7 +3393,8 @@ function doEndSession(){
     STORE.save();stopTimer();stopElapsed();
     const pb=document.getElementById('prog-bar');if(pb)pb.style.width='0%';
     updateHeader();renderDB();renderRoster();renderAllTime();renderHistory();renderArchive();updatePvSessFilter();
-    const modeLabel=isCF?`${totalM} matches · Continuous Flow`:`${arch.rounds.length} rounds · ${totalM} matches`;
+    const totalM=(arch.cfLog||[]).length;
+    const modeLabel=`${totalM} matches · Continuous Flow`;
     openModal(`<div class="modal-title" style="text-align:center">🏆 Session Complete!</div>
       <div style="text-align:center;margin-bottom:12px;color:var(--mu);font-size:.76rem">${esc(n)}<br/>${modeLabel} · ${arch.players.length} players</div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:.86rem;color:var(--mu);letter-spacing:.5px;margin-bottom:6px">🥇 TOP PERFORMERS</div>
@@ -3626,16 +3598,29 @@ function switchTab(id){
   if(!tabEl){console.error('Tab not found: tab-'+id);return;}
   tabEl.classList.add('on');
   tabEl.setAttribute('style','display:block'); // clear the force-none, .on CSS takes over
-  // Always re-render on every switch to pick up latest data
-  if(id==='standings'){renderStandings();}
-  if(id==='history'){renderHistory();renderArchive();_updateLastSavedBanner();}
-  if(id==='live'){renderLive();}
-  if(id==='setup'){renderDB();renderRoster();}
-  if(id==='player'){renderPlayerView();}
+  // Always re-render on explicit navigation — _renderTab owns what each tab shows
+  _renderTab(id);
   window.scrollTo(0,0);
 }
 
-/* ── COURT PILLS ─────────────────────────────────── */
+/* ── Tab render helpers ───────────────────────────
+   Single source of truth for "what renders in each tab".
+   _applyRemote calls _renderActiveTab() — never all tabs.
+   switchTab calls _renderTab(id) — always fresh on navigation.
+──────────────────────────────────────────────────*/
+function _activeTabId(){
+  return document.querySelector('.tb.on')?.dataset?.tab||'setup';
+}
+function _renderTab(id){
+  if(id==='setup'){renderDB();renderRoster();}
+  else if(id==='live'){renderLive();}
+  else if(id==='standings'){renderStandings();renderAllTime();}
+  else if(id==='history'){renderHistory();renderArchive();_updateLastSavedBanner();}
+  else if(id==='player'){renderPlayerView();}
+}
+function _renderActiveTab(){
+  _renderTab(_activeTabId());
+}
 function syncCourtPills(containerId,val){document.querySelectorAll(`#${containerId} .cpill`).forEach(p=>p.classList.toggle('sel',parseInt(p.dataset.c)===val));}
 function initCourtPills(containerId,onSel){
   document.querySelectorAll(`#${containerId} .cpill`).forEach(pill=>{
@@ -4547,7 +4532,7 @@ const CF={
     // Recording it here would capture the pre-game count, making the cooldown expire 1 game early
     MM.recHx([match]);
     delete S.session.cfSuggestions[courtNum];
-    STORE.save();renderLive();renderStandings();
+    STORE.save('session');renderLive();renderStandings();
     toast(`Court ${courtNum} started 🏓`,'ok');
   },
 
@@ -4671,7 +4656,7 @@ const CF={
     // Score, ELO, queue re-entry and stats are already committed above this line.
     try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     catch(e){console.error('CF suggestion error (non-fatal):',e);}
-    STORE.save();renderLive();renderHistory();renderStandings();updateHeader();
+    STORE.save('session');renderLive();renderHistory();renderStandings();updateHeader();
 
     // Match quality score and win probability context
     const t1Avg=(this.cfRating(m.t1[0])+this.cfRating(m.t1[1]))/2;
@@ -4718,7 +4703,7 @@ const CF={
       ?next.allIds.filter(id=>!excluded.has(id)).map(id=>gp(id)?.name||'?')
           .reduce((s,n)=>s?s+', '+n:n,'') || 'different pick'
       :'(not enough players)';
-    STORE.save();renderLive();
+    STORE.save('session');renderLive();
     toast(`Court ${courtNum} reshuffled — swapped in ${log}`,'ok');
   },
 
@@ -5275,7 +5260,7 @@ function importMarch28Session(){
   S.archive=S.archive.filter(a=>a.id!=='march28-2025');
   S.archive.push(sess);
   recalcAllTimeRatings();
-  STORE.save();renderDB();renderAllTime();renderStandings();renderArchive();updatePvSessFilter();
+  STORE.save('db');renderDB();renderAllTime();renderStandings();renderArchive();updatePvSessFilter();
   toast('✅ March 28 session imported — '+mc+' matches, '+sessPlayers.length+' players, ratings recalculated','ok');
 }
 document.addEventListener('DOMContentLoaded',init);
