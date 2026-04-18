@@ -588,23 +588,16 @@ let _pageFirstLoad=true; // true only once — blocks reconnection from forcing 
 // Per-court timers (not persisted — local UI state only)
 const CT={};let _ctTick=null;
 // Firebase config stored locally (describes HOW to connect, not app data)
-const SYNC_CFG_KEY='pb16_sync_cfg';
 let ADMIN_UNLOCKED=false;
 // DEVICE_ID stays local — prevents echoing own Firebase writes back
-const DEVICE_ID=localStorage.getItem('pb16_did')||(()=>{const d=Math.random().toString(36).slice(2,10);localStorage.setItem('pb16_did',d);return d;})();
+const DEVICE_ID=Math.random().toString(36).slice(2,10); // Runtime only — no localStorage
 
 /* ── FIREBASE REAL-TIME SYNC ──────────────────────── */
 const SYNC={
   ready:false, ref:null, roomId:null, _ignoreNext:false, _unsubscribe:null,
 
-  getConfig(){
-    try{return JSON.parse(localStorage.getItem(SYNC_CFG_KEY)||'null');}catch(e){return null;}
-  },
-  saveConfig(cfg,roomId){
-    localStorage.setItem(SYNC_CFG_KEY,JSON.stringify({...cfg,roomId}));
-  },
+  // No localStorage — Firebase is the single source of truth
   clearConfig(){
-    localStorage.removeItem(SYNC_CFG_KEY);
     this.ready=false;this.ref=null;this.roomId=null;
     if(this._unsubscribe){this._unsubscribe();this._unsubscribe=null;}
     this._updateBadge();
@@ -851,9 +844,7 @@ const SYNC={
       messagingSenderId:'669188671832',
       appId:'1:669188671832:web:8335ae5c6dd9298170fd2d'
     };
-    const DEFAULT_ROOM='SYRxAPL';
-    const cfg=saved?.apiKey?saved:DEFAULT_CFG;
-    const roomId=saved?.roomId||DEFAULT_ROOM;
+    const roomId='SYRxAPL';
     const ok=await this.connect(cfg,roomId);
     if(!ok){
       // Update loading overlay to show error + retry
@@ -878,7 +869,7 @@ const SYNC={
 };
 
 /* ── STORAGE — Firebase only, no localStorage for app data ── */
-let _bc=null; // BroadcastChannel for same-browser instant tab sync
+// No BroadcastChannel — Firebase real-time listener covers all tab sync
 
 const STORE={
   save(){
@@ -886,12 +877,7 @@ const STORE={
     // Flash sync indicator
     const si=document.getElementById('sync-status');
     if(si){si.textContent='⏳';si.title='Syncing…';clearTimeout(si._t);si._t=setTimeout(()=>{si.textContent='✓';si.title='Synced';},1200);}
-    if(!PLAYER_MODE){
-      try{
-        if(!_bc&&typeof BroadcastChannel!=='undefined')_bc=new BroadcastChannel('pb_ladder_v16');
-        if(_bc)_bc.postMessage({type:'STATE',db:S.db,session:S.session?JSON.parse(JSON.stringify(S.session)):null,archive:S.archive,adminPin:S.adminPin});
-      }catch(e){}
-    }
+    // Firebase handles all sync — no local broadcast
   }
 };
 
@@ -2913,22 +2899,7 @@ function initPlayerMode(){
   if(playerTab)playerTab.classList.add('on');
   renderPlayerView();
 
-  // Listen for live state from organizer tab (same browser, same origin)
-  try{
-    if(typeof BroadcastChannel!=='undefined'){
-      const bcListener=new BroadcastChannel('pb_ladder_v16');
-      bcListener.onmessage=(e)=>{
-        if(e.data?.type!=='STATE')return;
-        try{
-          const prevId=document.getElementById('pv-select')?.value||'';
-          // Apply the broadcast state (no Firebase round-trip needed for same-browser tab)
-          SYNC._applyRemote(e.data,false);
-          const sel=document.getElementById('pv-select');
-          if(sel&&prevId&&S.db.find(p=>p.id===prevId)){sel.value=prevId;renderPlayerView();}
-        }catch(err){}
-      };
-    }
-  }catch(e){}
+  // Firebase listener in SYNC.connect() handles all tab sync
 }
 
 /* ── SYNC MODAL ───────────────────────────────────── */
