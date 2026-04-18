@@ -2710,7 +2710,7 @@ function doEndSession(){
     recalcAllTimeRatings();
     STORE.save();stopTimer();stopElapsed();
     const pb=document.getElementById('prog-bar');if(pb)pb.style.width='0%';
-    updateHeader();renderDB();renderRoster();renderHistory();renderArchive();updatePvSessFilter();
+    updateHeader();renderDB();renderRoster();renderHistory();renderArchive();renderStandings();updatePvSessFilter();
     const totalM=(arch.cfLog||[]).length;
     const modeLabel=`${totalM} matches · Continuous Flow`;
     openModal(`<div class="modal-title" style="text-align:center">🏆 Session Complete!</div>
