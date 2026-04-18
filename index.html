@@ -4147,11 +4147,13 @@ const CF={
 
     // Post-joint-search: verify MGL/tier2 players are actually included.
     // The joint optimizer may have excluded them for a better total score — override this.
-    if(bestAlloc&&tier2.length>0){
+    if(bestAlloc&&(tier1.length>0||tier2.length>0)){
       const allSelected=new Set(bestAlloc.flatMap(b=>b.group.map(p=>p.id)));
-      const unservedTier2=tier2.filter(p=>!allSelected.has(p.id));
-      if(unservedTier2.length>0){
-        // Force greedy path to ensure MGL-priority players get in
+      // If any 0-game or MGL player wasn't selected, force greedy path
+      const unservedPrio=[...tier1,...tier2].filter(p=>!allSelected.has(p.id));
+      if(unservedPrio.length>0&&(tier1.length+tier2.length)<allSelected.size){
+        // Only override if there were enough priority players to fill a court
+        // but they weren't chosen (avoids override when queue is thin)
         bestAlloc=null;
       }
     }
@@ -4163,7 +4165,10 @@ const CF={
       readyCourts.forEach(c=>{
         if(rem.length<4){S.session.cfSuggestions[c]=null;return;}
         // If any priority players (MGL / pinned) remain unserved, anchor group on them.
-        const unserved=rem.filter(p=>tier2.some(t=>t.id===p.id)||tier0.some(t=>t.id===p.id));
+        // Anchor: pinned (tier0) > 0-game (tier1) > MGL (tier2)
+        const unserved=rem.filter(p=>tier0.some(t=>t.id===p.id)||
+                                      tier1.some(t=>t.id===p.id)||
+                                      tier2.some(t=>t.id===p.id));
         let best=null;
         if(unserved.length>0){
           const anchor=unserved[0];
@@ -4275,28 +4280,33 @@ const CF={
     const tier2pIds=new Set(tier2p.map(p=>p.id));
     const tier3p=pool.filter(p=>!tier0pIds.has(p.id)&&!tier1pIds.has(p.id)&&!tier2pIds.has(p.id));
     const orderedPool=[...tier0p,...tier1p,...tier2p,...tier3p];
-    const starving=orderedPool.find(p=>this.hungerBoost(p.id)>=50);
-    if(starving){
-      const others=orderedPool.filter(p=>p.id!==starving.id).slice(0,15);
+    // Anchor: any player in tier0 (pinned), tier1 (0-game), or tier2 (MGL>=4) must be served.
+    // Use the highest-priority unserved player as a forced anchor.
+    const anchor=orderedPool.find(p=>
+      pinnedSg.has(p.id)||                          // pinned
+      (gsp(p.id)?.matchesPlayed||0)===0||           // never played  
+      this.matchGap(p.id)>=4                        // missed 4+ matches
+    );
+    if(anchor){
+      const others=orderedPool.filter(p=>p.id!==anchor.id).slice(0,15);
       const n=others.length;
       let best=null,bestScore=Infinity;
       for(let i=0;i<n-2;i++)for(let j=i+1;j<n-1;j++)for(let k=j+1;k<n;k++){
-        const group=[starving,others[i],others[j],others[k]];
+        const group=[anchor,others[i],others[j],others[k]];
         const res=this._scoreGroup(group,mustSplit);
-        // Relax gap cap for starving players — any playable match beats never playing
         if(!this._withinTeamGapOk(res.t1,res.t2,600))continue;
         if(res.score<bestScore){bestScore=res.score;best={...res,group};}
       }
       if(best){this._storeSuggestion(courtNum,best,finishedMatch);return;}
     }
-    // HARD FIRST-GAME GUARANTEE: if >=4 first-timers exist, search ONLY within them.
-    // This prevents the optimizer from "accidentally" picking a better match that
-    // includes already-played players when un-played players are available.
-    const tier1Only=tier1p.length>=4;
-    const constrainedPool=tier1Only?tier1p:orderedPool;
-    const top=constrainedPool.slice(0,Math.min(Math.max(16,constrainedPool.length),constrainedPool.length));
-    const best=this._findBestGroup(top,mustSplit,nrIds,orderedPool.length)||
-               (tier1Only?this._findBestGroup(orderedPool.slice(0,16),mustSplit,nrIds,orderedPool.length):null);
+    // Search uses orderedPool: [pinned → first-timers → MGL-waiters → normal]
+    // hungerBoost for 0-game players is already up to 200pts — naturally prioritises them
+    // without a hard constraint that would block MGL players from ever being selected.
+    // Both first-game and MGL guarantees coexist:
+    //   - 0-game players float to top via hungerBoost 
+    //   - MGL players (gap>=4) are in the pool via greedy anchor below
+    const top=orderedPool.slice(0,Math.min(Math.max(16,orderedPool.length),orderedPool.length));
+    const best=this._findBestGroup(top,mustSplit,nrIds,orderedPool.length);
     this._storeSuggestion(courtNum,best,finishedMatch);
   },
 
