@@ -658,7 +658,7 @@ const SYNC={
       });
       this._unsubscribe=()=>this.ref.off('value',listener);
       this.ready=true;
-      this.saveConfig(cfg,roomId);
+      // No config saved — Firebase only
       this._updateBadge();
       toast(`🟢 Live sync ON — Room ${roomId}`,'ok');
       return true;
@@ -833,12 +833,11 @@ const SYNC={
       if(norm)norm.style.display='none';
       return; // stop — can't connect from file://
     }
-    const saved=this.getConfig();
-    const DEFAULT_CFG={
+    // Firebase is the only source of truth — config hardcoded, no localStorage
+    const cfg={
       apiKey:'AIzaSyCntwgc62wfRackl_sGFpp7FZiXmJvIhYI',
       authDomain:'ladder-open-play.firebaseapp.com',
-      //databaseURL:'https://ladder-open-play-default-rtdb.firebaseio.com',
-      databaseURL:'https://ladder-open-play-default-rtdb.asia-southeast1.firebasedatabase.app', // Tom Bak
+      databaseURL:'https://ladder-open-play-default-rtdb.asia-southeast1.firebasedatabase.app',
       projectId:'ladder-open-play',
       storageBucket:'ladder-open-play.firebasestorage.app',
       messagingSenderId:'669188671832',
