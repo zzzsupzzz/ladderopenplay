@@ -226,6 +226,8 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 .hrhd{background:var(--s2);padding:7px 12px;font-size:.75rem;color:var(--mu);font-weight:600;display:flex;justify-content:space-between;align-items:center;cursor:pointer}
 .hrhd:hover{background:var(--s3)}
 .hm{padding:7px 12px;border-top:1px solid rgba(28,53,80,.4);display:flex;align-items:center;gap:7px;font-size:.78rem}
+.hm-new{animation:hmFlash 2.4s ease forwards}
+@keyframes hmFlash{0%{background:rgba(52,217,116,.22);border-left:3px solid var(--gr)}60%{background:rgba(52,217,116,.08);border-left:3px solid var(--gr)}100%{background:transparent;border-left:none}}
 .hscore{font-family:'Bebas Neue',sans-serif;font-size:1.05rem;color:var(--cy);min-width:38px;text-align:center}
 
 /* ARCHIVE */
@@ -345,6 +347,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
       <div id="elapsed"></div>
     </div>
     <button id="share-btn" onclick="openShareModal()" style="font-size:.69rem;font-weight:600;padding:4px 9px;border-radius:20px;background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.3);color:var(--pu);cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">📱 Share</button>
+    <span id="room-code-badge" onclick="openSyncModal()" title="Room code — click to manage" style="font-size:.65rem;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--s2);border:1px solid var(--bd);color:var(--mu);cursor:pointer;white-space:nowrap">📡 —</span>
     <span id="sync-badge" onclick="openSyncModal()" title="Live sync settings">⚪ Sync Off</span>
     <span id="sync-status" title="Synced" style="font-size:.75rem;color:var(--gr);min-width:14px;text-align:center">✓</span>
     <span id="hbadge">SETUP</span>
@@ -376,9 +379,9 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <div class="ct">🗓️ Session Setup
       <button class="btn bg2 sm" style="margin-left:auto" onclick="openShareModal()" title="Share read-only player view link">📱 Player Link</button>
     </div>
-    <label>SESSION MODE</label>
-    <div style="display:flex;gap:8px;margin-bottom:12px">
-      <div style="font-size:.75rem;color:var(--cy);font-weight:700;padding:4px 0">⚡ Continuous Flow — each court finishes independently</div>
+    <div style="display:inline-flex;align-items:center;gap:6px;margin-bottom:12px;background:rgba(34,211,238,.07);border:1px solid rgba(34,211,238,.25);border-radius:8px;padding:5px 11px">
+      <span style="font-size:.8rem;color:var(--cy);font-weight:700">⚡ Continuous Flow</span>
+      <span style="font-size:.72rem;color:var(--mu)">each court finishes independently</span>
     </div>
     <div id="flow-mode-opts">
       <div style="margin-bottom:8px"><label>SESSION NAME</label><input id="sess-name-flow" class="inp" placeholder="Saturday Open Play…"/></div>
@@ -513,6 +516,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:.5px">Session History</div>
     <button class="btn bg2 sm" onclick="openExportModal()">📤 Export</button>
   </div>
+  <div id="history-saved-banner" style="display:none;align-items:center;gap:6px;background:rgba(52,217,116,.07);border:1px solid rgba(52,217,116,.25);border-radius:8px;padding:6px 12px;margin-bottom:9px"></div>
   <div id="history-wrap"></div>
   <div id="archive-wrap"></div>
 </div>
@@ -579,6 +583,43 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 
 const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,roundMin:0,sessionMode:'flow',extendedMin:16,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
 let _pageFirstLoad=true; // true only once — blocks reconnection from forcing tab switch
+
+/* ── Room ID management ─────────────────────────────
+   Each organiser device generates its own room code and stores it
+   in localStorage. Clearing localStorage or clicking "New Room"
+   generates a fresh code — preventing cross-event collisions.
+   Room code is 7 uppercase alphanumeric chars (e.g. "A3K9PXZ").
+──────────────────────────────────────────────────── */
+function _generateRoomId(){
+  const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no O/0/1/I (ambiguous)
+  return Array.from({length:7},()=>chars[Math.floor(Math.random()*chars.length)]).join('');
+}
+function _getOrCreateRoomId(){
+  let id=localStorage.getItem('pb_room_id');
+  if(!id||id.length<4){id=_generateRoomId();localStorage.setItem('pb_room_id',id);}
+  return id;
+}
+function generateNewRoom(){
+  showCfm(
+    `<strong>Generate a new room?</strong><br/>
+    <span style="font-size:.74rem;color:var(--mu)">This device will disconnect from the current room and join a new one. Other devices will stay on the old room until you share the new code.</span>`,
+    '🔀 New Room','bc',()=>{
+      const newId=_generateRoomId();
+      localStorage.setItem('pb_room_id',newId);
+      SYNC.clearConfig();
+      SYNC.ready=false;
+      SYNC.autoConnect();
+      closeModal();
+    }
+  );
+}
+function _updateRoomBadge(){
+  const el=document.getElementById('room-code-badge');
+  if(!el)return;
+  const id=SYNC.roomId||localStorage.getItem('pb_room_id')||'—';
+  el.textContent=`📡 ${id}`;
+  el.title=`Room: ${id} — click to manage`;
+}
 
 /* ── CF simultaneous-finish batch debounce ─────────────── */
 // scheduleCFBatch removed in V19: suggestions are now generated synchronously
@@ -671,6 +712,7 @@ const SYNC={
 
   push(){
     if(!this.ready||!this.ref)return;
+    S._lastSaveTs=Date.now(); // used by stale-write guard in _applyRemote
     let payload;
     try{
       payload={
@@ -711,9 +753,43 @@ const SYNC={
           if(ct.status==='playing'&&ct.match)localPlayingCourts[c]=ct;
         });
       }
+      // ── Phase 1 Sync Safety ──────────────────────────────────
+      // (1) Timestamp guard — reject payloads older than what we last saved.
+      //     Protects against a stale device reconnecting and overwriting fresh data.
+      const remoteTs=remote._ts||0;
+      const localTs=S._lastSaveTs||0;
+      const isStale=!isFirstLoad&&remoteTs>0&&remoteTs<localTs-2000; // 2s grace for clock skew
+      if(isStale){
+        console.warn(`[sync] Rejected stale remote write (remote _ts ${remoteTs} < local ${localTs})`);
+        return;
+      }
+
+      // (2) cfLog shrink guard — never let a remote payload reduce match history.
+      //     If remote has fewer log entries, keep the local log.
+      const localCfLogLen=S.session?.cfLog?.length||0;
+      const remoteCfLogLen=remote.session?.cfLog?.length||0;
+      let preservedCfLog=null;
+      if(!isFirstLoad&&remoteCfLogLen<localCfLogLen){
+        preservedCfLog=[...S.session.cfLog];
+        console.warn(`[sync] cfLog shrink blocked (remote ${remoteCfLogLen} < local ${localCfLogLen})`);
+      }
+
+      // (3) Archive shrink guard — never discard archived sessions.
+      const localArchiveLen=S.archive?.length||0;
+      const remoteArchiveLen=(remote.archive||[]).length;
+      let preservedArchive=null;
+      if(!isFirstLoad&&remoteArchiveLen<localArchiveLen){
+        preservedArchive=[...S.archive];
+        console.warn(`[sync] Archive shrink blocked (remote ${remoteArchiveLen} < local ${localArchiveLen})`);
+      }
+      // ────────────────────────────────────────────────────────
+
       S.db=remote.db||[];
       S.session=remote.session||null;
-      S.archive=remote.archive||[];
+      S.archive=preservedArchive||(remote.archive||[]);
+
+      // Restore preserved cfLog after session is assigned
+      if(preservedCfLog&&S.session)S.session.cfLog=preservedCfLog;
       if(typeof remote.adminPin!=='undefined') S.adminPin=remote.adminPin;
       if(S.session){
         // Merge: keep local suggestions that Firebase data doesn't have yet
@@ -768,11 +844,9 @@ const SYNC={
       // Invalidate matchmaking caches — archive may have changed on remote
       _invalidateMatchmakingCaches();
 
-      // Seed example data on a brand-new empty room (first device, not player mode)
-      if(S.db.length===0&&S.archive.length===0&&!isPlayerModeUrl()&&!PLAYER_MODE){
-        seedExampleData();
-        this.push(); // push seed data to Firebase so other devices see it
-      }
+      // PB-004: Auto-seeding disabled — demo data must be loaded explicitly.
+      // (Removed: seedExampleData() was auto-pushed to Firebase on any fresh room,
+      //  which polluted live events with fake players.)
 
       // Re-render everything
       updatePvSelect();updatePvSessFilter();renderDB();renderRoster();renderAllTime();
@@ -815,12 +889,13 @@ const SYNC={
       b.textContent='⏳ Connecting…';
       b.style.cssText='display:inline-flex;align-items:center;gap:3px;font-size:.65rem;font-weight:700;padding:3px 8px;border-radius:20px;background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.3);color:var(--go);cursor:pointer';
     }else if(this.ready){
-      b.textContent=`🟢 ${this.roomId}`;
+      b.textContent=`🟢 Live`;
       b.style.cssText='display:inline-flex;align-items:center;gap:3px;font-size:.65rem;font-weight:700;padding:3px 8px;border-radius:20px;background:rgba(52,217,116,.12);border:1px solid rgba(52,217,116,.35);color:var(--gr);cursor:pointer';
     }else{
       b.textContent='⚪ Sync Off';
       b.style.cssText='display:inline-flex;align-items:center;gap:3px;font-size:.65rem;font-weight:700;padding:3px 8px;border-radius:20px;background:var(--s2);border:1px solid var(--bd);color:var(--mu);cursor:pointer';
     }
+    _updateRoomBadge();
   },
 
   async autoConnect(){
@@ -843,7 +918,7 @@ const SYNC={
       messagingSenderId:'669188671832',
       appId:'1:669188671832:web:8335ae5c6dd9298170fd2d'
     };
-    const roomId='SYRxAPL';
+    const roomId=_getOrCreateRoomId();
     const ok=await this.connect(cfg,roomId);
     if(!ok){
       // Update loading overlay to show error + retry
@@ -1892,7 +1967,7 @@ function renderRoster(){
     const actE=S.session?.status==='active',btnE=document.getElementById('start-btn');
     if(actE){
       btnE.style.display='none';
-      document.getElementById('start-hint').innerHTML=`<span style="color:var(--gr);font-weight:600">✅ Session active — <a href="#" style="color:var(--cy)" onclick="switchTab('live');return false">Go to Live tab →</a></span>`;
+      document.getElementById('start-hint').innerHTML=`<span style="font-size:.74rem;color:var(--mu)">Session in progress — <a href="#" style="color:var(--cy);text-decoration:none" onclick="switchTab('live');return false">Switch to Live tab ↗</a></span>`;
     } else {
       btnE.style.display='';
       btnE.disabled=true;
@@ -1906,14 +1981,14 @@ function renderRoster(){
   document.getElementById('roster-list').innerHTML=players.map(p=>`<div class="prow click chk" onclick="toggleCheckIn('${p.id}')"><div class="pnc"><div class="pn">${p.name}${tagHtml(p)}</div></div><div class="pr" style="color:var(--gr)">${p.isNR?'<span class="nr-badge">NR</span>':Math.round(p.rating)}</div><div style="color:var(--gr)">✓</div></div>`).join('');
   const avg=Math.round(arr.filter(id=>!gp(id)?.isNR).reduce((s,id)=>s+(gp(id)?.rating||0),0)/Math.max(1,arr.filter(id=>!gp(id)?.isNR).length));
   const need=S.courts*4;
-  const playingR1=Math.min(need,arr.length);
+  const startingNow=Math.min(need,arr.length);
   const so=Math.max(0,arr.length-need);
-  const hintText=so?`${so} player${so>1?'s':''} sit out round 1`:'Everyone plays round 1!';
-  document.getElementById('roster-stats').innerHTML=`<span class="sc"><b>${arr.length}</b> Players</span><span class="sc"><b>${S.courts}</b> Court${S.courts>1?'s':''}</span><span class="sc"><b>${playingR1}</b> Playing R1</span><span class="sc"><b>${avg}</b> Avg RTG</span>`;
+  const hintText=so?`${so} player${so>1?'s':''} will queue first`:'Everyone plays first match!';
+  document.getElementById('roster-stats').innerHTML=`<span class="sc"><b>${arr.length}</b> Players</span><span class="sc"><b>${S.courts}</b> Court${S.courts>1?'s':''}</span><span class="sc"><b>${startingNow}</b> Starting</span><span class="sc"><b>${avg}</b> Avg RTG</span>`;
   const act=S.session?.status==='active',btn=document.getElementById('start-btn');
   if(act){
     btn.style.display='none';
-    document.getElementById('start-hint').innerHTML=`<span style="color:var(--gr);font-weight:600">✅ Session active — <a href="#" style="color:var(--cy)" onclick="switchTab('live');return false">Go to Live tab →</a></span>`;
+    document.getElementById('start-hint').innerHTML=`<span style="font-size:.74rem;color:var(--mu)">Session in progress — <a href="#" style="color:var(--cy);text-decoration:none" onclick="switchTab('live');return false">Switch to Live tab ↗</a></span>`;
   } else {
     btn.style.display='';
     if(arr.length<4){btn.disabled=true;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=`Need ${4-arr.length} more.`;}
@@ -2132,6 +2207,38 @@ function deleteArchiveSess(sessId){
       if(S.session)renderLive();
       toast(`"${sess.name}" deleted — ratings recalculated ✓`,'ok');
     });
+}
+
+/* ── Score confidence helpers ───────────────────── */
+let _lastMatchSavedTs=0;
+
+function flashLatestMatch(){
+  // Switch to History tab and highlight the newest match row
+  switchTab('history');
+  // Give renderHistory a tick to finish, then apply the flash class + scroll
+  setTimeout(()=>{
+    const el=document.getElementById('history-wrap');
+    if(!el)return;
+    const first=el.querySelector('.hm');
+    if(first){
+      first.classList.remove('hm-new'); // reset if already animating
+      void first.offsetWidth;           // force reflow to restart animation
+      first.classList.add('hm-new');
+      first.scrollIntoView({behavior:'smooth',block:'nearest'});
+    }
+    _updateLastSavedBanner();
+  },80);
+}
+
+function _updateLastSavedBanner(){
+  const wrap=document.getElementById('history-saved-banner');
+  if(!wrap)return;
+  if(!_lastMatchSavedTs){wrap.style.display='none';return;}
+  const mins=Math.round((Date.now()-_lastMatchSavedTs)/60000);
+  const ago=mins<=0?'just now':`${mins}m ago`;
+  wrap.style.display='flex';
+  wrap.innerHTML=`<span style="font-size:.68rem;color:var(--gr)">✅ Match saved ${ago}</span>
+    <button style="background:none;border:none;font-size:.68rem;color:var(--cy);cursor:pointer;padding:0 0 0 8px;font-family:'DM Sans',sans-serif;font-weight:600" onclick="flashLatestMatch()">↓ Jump to latest</button>`;
 }
 
 /* ── RENDER: HISTORY ─────────────────────────────── */
@@ -2411,7 +2518,7 @@ function renderPlayerView(){
       const won=done&&((inT1&&myMatch.s1>myMatch.s2)||(!inT1&&myMatch.s2>myMatch.s1));
       const tie=done&&myMatch.s1===myMatch.s2;
       currentMatchHtml=`<div class="pv-match-now">
-        <div style="font-size:.68rem;font-weight:700;color:var(--cy);letter-spacing:.08em;margin-bottom:6px">ROUND ${rnd.number} — COURT ${myMatch.court}</div>
+        <div style="font-size:.68rem;font-weight:700;color:var(--cy);letter-spacing:.08em;margin-bottom:6px">MATCH IN PROGRESS — COURT ${myMatch.court}</div>
         <div style="font-size:.82rem;color:var(--mu);margin-bottom:4px">Partner: <strong style="color:var(--tx)">${partner?plainName(partner):'?'}</strong></div>
         <div style="font-size:.82rem;color:var(--mu);margin-bottom:8px">vs <strong style="color:var(--re)">${opps.map(plainName).join(' & ')}</strong></div>
         ${done?`<div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:${won?'var(--gr)':tie?'var(--go)':'var(--re)'};letter-spacing:2px">${myMatch.s1}–${myMatch.s2} ${won?'WIN 🎉':tie?'TIE 🤝':'LOSS'}</div>`:`<div style="font-size:.78rem;color:var(--cy)">Match in progress — good luck! 🏓</div>`}
@@ -2428,11 +2535,11 @@ function renderPlayerView(){
       if(plStrk>=MAX_CONSEC)sitReason=`You played ${plStrk} games in a row — system rotated you out. You're back in the queue.`;
       else if(S.session.activePlayers.length>S.session.courts*4){
         const surplus=S.session.activePlayers.length-S.session.courts*4;
-        sitReason=`${surplus} player${surplus>1?'s':''} always sit each round. You'll be prioritised next.`;
+        sitReason=`${surplus} player${surplus>1?'s':''} always sit each cycle. You'll be prioritised next.`;
       }else sitReason="Rotation rest — you're back in the queue.";
       currentMatchHtml=`<div class="card" style="text-align:center">
         <div style="font-size:1.5rem;margin-bottom:6px">💤</div>
-        <div style="font-size:.85rem;color:var(--or)">Sitting out Round ${rnd.number}</div>
+        <div style="font-size:.85rem;color:var(--or)">Sitting This Cycle</div>
         <div style="font-size:.73rem;color:var(--mu);margin-top:6px">
           This session: <strong style="color:var(--tx)">${sp.wins}W / ${sp.losses}L</strong> &nbsp;·&nbsp; ${played} game${played!==1?'s':''} &nbsp;·&nbsp; PD ${pd>=0?'+':''}${pd}<br/>
           Sat out ${sitCount} time${sitCount!==1?'s':''} total &nbsp;·&nbsp; ELO ${sp.sRating-sp.startRating>=0?'+':''}${Math.round(sp.sRating-sp.startRating)}
@@ -2904,37 +3011,49 @@ function initPlayerMode(){
 /* ── SYNC MODAL ───────────────────────────────────── */
 function openSyncModal(){
   const isOn=SYNC.ready;
-  const roomId=SYNC.roomId||'SYRxAPL';
-  openModal(`<div class="modal-title">🟢 Live Sync Status</div>
+  const roomId=SYNC.roomId||localStorage.getItem('pb_room_id')||'—';
+  openModal(`<div class="modal-title">📡 Room & Sync</div>
+
+    <div style="background:rgba(34,211,238,.07);border:1px solid rgba(34,211,238,.25);border-radius:var(--ra);padding:14px;text-align:center;margin-bottom:12px">
+      <div style="font-size:.68rem;color:var(--mu);margin-bottom:3px;letter-spacing:.08em">ROOM CODE</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:var(--cy);letter-spacing:6px">${esc(roomId)}</div>
+      <div style="font-size:.71rem;color:var(--mu);margin-top:3px">All devices that auto-connect share this room</div>
+    </div>
 
     ${isOn?`
-    <div style="background:rgba(52,217,116,.08);border:1px solid rgba(52,217,116,.3);border-radius:var(--ra);padding:14px;text-align:center;margin-bottom:14px">
-      <div style="font-size:.7rem;color:var(--mu);margin-bottom:4px;letter-spacing:.08em">CONNECTED · ROOM CODE</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:var(--gr);letter-spacing:6px">${esc(roomId)}</div>
-      <div style="font-size:.72rem;color:var(--mu);margin-top:4px">All devices on this code sync in real-time</div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+      <span style="font-size:.72rem;color:var(--gr);font-weight:700">🟢 Live sync ON</span>
+      <span style="font-size:.72rem;color:var(--mu)">· scores and players sync in real-time</span>
     </div>
-    <div style="font-size:.73rem;color:var(--mu);margin-bottom:12px">
-      <strong style="color:var(--tx)">How to add another admin device:</strong><br/>
-      Open this app on the other device — it will auto-connect to room <strong style="color:var(--gr)">${esc(roomId)}</strong> automatically.<br/>
-      Every score and player change syncs to everyone instantly.
+    <div style="font-size:.73rem;color:var(--mu);background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px;margin-bottom:10px;line-height:1.6">
+      <strong style="color:var(--tx)">Add another device:</strong> open this app on the other device — it auto-joins room <strong style="color:var(--cy)">${esc(roomId)}</strong>.<br/>
+      Every score and roster change syncs instantly.
     </div>
     <button class="btn bd2 sm" style="width:100%;margin-bottom:6px"
       onclick="showCfm('Disconnect live sync on this device?','Disconnect','bd2',()=>{SYNC.clearConfig();closeModal();toast('Sync disconnected','warn');})">
       Disconnect This Device
     </button>`:`
-    <div style="background:rgba(251,191,36,.07);border:1px solid rgba(251,191,36,.25);border-radius:var(--ra);padding:10px;margin-bottom:12px;font-size:.73rem;color:var(--go)">
-      ⏳ Connecting to Firebase… Please wait or check your internet connection.
+    <div style="background:rgba(251,191,36,.07);border:1px solid rgba(251,191,36,.25);border-radius:var(--ra);padding:10px;margin-bottom:10px;font-size:.73rem;color:var(--go)">
+      ⏳ Not connected — check your internet connection or tap Retry.
     </div>
     <button class="btn bp" style="width:100%;margin-bottom:6px" onclick="closeModal();SYNC.ready=false;SYNC.autoConnect()">
       🔄 Retry Connection
     </button>`}
 
-    <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;font-size:.71rem;color:var(--mu)">
-      <strong style="color:var(--tx)">Firebase project:</strong> ladder-open-play<br/>
-      <strong style="color:var(--tx)">Room:</strong> ${esc(roomId)} &nbsp;·&nbsp;
-      <strong style="color:var(--tx)">Device ID:</strong> ${DEVICE_ID.slice(0,6)}
+    <div class="dv" style="margin:10px 0"></div>
+    <div style="font-size:.72rem;color:var(--mu);margin-bottom:6px;font-weight:700">ROOM ISOLATION</div>
+    <div style="font-size:.71rem;color:var(--mu);margin-bottom:8px;line-height:1.6">
+      Each session should use a unique room to prevent data from different events mixing.
+      Generate a new room code before starting a new event.
     </div>
+    <button class="btn bc sm" style="width:100%;margin-bottom:8px" onclick="closeModal();generateNewRoom()">
+      🔀 Generate New Room Code
+    </button>
 
+    <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px;font-size:.7rem;color:var(--mu)">
+      <strong style="color:var(--tx)">Firebase project:</strong> ladder-open-play &nbsp;·&nbsp;
+      <strong style="color:var(--tx)">Device:</strong> ${DEVICE_ID.slice(0,6)}
+    </div>
     <button class="btn bg2 sm" style="width:100%;margin-top:10px" onclick="closeModal()">Close</button>`);
 }
 
@@ -3043,7 +3162,7 @@ function openExportModal(){
     <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
       <button class="btn bp sm" style="flex:1" onclick="runExport('json')">📦 JSON (Full backup)</button>
       <button class="btn bc sm" style="flex:1" onclick="runExport('csv')">📊 CSV (Players)</button>
-      <button class="btn" style="flex:1;background:rgba(167,139,250,.15);color:var(--pu);border:1px solid rgba(167,139,250,.3)" onclick="runExport('pdf')">📋 Round Sheet (TXT)</button>
+      <button class="btn" style="flex:1;background:rgba(167,139,250,.15);color:var(--pu);border:1px solid rgba(167,139,250,.3)" onclick="runExport('pdf')">📋 Session Report (TXT)</button>
     </div>
     <div id="exp-area"></div>
     <div class="dv"></div>
@@ -3057,7 +3176,7 @@ function runExport(fmt){
     content=rows.map(r=>r.map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(',')).join('\r\n');
     filename=`pb-players-${Date.now()}.csv`;mime='text/csv;charset=utf-8';
   } else if(fmt==='pdf'){
-    content=buildRoundSheet();filename=`pb-rounds-${Date.now()}.txt`;mime='text/plain;charset=utf-8';
+    content=buildSessionReport();filename=`pb-session-report-${Date.now()}.txt`;mime='text/plain;charset=utf-8';
   } else {
     content=JSON.stringify({version:18,exportDate:new Date().toISOString(),players:S.db,session:S.session,archive:S.archive},null,2);
     filename=`pb-ladder-${Date.now()}.json`;mime='application/json;charset=utf-8';
@@ -3073,7 +3192,7 @@ function runExport(fmt){
   showExportText(content);
 }
 
-function buildRoundSheet(){
+function buildSessionReport(){
   const sessions=[...(S.session?[S.session]:[]),...S.archive];
   if(!sessions.length)return'No session data.';
   return sessions.map(sess=>{
@@ -3083,7 +3202,7 @@ function buildRoundSheet(){
     const isCF=!!sess.cfMode;
     const lines=[sess.name,`${'='.repeat(sess.name.length)}`,
       new Date(sess.date).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'}),
-      isCF?'⚡ Continuous Flow Mode':'🔄 Round Mode',hr,''];
+      '⚡ Continuous Flow Mode',hr,''];
     if(isCF){
       // CF session: flat match log grouped by court
       const cfLog=sess.cfLog||[];
@@ -4552,6 +4671,9 @@ const CF={
     const w=tie?null:(s1>s2?m.t1:m.t2).map(id=>gp(id)?.name||'?').join(' & ');
     const dStr=[...m.t1,...m.t2].map((id,i)=>{const d=m.eloDeltas[i];return`${gp(id)?.name||'?'}: <strong style="color:${d>0?'var(--gr)':d<0?'var(--re)':'var(--mu)'}">${d>0?'+':''}${d}</strong>`;}).join(' · ');
     toast(`${s1}–${s2} ${tie?'🤝':w+' win!'} <span style="font-size:.68rem;color:var(--mu)">${qualStars}${shortGame?' ⚡':''}</span>${contextMsg?`<br/><span style="font-size:.68rem;color:var(--m2)">${contextMsg}</span>`:''}<br/><span style="font-size:.71rem;opacity:.85">${dStr}</span>`,'ok');
+    // Score confidence: stamp save time, flash newest history row
+    _lastMatchSavedTs=Date.now();
+    flashLatestMatch();
   },
 
   /* Reshuffle — exclude current suggestion's players, re-run batch across all ready courts */
@@ -5015,6 +5137,7 @@ function init(){
   document.getElementById('cfm-bg').addEventListener('click',function(e){if(e.target===this)document.getElementById('cfm-no').click();});
   // CF mode only — round mode removed
   initPlayerMode();
+  _updateRoomBadge(); // show room code immediately, before Firebase connects
   SYNC._updateBadge('connecting');
   SYNC.autoConnect();
 }
