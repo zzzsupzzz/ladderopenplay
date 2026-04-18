@@ -2520,37 +2520,18 @@ function buildSessionReport(){
     const lines=[sess.name,`${'='.repeat(sess.name.length)}`,
       new Date(sess.date).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'}),
       '⚡ Continuous Flow Mode',hr,''];
-    {
-      // CF session: flat match log grouped by court
-      const cfLog=sess.cfLog||[];
-      lines.push(`${cfLog.length} matches played`,'');
-      cfLog.forEach((m,i)=>{
-        const s1=String(m.s1??'?'),s2=String(m.s2??'?');
-        lines.push(`  #${String(i+1).padStart(2)}  Court ${m.courtNum}`);
-        lines.push(`  ┌─────────────────────────────┬──────┐`);
-        lines.push(`  │ ${m.t1.map(gn).join(' / ').padEnd(27)} │  ${s1.padStart(2)}  │`);
-        lines.push(`  │ ${m.t2.map(gn).join(' / ').padEnd(27)} │  ${s2.padStart(2)}  │`);
-        lines.push(`  └─────────────────────────────┴──────┘`);
-      });
-      lines.push('');
-    }else{
-      // Round mode
-      // Legacy round sessions: no detailed export
-      if(false){
-        lines.push(`Round ${r.number}`,'');
-        r.matches.forEach(m=>{
-          const s1=m.status==='done'?String(m.s1):'?';
-          const s2=m.status==='done'?String(m.s2):'?';
-          lines.push(`  COURT ${m.court}`);
-          lines.push(`  ┌─────────────────────────────┬──────┐`);
-          lines.push(`  │ ${m.t1.map(gn).join(' / ').padEnd(27)} │  ${s1.padStart(2)}  │`);
-          lines.push(`  │ ${m.t2.map(gn).join(' / ').padEnd(27)} │  ${s2.padStart(2)}  │`);
-          lines.push(`  └─────────────────────────────┴──────┘`);
-        });
-        if(r.sitOuts?.length) lines.push(`  Sitting out: ${r.sitOuts.map(gn).join(', ')}`);
-        lines.push('');
-      });
-    }
+    // CF session: flat match log grouped by court
+    const cfLog=sess.cfLog||[];
+    lines.push(`${cfLog.length} matches played`,'');
+    cfLog.forEach((m,i)=>{
+      const s1=String(m.s1??'?'),s2=String(m.s2??'?');
+      lines.push(`  #${String(i+1).padStart(2)}  Court ${m.courtNum}`);
+      lines.push(`  ┌─────────────────────────────┬──────┐`);
+      lines.push(`  │ ${m.t1.map(gn).join(' / ').padEnd(27)} │  ${s1.padStart(2)}  │`);
+      lines.push(`  │ ${m.t2.map(gn).join(' / ').padEnd(27)} │  ${s2.padStart(2)}  │`);
+      lines.push(`  └─────────────────────────────┴──────┘`);
+    });
+    lines.push('');
     // Standings
     if(sess.players?.length){
       lines.push(hr,'FINAL STANDINGS','');
