@@ -2131,7 +2131,15 @@ function renderHistory(){
   if(!S.session){el.innerHTML=`<div class="empty">No rounds yet this session.</div>`;return;}
   const gn=id=>{const sp=gsp(id);if(sp?.name)return esc(sp.name+(sp.tag?` ${sp.tag}`:''));return esc(gp(id)?.name||'?');};
   const log=S.session.cfLog||[];
-  if(!log.length){el.innerHTML=`<div class="empty">No matches yet.</div>`;return;}
+  if(!log.length){
+    // Show players even before first match
+    const pList=S.session.players.slice().sort((a,b)=>b.sRating-a.sRating)
+      .map(sp=>`<span style="font-size:.73rem;color:var(--mu)">${esc(sp.name)}</span>`).join(' · ');
+    el.innerHTML=`<div class="empty" style="text-align:left;padding:10px">
+      <div style="margin-bottom:6px;font-size:.72rem;color:var(--cy);font-weight:700">Session started — no matches yet</div>
+      <div style="line-height:1.8">${pList}</div></div>`;
+    return;
+  }
   el.innerHTML=[...log].slice().reverse().map((m,ri)=>{
     const origIdx=log.length-1-ri;
     const t1n=m.t1.map(gn).join(' & '),t2n=m.t2.map(gn).join(' & ');
@@ -3865,6 +3873,27 @@ const CF={
     const t2gap=rawT2gap/40;
     const partRpt=MM.pc(t1[0].id,t1[1].id)+MM.pc(t2[0].id,t2[1].id);
     const oppRpt=t1.reduce((s,a)=>t2.reduce((ss,b)=>ss+MM.oc(a.id,b.id),s),0);
+    // Group composition penalty:
+    // a) Same 4 people together again → 120pt decaying
+    const gKey=group.map(p=>p.id).sort().join(',');
+    const lastGroupAt=(S.session.cfGroupHx||{})[gKey]??null;
+    const groupGS=lastGroupAt!==null?(S.session.cfMatchCount||0)-lastGroupAt:null;
+    const groupRpt=groupGS!==null?Math.max(0,120-groupGS*12):0;
+    // b) 3-player overlap with any recent court match → strong penalty
+    // Prevents "swap one player each round" pattern (seen in screenshots)
+    const recentMatches=Object.values(S.session.cfGroupHx||{})
+      .filter(v=>(S.session.cfMatchCount||0)-v<=2); // last 2 matches
+    let overlapPen=0;
+    if(recentMatches.length>0){
+      const groupIdSet=new Set(group.map(p=>p.id));
+      Object.entries(S.session.cfGroupHx||{}).forEach(([k,v])=>{
+        if((S.session.cfMatchCount||0)-v>2)return; // only last 2 matches
+        const prevIds=k.split(',');
+        const overlap=prevIds.filter(id=>groupIdSet.has(id)).length;
+        if(overlap>=3)overlapPen+=150; // 3/4 same people: very strong redirect
+        else if(overlap>=2)overlapPen+=20; // 2/4 same: mild
+      });
+    }
     const mKey=this.matchupKey(t1.map(p=>p.id),t2.map(p=>p.id));
     // Time-decayed repeat penalty: 150pts when just played, decays 15pts per game since.
     // After 10 games = fully fresh. This prevents "all options penalised equally" deadlock
@@ -3880,11 +3909,19 @@ const CF={
     const waitBonus=-avgWait*0.6;
     // MGL gap bonus: reduce penalty for players who've waited many matches
     const gapBonus=-group.reduce((s,p)=>s+Math.min(this.matchGap(p.id)*2,40),0);
-    const total=crossImb+(t1gap+t2gap)+partRpt*3+oppRpt*5+matchRpt+splitPen+consecPen+waitBonus+gapBonus;
+    const total=crossImb+(t1gap+t2gap)+partRpt*3+oppRpt*5+matchRpt+groupRpt+overlapPen+splitPen+consecPen+waitBonus+gapBonus;
     const meta={splitOverride:splitPen>0&&splitPen<200,repeatMatchup:matchRpt>0,
       rawT1gap,rawT2gap};
-    // NR protection: for first 3 games, penalise pairings far from their estimated level
-    let nrProtPen=0;
+    // NR protection:
+    // a) Soft penalty for 2+ NR in same group when rated alternatives exist.
+    //    Gentle enough that NR pairs are chosen when queue is mostly NR.
+    // Soft NR-pair penalty: prefer not pairing 2 NR together when rated alternatives exist,
+    // but never block. With mostly-NR queues ratedInQ will be low and penalty disappears.
+    const nrInThisGroup=group.filter(p=>gp(p.id)?.isNR||gsp(p.id)?.isNR).length;
+    const ratedInQ=(S.session?.cfQueue||[]).filter(q=>!gp(q.id)?.isNR).length;
+    const nrPairPen=nrInThisGroup>=2&&ratedInQ>=4?40:0;
+    // Skill-gap NR protection: penalise pairings far from NR's estimated level for first 3 games
+    let nrProtPen=nrPairPen;
     const NR_PROTECT_GAMES=3;
     const NR_GAP_LIMIT=200;
     const nrHx=S.session.nrPairingHx||{};
@@ -3947,7 +3984,8 @@ const CF={
     if(queue.length<4){readyCourts.forEach(c=>{S.session.cfSuggestions[c]=null;});return;}
 
     const mustSplit=S.session.cfMustSplitPair;
-    const nrIds=new Set(queue.filter(q=>gp(q.id)?.isNR||gsp(q.id)?.isNR).map(q=>q.id));
+    // nrIds: use session player isNR (reflects any promotions during session)
+    const nrIds=new Set(queue.filter(q=>{const sp=gsp(q.id);return sp?.isNR||(sp&&!sp.isNR&&(sp.matchesPlayed||0)<5&&gp(q.id)?.isNR);}).map(q=>q.id));
 
     // Build pool with ratings + priority info
     const courtAvg=queue.reduce((s,q)=>s+this.cfRating(q.id),0)/queue.length;
@@ -4029,8 +4067,8 @@ const CF={
       const r=remaining;const m=r.length;
       for(let i=0;i<m-3;i++)for(let j=i+1;j<m-2;j++)for(let k=j+1;k<m-1;k++)for(let l=k+1;l<m;l++){
         const group=[r[i],r[j],r[k],r[l]];
-        const nrCount=group.filter(p=>nrIds.has(p.id)).length;
-        if(nrCount>=2&&queue.length>need)continue;
+        // NR-pair: soft penalty only — never block.
+        // Handled as a scoring penalty in _scoreGroup via nrProtPen.
         const{score,meta,t1,t2}=this._scoreGroup(group,mustSplit);
         if(!this._withinTeamGapOk(t1,t2,350))continue;
         // Hard pair cooldown filter
@@ -4050,7 +4088,7 @@ const CF={
     const tier1Ids=new Set(tier1.map(p=>p.id));
     // TIER 2: Players whose matchGap >= NC*3 — missed 3+ full waves, force them in
     // This is pure game-count based: works regardless of confirmation speed
-    const mglThreshold=(S.session.courts||1)*3;
+    const mglThreshold=4; // max 4 missed matches before force-include
     const tier2=pool.filter(p=>!tier1Ids.has(p.id)&&this.matchGap(p.id)>=mglThreshold);
     const tier2Ids=new Set(tier2.map(p=>p.id));
     // TIER 3: Everyone else in normal priority order
@@ -4165,8 +4203,7 @@ const CF={
     // Pass 1: strict 350pt gap cap + pair cooldown enforced
     for(let i=0;i<n-3;i++)for(let j=i+1;j<n-2;j++)for(let k=j+1;k<n-1;k++)for(let l=k+1;l<n;l++){
       const group=[candidates[i],candidates[j],candidates[k],candidates[l]];
-      if((nrIds.has(group[0].id)||nrIds.has(group[1].id)||nrIds.has(group[2].id)||nrIds.has(group[3].id))
-         &&group.filter(p=>nrIds.has(p.id)).length>=2&&totalQueue>4)continue;
+      // NR-pair: soft penalty via _scoreGroup nrProtPen — never a hard block.
       const res=this._scoreGroup(group,mustSplit);
       if(!this._withinTeamGapOk(res.t1,res.t2,350))continue;
       if(hasCooldownPair(res))continue; // hard cooldown filter
@@ -4215,7 +4252,7 @@ const CF={
     const tier0pIds=new Set(tier0p.map(p=>p.id));
     const tier1p=pool.filter(p=>!tier0pIds.has(p.id)&&(gsp(p.id)?.matchesPlayed||0)===0);
     const tier1pIds=new Set(tier1p.map(p=>p.id));
-    const mgl=(S.session.courts||1)*3;
+    const mgl=4; // max 4 missed matches
     const tier2p=pool.filter(p=>!tier0pIds.has(p.id)&&!tier1pIds.has(p.id)&&this.matchGap(p.id)>=mgl);
     const tier2pIds=new Set(tier2p.map(p=>p.id));
     const tier3p=pool.filter(p=>!tier0pIds.has(p.id)&&!tier1pIds.has(p.id)&&!tier2pIds.has(p.id));
@@ -4783,8 +4820,8 @@ const CF={
           if(isPinned)reasons.push(`<span style="font-size:.59rem;color:var(--pu);font-weight:700">📌 PINNED</span>`);
           else if(upNext)reasons.push(`<span style="font-size:.59rem;color:var(--gr);font-weight:700">▶ UP NEXT</span>`);
           if(waitMin>=20)reasons.push(`<span style="font-size:.59rem;color:var(--re)">⏰ Long wait priority</span>`);
-          const gap2=CF.matchGap(q.id);const nc2=S.session?.courts||1;
-          if(gap2>=nc2*3)reasons.push(`<span style="font-size:.59rem;color:var(--or)">⚖ Missed ${gap2} matches — priority</span>`);
+          const gap2=CF.matchGap(q.id);
+          if(gap2>=4)reasons.push(`<span style="font-size:.59rem;color:var(--or)">⚖ Missed ${gap2} matches — priority</span>`);
           const gamesPlayed=sp?.matchesPlayed||0;
           if(gamesPlayed===0)reasons.push(`<span style="font-size:.59rem;color:var(--pu)">✦ First game</span>`);
           return `<div class="cf-queue-item" style="flex-direction:column;align-items:stretch;gap:3px">
