@@ -4783,6 +4783,39 @@ function importMarch28Session(){
   STORE.save('db');renderDB();renderStandings();renderArchive();updatePvSessFilter();
   toast('✅ March 28 session imported — '+mc+' matches, '+sessPlayers.length+' players, ratings recalculated','ok');
 }
+/* § BOOT */
+let PLAYER_MODE=false; // true when URL has ?view=player or #player
+
+function initPlayerMode(){
+  PLAYER_MODE=isPlayerModeUrl();
+  if(!PLAYER_MODE)return;
+  // Player-only view: show banner, hide all admin tabs, go straight to My Stats
+  const banner=document.getElementById('player-mode-banner');
+  if(banner)banner.style.display='block';
+  // Hide all tabs except player
+  document.querySelectorAll('.tb:not([data-tab="player"])').forEach(b=>b.style.display='none');
+  const shareBtn=document.getElementById('share-btn');
+  if(shareBtn)shareBtn.style.display='none';
+  const lockBtn=document.getElementById('lock-btn');
+  if(lockBtn)lockBtn.style.display='none';
+  switchTab('player');
+}
+
+function init(){
+  initCourtPills('cpills-setup',n=>{S.courts=n;renderRoster();});
+  initCourtPills('cpills-live',n=>{
+    S.courts=n;
+    if(S.session){S.session.courts=n;STORE.save('session');}
+    renderRoster();
+  });
+  document.querySelectorAll('.tb').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.tab)));
+  document.getElementById('cfm-bg').addEventListener('click',function(e){if(e.target===this)document.getElementById('cfm-no').click();});
+  initPlayerMode();
+  _updateRoomBadge();
+  SYNC._updateBadge('connecting');
+  SYNC.autoConnect();
+}
+
 document.addEventListener('DOMContentLoaded',init);
 </script>
 </body>
