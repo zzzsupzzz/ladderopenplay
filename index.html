@@ -893,6 +893,7 @@ const SYNC={
           // Ensure all CF fields exist
           const _d=x=>S.session[x]=S.session[x]||{};
           const _a=x=>S.session[x]=S.session[x]||[];
+          if(!Array.isArray(S.session.cfPauseAfterGame))S.session.cfPauseAfterGame=S.session.cfPauseAfterGame||[];
           _d('soStreak');_d('plStreak');_d('sitOutHx');_d('partnerHx');
           _d('oppHx');_d('oppHxTime');_d('nrPairingHx');_d('ratingOverrides');
           _d('neverPair');_d('cfSuggestions');_d('cfMatchupHx');
@@ -1406,7 +1407,7 @@ const MM={
   //   4. Lower session rating last (top players sit last among equal candidates)
   _pickSitOuts(subpool, excess){
     const minPlay=S.session.minPlayAfterSit||2;
-    const MAX_CONSEC=3; // hard cap — everyone must rest after 3 consecutive games, no exceptions
+    const MAX_CONSEC=2; // Change 6: tighter consecutive limit — rest after 2 games, relax only when queue is thin
 
     // Hard rule A: just sat → must play next (no back-to-back sits)
     const mustPlayIds=new Set(subpool.filter(p=>(S.session.soStreak[p.id]||0)>=1).map(p=>p.id));
@@ -1650,7 +1651,7 @@ function startSession(){
     }),
     partnerHx:{},oppHx:{},oppHxTime:{},
     nrPairingHx:{},
-    cfQueue:[],cfPinnedIds:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,
+    cfQueue:[],cfPinnedIds:[],cfPauseAfterGame:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,
     cfMatchupHx:{},cfGroupHx:{},cfPairConsec:{},cfPairWins:{},cfMustSplitPair:null,cfPaused:[],
     cfPairSessionCount:{},cfPairLastAt:{},cfPairLastLost:{},
     neverPair:{},ratingOverrides:{},
@@ -1889,7 +1890,7 @@ function cfPinPlayer(id){
   if(!S.session)return;
   if(!S.session.cfPinnedIds)S.session.cfPinnedIds=[];
   // Max 4 pins (one full court worth)
-  if(S.session.cfPinnedIds.length>=4){toast('Max 4 players can be pinned at once','warn');return;}
+  if(S.session.cfPinnedIds.length>=4){toast('Can pin at most 4 players (one full match)','warn');return;}
   if(S.session.cfPinnedIds.includes(id)){toast('Already pinned','warn');return;}
   // Only queue members can be pinned
   if(!S.session.cfQueue.find(q=>q.id===id)){toast('Player must be in queue to pin','warn');return;}
@@ -1909,6 +1910,21 @@ function cfClearPins(){
   if(S.session)S.session.cfPinnedIds=[];
 }
 
+// Change 8: schedule pause after current game finishes
+function cfSchedulePauseAfter(id){
+  if(!S.session)return;
+  if(!Array.isArray(S.session.cfPauseAfterGame))S.session.cfPauseAfterGame=[];
+  if(!S.session.cfPauseAfterGame.includes(id))S.session.cfPauseAfterGame.push(id);
+  STORE.save('session');renderLive();
+  toast(`${gp(id)?.name||'?'} — pausing after this game`,'ok');
+}
+function cfCancelPauseAfter(id){
+  if(!S.session)return;
+  if(!Array.isArray(S.session.cfPauseAfterGame))S.session.cfPauseAfterGame=[];
+  S.session.cfPauseAfterGame=S.session.cfPauseAfterGame.filter(x=>x!==id);
+  STORE.save('session');renderLive();
+  toast(`Pause-after cancelled for ${gp(id)?.name||'?'}`,'ok');
+}
 function cfPausePlayer(id){
   if(!S.session?.cfMode)return;
   const p=gp(id);if(!p)return;
@@ -3369,26 +3385,94 @@ const CF={
   /* Effective rating — handles NR via session average */
   cfRating(id){
     const p=gp(id),sp=gsp(id);if(!p||!sp)return 1000;
+
+    // NR path — unchanged
     if(p.isNR||sp.isNR){
       if((sp.matchesPlayed||0)>=2)return Math.max(400,sp.sRating+((sp.wins||0)-(sp.losses||0))*25);
       const rated=S.session.activePlayers
         .map(id2=>gsp(id2)).filter(s=>s&&!s.isNR&&s.status!=='left').map(s=>s.sRating||1000);
       return rated.length?Math.round(rated.reduce((a,b)=>a+b,0)/rated.length):1000;
     }
-    // Use individual matchesPlayed as the blend factor — not global cfMatchCount.
-    // A player who's played 0 games has zero personal evidence regardless of how many
-    // total session matches happened. This ensures "on fire" detection is earned.
-    const personalGames=(sp.matchesPlayed||0)+1; // +1 so first game uses blend, not pure allTime
-    const base=effectiveRating(id,personalGames);
-    // Ringer regression: high-rating/low-games players regress toward session average
-    // so stale or inflated ratings don't dominate matchmaking
+
+    // ── ANCHOR ─────────────────────────────────────────────────────────
+    // All-time rating is the ground truth. Never replaced — only adjusted.
+    const anchor=p.rating||1000;
+
+    // ── SESSION FORM ADJUSTMENT ─────────────────────────────────────────
+    // Only computed from the most recent WINDOW_SIZE games.
+    // Requires MIN_EVIDENCE results before trusting the signal.
+    // Hard-capped so a cold streak can never make a 1200 play like an 800.
+    const WINDOW=5;           // look at last 5 games only
+    const MIN_EVIDENCE=2;     // need at least 2 games before any adjustment
+    const MAX_ADJ=120;        // absolute cap on session form adjustment in either direction
+
+    const allMatches=_getSessionMatches();
+    const myMatches=allMatches.filter(m=>m.t1?.includes(id)||m.t2?.includes(id));
+    const gamesPlayed=myMatches.length;
+
+    let formAdj=0;
+    if(gamesPlayed>=MIN_EVIDENCE){
+      const recent=myMatches.slice(-WINDOW); // last WINDOW games
+
+      // Evidence weight: ramps from 0.4 at MIN_EVIDENCE to 1.0 at WINDOW+ games.
+      // Prevents 2-game evidence from swinging as hard as 5-game evidence.
+      const evidenceW=Math.min(1.0, 0.4+(gamesPlayed-MIN_EVIDENCE)*0.15);
+
+      let rawAdj=0;
+      recent.forEach(m=>{
+        const inT1=m.t1?.includes(id);
+        const won=inT1?m.s1>m.s2:m.s2>m.s1;
+        const tie=m.s1===m.s2;
+        const ptsFor=inT1?m.s1:m.s2;
+        const ptsAgainst=inT1?m.s2:m.s1;
+        const pd=ptsFor-ptsAgainst;           // point differential for this game
+
+        // Opponent strength: how much stronger/weaker were the opponents?
+        // Win against +200 opponents counts far more than win against -200.
+        const oppIds=(inT1?m.t2:m.t1)||[];
+        const oppAvg=oppIds.length
+          ?oppIds.reduce((s,oid)=>{const osp=gsp(oid);return s+(osp?.sRating||gp(oid)?.rating||anchor);},0)/oppIds.length
+          :anchor;
+        const oppStrength=(oppAvg-anchor)/300; // -1 to +1 scale (300pt diff = full unit)
+        const oppMult=Math.max(0.3, Math.min(2.0, 1.0+oppStrength));
+
+        // Partner strength: weak partner inflates opponent carry; strong partner deflates win credit.
+        // We adjust slightly for this but keep it gentle — partner info is noisy.
+        const partIds=(inT1?m.t1:m.t2).filter(x=>x!==id)||[];
+        const partAvg=partIds.length
+          ?partIds.reduce((s,pid)=>{const psp=gsp(pid);return s+(psp?.sRating||gp(pid)?.rating||anchor);},0)/partIds.length
+          :anchor;
+        const partBias=(partAvg-anchor)/600; // gentle ±0.5 at most
+        const netMult=Math.max(0.6, oppMult-partBias);
+
+        // Base signal for this game: win/loss/tie + point differential
+        const winSignal=won?1:tie?0:-1;
+        const pdSignal=Math.max(-1,Math.min(1,pd/8));  // ±1 at ±8 pts differential
+        const gameSignal=(winSignal*0.7+pdSignal*0.3)*netMult;
+
+        rawAdj+=gameSignal*30; // 30pts per "full unit" signal game
+      });
+
+      // Average over games in window so a longer hot streak requires sustained evidence
+      const avgAdj=rawAdj/recent.length;
+      formAdj=Math.max(-MAX_ADJ, Math.min(MAX_ADJ, avgAdj*evidenceW));
+    }
+
+    // ── RINGER REGRESSION ───────────────────────────────────────────────
+    // High-rating, low-games players regress toward session average so stale
+    // ratings don't dominate matchmaking.
+    let ringerReg=0;
     if(isRinger(p)){
       const sessAvg=S.session.activePlayers
         .map(id2=>gsp(id2)).filter(s=>s&&!s.isNR&&s.status!=='left').map(s=>s.sRating||1000)
-        .reduce((a,b,_,arr)=>a+b/arr.length,0)||1000;
-      return Math.round(base*0.75+sessAvg*0.25);
+        .reduce((a,b,_,arr)=>a+b/arr.length,0)||anchor;
+      ringerReg=Math.round((sessAvg-anchor)*0.25);
     }
-    return base;
+
+    // ── RATING OVERRIDE ─────────────────────────────────────────────────
+    const ovr=S.session?.ratingOverrides?.[id]||0;
+
+    return Math.round(anchor+formAdj+ringerReg+ovr);
   },
 
   /* Match-Gap: how many session matches have run since this player last played.
@@ -3416,11 +3500,12 @@ const CF={
     if(!allGames.length)return 0;
     const avgGames=allGames.reduce((a,b)=>a+b,0)/allGames.length;
     const deficit=avgGames-myGames;
-    // Players with 0 games get aggressive exponential boost to guarantee pool inclusion:
-    // avg=1 → +20, avg=3 → +60, avg=10 → +200 (cap). Ensures they always rank
-    // in top-nc*4 of the pool after being left out once.
+    // Change 5: stronger fairness — scale steeply with imbalance.
+    // deficit=1 → +16, deficit=2 → +40, deficit=3 → +72 (quadratic ramp).
+    // deficit=0 games but avg=5+ → 200pt anchor so brand-new arrivals are guaranteed in.
     if(myGames===0&&avgGames>0)return Math.min(200,avgGames*20);
-    return deficit>0?Math.min(80,deficit*8):0;
+    if(deficit<=0)return 0;
+    return Math.min(150,deficit*deficit*8+deficit*8); // quadratic for strong imbalance signal
   },
 
   queuePriority(qEntry,courtAvg){
@@ -3479,8 +3564,14 @@ const CF={
     const crossImb=Math.abs(avg(t1)-avg(t2));
     const rawT1gap=Math.abs(t1[0].sr-t1[1].sr);
     const rawT2gap=Math.abs(t2[0].sr-t2[1].sr);
-    const t1gap=rawT1gap/40;
-    const t2gap=rawT2gap/40;
+    // Item 1: Strong within-team spread penalty (prevents carry matches).
+    // Quadratic above 150pts so 300pt gap costs 4× more than 150pt gap.
+    const _teamPen=g=>{if(g<=150)return g/50;const x=(g-150)/100;return 3+x*x*3;};
+    const t1gap=_teamPen(rawT1gap);
+    const t2gap=_teamPen(rawT2gap);
+    // Item 1 continued: 4-player spread penalty — discourages wide fields
+    const allRtgs=group.map(p=>p.sr);
+    const spreadPen=Math.max(0,(Math.max(...allRtgs)-Math.min(...allRtgs)-400)/50);
     const partRpt=MM.pc(t1[0].id,t1[1].id)+MM.pc(t2[0].id,t2[1].id);
     const oppRpt=t1.reduce((s,a)=>t2.reduce((ss,b)=>ss+MM.oc(a.id,b.id),s),0);
     // Group composition penalty:
@@ -3514,12 +3605,26 @@ const CF={
     const t1k=this.pairKey(t1[0].id,t1[1].id),t2k=this.pairKey(t2[0].id,t2[1].id);
     const splitPen=(mustSplitPair&&(t1k===mustSplitPair||t2k===mustSplitPair))?15:0;
     const consec=k=>(S.session.cfPairConsec||{})[k]||0;
-    const consecPen=(consec(t1k)>=2?30:consec(t1k)>=1?8:0)+(consec(t2k)>=2?30:consec(t2k)>=1?8:0);
+    // Change 6: stronger consecutive penalty — 2-consec already painful
+    const consecPen=(consec(t1k)>=2?60:consec(t1k)>=1?20:0)+(consec(t2k)>=2?60:consec(t2k)>=1?20:0);
     const avgWait=group.reduce((s,p)=>s+p.waitMin,0)/4;
     const waitBonus=-avgWait*0.6;
     // MGL gap bonus: reduce penalty for players who've waited many matches
     const gapBonus=-group.reduce((s,p)=>s+Math.min(this.matchGap(p.id)*2,40),0);
-    const total=crossImb+(t1gap+t2gap)+partRpt*3+oppRpt*5+matchRpt+groupRpt+overlapPen+splitPen+consecPen+waitBonus+gapBonus;
+    // ── PRIORITY ORDER (locked) ──────────────────────────────────────────
+    // 1. Match balance    → crossImb (team avg gap) + t1gap/t2gap (within-team) + spreadPen
+    // 2. Avoid repeats    → matchRpt + groupRpt + overlapPen + partRpt + oppRpt + consecPen
+    // 3. Fair playtime    → gapBonus + waitBonus + (hunger handled in pool ordering)
+    // 4. Session form     → handled in cfRating() — baked into .sr values used above
+    // 5. ELO anchor       → baked into cfRating() baseline — never drives score directly
+    // Weights reflect priority: balance terms largest, playtime as bonus (negative = good)
+    const total=
+      // P1: Match balance (largest weight — must win)
+      crossImb*1.0 + (t1gap+t2gap) + spreadPen +
+      // P2: Avoid repeats
+      partRpt*3 + oppRpt*5 + matchRpt + groupRpt + overlapPen + splitPen + consecPen +
+      // P3: Fair playtime (negative = bonus for waiting players)
+      waitBonus + gapBonus;
     const meta={splitOverride:splitPen>0&&splitPen<200,repeatMatchup:matchRpt>0,
       rawT1gap,rawT2gap};
     // NR protection:
@@ -3730,7 +3835,11 @@ const CF={
     // MGL/tier2 players are guaranteed to be in the window IF we use fairPool directly.
     // Use fairPool as-is — the tier ordering already puts priority players first.
     // The post-search MGL override (below) enforces that tier2 players aren't excluded.
-    const searchPool=fairPool.slice(0,Math.min(jointSearchCap,n));
+    // Always include ALL pinned players in search pool regardless of cap
+    // This is the hard constraint: pinned players MUST be considered for every court
+    const pinnedInPool=fairPool.filter(p=>pinnedIds.has(p.id));
+    const nonPinnedPool=fairPool.filter(p=>!pinnedIds.has(p.id));
+    const searchPool=[...pinnedInPool,...nonPinnedPool].slice(0,Math.max(pinnedInPool.length+4, Math.min(jointSearchCap,n)));
     const doJoint=(nc<=3);
     if(doJoint)tryAlloc(0,searchPool,[],0);
 
@@ -3897,6 +4006,26 @@ const CF={
       (gsp(p.id)?.matchesPlayed||0)===0||
       this.matchGap(p.id)>=4
     );
+    // STEP 0 (NEW): If 2–4 players are pinned, ALL must be in the match.
+    // Build candidates that contain every pinned player; pick best grouping.
+    const pinnedList=[...tier0p];
+    if(pinnedList.length>=2&&pinnedList.length<=4){
+      const needed=4-pinnedList.length;
+      const candidates=orderedPool.filter(p=>!pinnedSg.has(p.id)).slice(0,Math.min(12,orderedPool.length));
+      let best=null,bestScore=Infinity;
+      if(needed===0){
+        // Exactly 4 pinned — only one group possible
+        const res=this._scoreGroup(pinnedList,mustSplit);
+        best={...res,group:pinnedList};
+      } else {
+        const cn=candidates.length;
+        if(needed===1){for(let i=0;i<cn;i++){const g=[...pinnedList,candidates[i]];const res=this._scoreGroup(g,mustSplit);if(res.score<bestScore){bestScore=res.score;best={...res,group:g};}}}
+        else if(needed===2){for(let i=0;i<cn-1;i++)for(let j=i+1;j<cn;j++){const g=[...pinnedList,candidates[i],candidates[j]];const res=this._scoreGroup(g,mustSplit);if(res.score<bestScore){bestScore=res.score;best={...res,group:g};}}}
+        else if(needed===3){for(let i=0;i<cn-2;i++)for(let j=i+1;j<cn-1;j++)for(let k=j+1;k<cn;k++){const g=[...pinnedList,candidates[i],candidates[j],candidates[k]];const res=this._scoreGroup(g,mustSplit);if(res.score<bestScore){bestScore=res.score;best={...res,group:g};}}}
+      }
+      if(best){this._storeSuggestion(courtNum,best,finishedMatch);return;}
+    }
+
     // STEP 1: If 4+ priority players exist, try pairing them ALL together first.
     // This prevents priority players from being spread thin (1 per court as anchor).
     // E.g. 4 NR players all waiting → let them play each other rather than being
@@ -4102,8 +4231,19 @@ const CF={
       idleStart:Date.now(),
       totalIdleMs:prevCourt.totalIdleMs||0,
       matchCount:(prevCourt.matchCount||0)+1};
+    // Pause-after: move flagged on-court players to paused instead of queue
+    const _paf=Array.isArray(S.session.cfPauseAfterGame)?S.session.cfPauseAfterGame:[];
+    if(_paf.length){
+      [...m.t1,...m.t2].forEach(id=>{
+        if(_paf.includes(id)){
+          if(!S.session.cfPaused.find(q=>q.id===id))
+            S.session.cfPaused.push({id,since:Date.now(),consec:0});
+        }
+      });
+      S.session.cfPauseAfterGame=_paf.filter(id=>![...m.t1,...m.t2].includes(id));
+    }
     [...m.t1,...m.t2].forEach((id,idx)=>{
-      if((S.session.cfPaused||[]).find(q=>q.id===id))return;
+      if((S.session.cfPaused||[]).find(q=>q.id===id))return; // pause-after already moved them
       if(S.session.cfQueue.find(q=>q.id===id))return;
       const staggerMs=idx*4000;
       const boostMs=0; // No boost — prevents consecutive play
@@ -4164,6 +4304,73 @@ const CF={
   },
 
   /* Reshuffle — exclude current suggestion's players, re-run batch across all ready courts */
+  // Change 4: Partial reshuffle — optionally lock some players and reshuffle only others
+  openPartialReshuffle(courtNum){
+    const sug=S.session?.cfSuggestions[courtNum];
+    if(!sug){toast('No suggestion to edit','err');return;}
+    const names=sug.allIds.map(id=>`<label style="display:flex;align-items:center;gap:7px;padding:5px 0;cursor:pointer;font-size:.8rem"><input type="checkbox" id="lock-${id}" checked style="accent-color:var(--cy)"/><span>${esc(gp(id)?.name||'?')} <span style="color:var(--mu);font-size:.72rem">${Math.round(this.cfRating(id))}</span></span></label>`).join('');
+    openModal(`<div class="modal-title">🔒 Partial Reshuffle — Court ${courtNum}</div>
+      <p style="font-size:.74rem;color:var(--mu);margin-bottom:10px">Check players to <strong>keep</strong>. Unchecked players will be swapped out.</p>
+      ${names}
+      <div style="display:flex;gap:7px;margin-top:12px">
+        <button class="btn bp" style="flex:1" onclick="CF.confirmPartialReshuffle(${courtNum})">Reshuffle</button>
+        <button class="btn bg2" onclick="closeModal()">Cancel</button>
+      </div>`);
+  },
+
+  confirmPartialReshuffle(courtNum){
+    const sug=S.session?.cfSuggestions[courtNum];if(!sug)return;
+    const locked=sug.allIds.filter(id=>document.getElementById(`lock-${id}`)?.checked);
+    const toReplace=sug.allIds.filter(id=>!locked.includes(id));
+    if(!toReplace.length){closeModal();toast('No players to swap — uncheck at least one','warn');return;}
+    if(locked.length>3){closeModal();toast('At most 3 can be locked — need at least 1 fresh player','warn');return;}
+    closeModal();
+
+    const lockedSet=new Set(locked);
+
+    // Re-enqueue the players being replaced so they're available as candidates
+    toReplace.forEach(id=>{
+      if(!S.session.cfQueue.find(q=>q.id===id))
+        S.session.cfQueue.push({id,since:Date.now(),consec:0});
+    });
+
+    // Pool = queue minus locked players (locked stay out — they're in the match)
+    const poolObjs=(S.session.cfQueue||[])
+      .filter(q=>!lockedSet.has(q.id))
+      .map(q=>({id:q.id,sr:this.cfRating(q.id),waitMin:(Date.now()-q.since)/60000}));
+
+    if(poolObjs.length+locked.length<4){
+      toReplace.forEach(id=>{S.session.cfQueue=S.session.cfQueue.filter(q=>q.id!==id);});
+      toast('Not enough queued players to complete the swap','warn');return;
+    }
+
+    const lockedObjs=locked.map(id=>({id,sr:this.cfRating(id),waitMin:0}));
+    const needed=4-locked.length;
+    let best=null,bestScore=Infinity;
+    const n=Math.min(poolObjs.length,14);
+    if(needed===1){for(let i=0;i<n;i++){const g=[...lockedObjs,poolObjs[i]];const res=this._scoreGroup(g,S.session.cfMustSplitPair);if(res.score<bestScore){bestScore=res.score;best={...res,group:g};}}}
+    else if(needed===2){for(let i=0;i<n-1;i++)for(let j=i+1;j<n;j++){const g=[...lockedObjs,poolObjs[i],poolObjs[j]];const res=this._scoreGroup(g,S.session.cfMustSplitPair);if(res.score<bestScore){bestScore=res.score;best={...res,group:g};}}}
+    else if(needed===3){for(let i=0;i<n-2;i++)for(let j=i+1;j<n-1;j++)for(let k=j+1;k<n;k++){const g=[...lockedObjs,poolObjs[i],poolObjs[j],poolObjs[k]];const res=this._scoreGroup(g,S.session.cfMustSplitPair);if(res.score<bestScore){bestScore=res.score;best={...res,group:g};}}}
+    else if(needed===4){const res=this._findBestGroup(poolObjs.slice(0,n),S.session.cfMustSplitPair,[],n);if(res)best=res;}
+
+    if(!best){
+      toReplace.forEach(id=>{S.session.cfQueue=S.session.cfQueue.filter(q=>q.id!==id);});
+      toast('Could not find a valid group — try different locks','warn');return;
+    }
+
+    // Dequeue the newly selected (non-locked) players from the queue
+    best.group.map(p=>p.id).filter(id=>!lockedSet.has(id)).forEach(id=>{
+      S.session.cfQueue=S.session.cfQueue.filter(q=>q.id!==id);
+    });
+
+    const gap=Math.abs((best.t1[0].sr+best.t1[1].sr)/2-(best.t2[0].sr+best.t2[1].sr)/2);
+    S.session.cfSuggestions[courtNum]={...sug,
+      t1:best.t1.map(p=>p.id),t2:best.t2.map(p=>p.id),allIds:best.group.map(p=>p.id),
+      meta:{...sug.meta,gap:Math.round(gap),gapWarn:gap>250}};
+    STORE.save('session');renderLive();
+    toast(`Court ${courtNum} reshuffled — ${toReplace.length} player(s) replaced`,'ok');
+  },
+
   reshuffleSuggestion(courtNum){
     if(!S.session)return;
     cancelAutoConfirm(courtNum);
@@ -4186,6 +4393,51 @@ const CF={
       :'(not enough players)';
     STORE.save('session');renderLive();
     toast(`Court ${courtNum} reshuffled — swapped in ${log}`,'ok');
+  },
+
+  // Change 3: Swap one player in a suggestion without rebuilding the whole match
+  openSwapPlayer(courtNum){
+    const sug=S.session?.cfSuggestions[courtNum];
+    if(!sug){toast('No suggestion to edit','err');return;}
+    const queue=(S.session.cfQueue||[]).map(q=>q.id).filter(id=>!sug.allIds.includes(id));
+    if(!queue.length){toast('No queued players available to swap in','warn');return;}
+    const inMatch=sug.allIds.map(id=>`<option value="${id}">${esc(gp(id)?.name||'?')} (${Math.round(this.cfRating(id))})</option>`).join('');
+    const inQueue=queue.map(id=>`<option value="${id}">${esc(gp(id)?.name||'?')} (${Math.round(this.cfRating(id))})</option>`).join('');
+    openModal(`<div class="modal-title">🔄 Swap Player — Court ${courtNum}</div>
+      <p style="font-size:.74rem;color:var(--mu);margin-bottom:10px">Remove one player from the suggestion and replace with someone from the queue.</p>
+      <label>REMOVE (from match)</label>
+      <select id="swap-out" class="inp" style="margin-bottom:8px"><option value="">— select —</option>${inMatch}</select>
+      <label>ADD (from queue)</label>
+      <select id="swap-in" class="inp" style="margin-bottom:12px"><option value="">— select —</option>${inQueue}</select>
+      <div style="display:flex;gap:7px">
+        <button class="btn bp" style="flex:1" onclick="CF.confirmSwap(${courtNum})">Swap</button>
+        <button class="btn bg2" onclick="closeModal()">Cancel</button>
+      </div>`);
+  },
+
+  confirmSwap(courtNum){
+    const outId=document.getElementById('swap-out')?.value;
+    const inId=document.getElementById('swap-in')?.value;
+    if(!outId||!inId){toast('Select both players','err');return;}
+    if(outId===inId){toast('Select two different players','err');return;}
+    const sug=S.session?.cfSuggestions[courtNum];if(!sug)return;
+    if(!sug.allIds.includes(outId)){toast('Player not in this suggestion','err');return;}
+
+    // Queue accounting: remove inId from queue, put outId back
+    S.session.cfQueue=S.session.cfQueue.filter(q=>q.id!==inId);
+    if(!S.session.cfQueue.find(q=>q.id===outId))
+      S.session.cfQueue.push({id:outId,since:Date.now(),consec:0});
+
+    // Rebuild suggestion with swap applied
+    const newIds=sug.allIds.map(id=>id===outId?inId:id);
+    const players=newIds.map(id=>({id,sr:this.cfRating(id),waitMin:0}));
+    const{t1,t2}=MM.bestPair(players);
+    const gap=Math.abs((t1[0].sr+t1[1].sr)/2-(t2[0].sr+t2[1].sr)/2);
+    S.session.cfSuggestions[courtNum]={...sug,
+      t1:t1.map(p=>p.id),t2:t2.map(p=>p.id),allIds:newIds,
+      meta:{...sug.meta,gap:Math.round(gap),gapWarn:gap>250}};
+    closeModal();STORE.save('session');renderLive();
+    toast(`Swapped ${gp(outId)?.name||'?'} → ${gp(inId)?.name||'?'}  ✓`,'ok');
   },
 
   /* Manual override */
@@ -4330,16 +4582,45 @@ const CF={
     };
     const t1CoolChip=cooldownChip(sug.t1,'P1');
     const t2CoolChip=cooldownChip(sug.t2,'P2');
+
+    // ── Explainability tags ──────────────────────────────────────────────
+    // Per-player form: scan last 3 games to classify streak/cooling
+    const formTag=id=>{
+      const matches=(_getSessionMatches()||[]).filter(m=>m.t1?.includes(id)||m.t2?.includes(id));
+      const last=matches.slice(-3);
+      if(last.length<2)return '';
+      const results=last.map(m=>{const inT1=m.t1?.includes(id);return inT1?m.s1>m.s2?1:m.s1===m.s2?0:-1:m.s2>m.s1?1:m.s1===m.s2?0:-1;});
+      const net=results.reduce((s,v)=>s+v,0);
+      if(net>=2)return`<span class="cf-chip" style="background:rgba(251,147,60,.15);color:var(--or)" title="Won ${results.filter(v=>v>0).length} of last ${last.length} games">🔥 Streak</span>`;
+      if(net<=-2)return`<span class="cf-chip cf-chip-info" title="Lost ${results.filter(v=>v<0).length} of last ${last.length} games">🧊 Cooling off</span>`;
+      return '';
+    };
+    // Balance tag: how even are the two teams?
+    const balanceTag=meta.gap<=30
+      ?`<span class="cf-chip cf-chip-ok" title="Teams within ${meta.gap}pts — very even">⚖️ Even match</span>`
+      :meta.gapWarn?`<span class="cf-chip cf-chip-warn" title="Team avg gap: ${meta.gap}pts">⚠ Skill gap</span>`:'';
+    // Repeat-avoidance tag
+    const repeatTag=meta.repeatMatchup
+      ?`<span class="cf-chip cf-chip-warn" title="These 4 players have played this matchup before">🔁 Avoid repeat</span>`:'';
+    // Fairness: any player with high match gap or hunger?
+    const fairnessTag=sug.allIds.some(id=>CF.matchGap(id)>=4||CF.hungerBoost(id)>80)
+      ?`<span class="cf-chip cf-chip-info" title="Includes players due for a game — fairness-driven pick">⏳ Fairness pick</span>`:'';
+    // Form tags for all 4 players
+    const playerFormTags=sug.allIds.map(id=>formTag(id)).filter(Boolean).join('');
+
     const chips=[
       `<span class="cf-chip ${meta.gapWarn?'cf-chip-warn':'cf-chip-ok'}">Teams ${meta.gap}pts${meta.gapWarn?' ⚠':' ✓'}</span>`,
+      balanceTag,
       meta.urgentWait?`<span class="cf-chip cf-chip-warn">⏳ ${meta.maxWait}min wait</span>`:`<span class="cf-chip cf-chip-info">Wait ${meta.maxWait}min</span>`,
       t1CoolChip,t2CoolChip,
+      playerFormTags,
+      repeatTag,
+      fairnessTag,
       meta.splitOverride?`<span class="cf-chip cf-chip-warn">⚠ Win pair kept</span>`:'',
-      meta.repeatMatchup?`<span class="cf-chip cf-chip-warn">⚠ Repeat matchup</span>`:'',
       meta.shortGameBoost?`<span class="cf-chip cf-chip-info">⚡ Short-game boost</span>`:'',
       staleWarn?`<span class="cf-chip cf-chip-warn">🕐 ${staleMin}min old — refresh?</span>`:'',
-      t1pgap>250?`<span class="cf-chip cf-chip-warn" title="P1 within-team gap: ${t1pgap}pts — consider reshuffling">⚠ P1</span>`:'',
-      t2pgap>250?`<span class="cf-chip cf-chip-warn" title="P2 within-team gap: ${t2pgap}pts — consider reshuffling">⚠ P2</span>`:'',
+      t1pgap>250?`<span class="cf-chip cf-chip-warn" title="P1 within-team gap: ${t1pgap}pts — consider reshuffling">⚠ P1 spread</span>`:'',
+      t2pgap>250?`<span class="cf-chip cf-chip-warn" title="P2 within-team gap: ${t2pgap}pts — consider reshuffling">⚠ P2 spread</span>`:'',
     ].filter(Boolean).join('');
     // Team tile: show avg only publicly. Partner gap in tooltip — not broadcast to bystanders.
     const pTeam=(ids,avg,pgap)=>`<div style="background:var(--s2);border:1px solid ${pgap>250?'rgba(248,113,113,.3)':pgap>150?'rgba(251,147,60,.2)':'var(--bd)'};border-radius:var(--ra);padding:9px;text-align:center" title="Partner skill gap: ${pgap}pts${pgap>250?' ⚠ High — reshuffle recommended':''}">
@@ -4356,8 +4637,10 @@ const CF={
       </div>
       <div style="display:flex;gap:7px">
         <button class="btn bp" style="flex:2" onclick="cancelAutoConfirm(${courtNum});CF.confirmSuggestion(${courtNum})">✓ Confirm — Start Court ${courtNum}</button>
-        <button class="btn bs sm" title="Reshuffle" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleSuggestion(${courtNum})">↺ Reshuffle</button>
-        <button class="btn bg2 sm" title="Manual" onclick="cancelAutoConfirm(${courtNum});CF.openManual(${courtNum})">✏ Manual</button>
+        <button class="btn bs sm" title="Full reshuffle" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleSuggestion(${courtNum})">↺ Reshuffle</button>
+        <button class="btn bs sm" title="Partial reshuffle — lock some players" onclick="cancelAutoConfirm(${courtNum});CF.openPartialReshuffle(${courtNum})">🔒 Lock+Shuffle</button>
+        <button class="btn bs sm" title="Swap one player" onclick="cancelAutoConfirm(${courtNum});CF.openSwapPlayer(${courtNum})">⇄ Swap</button>
+        <button class="btn bg2 sm" title="Manual pick" onclick="cancelAutoConfirm(${courtNum});CF.openManual(${courtNum})">✏ Manual</button>
       </div></div>`;
   },
 
@@ -4367,6 +4650,13 @@ const CF={
     // Show tag in live court so Eric VN vs Eric TH are distinguishable
     // FIX: esc() applied to name only — not the span wrapper (otherwise tag shows as escaped text)
     const gn=id=>{const p=gp(id);return p?(esc(p.name)+(p.tag?` <span style="font-size:.68rem;background:rgba(251,147,60,.18);color:var(--or);border-radius:4px;padding:1px 4px;font-weight:700">${esc(p.tag)}</span>`:'')):esc('?');};
+    const _pafList=Array.isArray(S.session.cfPauseAfterGame)?S.session.cfPauseAfterGame:[];
+    const pauseBtn=id=>{
+      const scheduled=_pafList.includes(id);
+      return scheduled
+        ?`<button class="btn bd2 sm" style="padding:2px 6px;font-size:.6rem" onclick="cfCancelPauseAfter('${id}')" title="Cancel pause-after">⏸ Scheduled ✕</button>`
+        :`<button class="btn bg2 sm" style="padding:2px 6px;font-size:.6rem" onclick="cfSchedulePauseAfter('${id}')" title="Pause after this game ends">⏸ After</button>`;
+    };
     const t1Avg=Math.round((gr(m.t1[0])+gr(m.t1[1]))/2),t2Avg=Math.round((gr(m.t2[0])+gr(m.t2[1]))/2);
     const extSec=(S.session.extendedMin||16)*60;
     const ext=m.extended;
@@ -4382,9 +4672,9 @@ const CF={
       </div>
       <div class="cbody">
         <div class="teams">
-          <div class="team">${m.t1.map(id=>`<div style="text-align:center;font-weight:600;font-size:.82rem">${gn(id)} <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span></div>`).join('')}<div class="team-avg">Avg ${t1Avg}</div></div>
+          <div class="team">${m.t1.map(id=>`<div style="display:flex;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:.82rem">${gn(id)} <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span>${pauseBtn(id)}</div>`).join('')}<div class="team-avg">Avg ${t1Avg}</div></div>
           <div class="vs-lbl">VS</div>
-          <div class="team">${m.t2.map(id=>`<div style="text-align:center;font-weight:600;font-size:.82rem">${gn(id)} <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span></div>`).join('')}<div class="team-avg">Avg ${t2Avg}</div></div>
+          <div class="team">${m.t2.map(id=>`<div style="display:flex;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:.82rem">${gn(id)} <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span>${pauseBtn(id)}</div>`).join('')}<div class="team-avg">Avg ${t2Avg}</div></div>
         </div>
         <div class="srow" style="margin-top:10px">
           <input class="sinp inp" id="cf-s1-${courtNum}" type="number" min="0" max="99" placeholder="0"/>
@@ -4495,7 +4785,7 @@ const CF={
               <div style="flex:1;font-weight:600;font-size:.82rem">${esc(p?.name||'?')}${tagHtml(p)}</div>
               <div style="font-size:.72rem;color:var(--mu)">${rDisp}</div>
               <span class="cf-wait ${wcls}">${waitMin}m</span>
-              <button class="btn bg2 sm" style="padding:2px 7px;font-size:.65rem" onclick="cfPausePlayer('${q.id}')" title="Take a break">⏸</button>
+              <button class="btn bg2 sm" style="padding:2px 7px;font-size:.65rem" onclick="cfPausePlayer('${q.id}')" title="Take a break now">⏸ Now</button>
               ${isPinned?
                 `<button class="btn" style="padding:2px 7px;font-size:.65rem;background:rgba(168,85,247,.15);border-color:var(--pu);color:var(--pu)" onclick="cfUnpinPlayer('${q.id}')" title="Remove pin">📌</button>`:
                 `<button class="btn bg2 sm" style="padding:2px 7px;font-size:.65rem" onclick="cfPinPlayer('${q.id}')" title="Pin to front of queue">📌</button>`}
