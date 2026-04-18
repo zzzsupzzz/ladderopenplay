@@ -355,11 +355,11 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 </div>
 
 <nav id="tabnav">
-  <button class="tb on" data-tab="setup">⚙️ Setup</button>
-  <button class="tb" data-tab="live">🎮 Live</button>
-  <button class="tb" data-tab="standings">📊 Standings</button>
-  <button class="tb" data-tab="history">📜 History</button>
-  <button class="tb" data-tab="player">👤 My Stats</button>
+  <button class="tb on" data-tab="setup" onclick="switchTab('setup')">⚙️ Setup</button>
+  <button class="tb" data-tab="live" onclick="switchTab('live')">🎮 Live</button>
+  <button class="tb" data-tab="standings" onclick="switchTab('standings')">📊 Standings</button>
+  <button class="tb" data-tab="history" onclick="switchTab('history')">📜 History</button>
+  <button class="tb" data-tab="player" onclick="switchTab('player')">👤 My Stats</button>
 </nav>
 
 <!-- Session progress bar -->
@@ -573,7 +573,8 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 //  • Pickles & Ladders icon embedded
 // ================================================================
 
-const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,roundMin:12,sessionMode:'flow',extendedMin:16,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
+const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,roundMin:0,sessionMode:'flow',extendedMin:16,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
+let _pageFirstLoad=true; // true only once — blocks reconnection from forcing tab switch
 
 /* ── CF simultaneous-finish batch debounce ─────────────── */
 // scheduleCFBatch removed in V19: suggestions are now generated synchronously
@@ -774,6 +775,7 @@ const SYNC={
       if(!PLAYER_MODE){
         if(S.session?.status==='active'){
           S.courts=S.session.courts||1;
+          S.extendedMin=S.session.extendedMin||16;
           syncCourtPills('cpills-setup',S.courts);syncCourtPills('cpills-live',S.courts);
           renderLive();
         }else{renderLive();}
@@ -783,10 +785,20 @@ const SYNC={
       // Hide loading overlay on first load; show sync toast on subsequent remote updates
       if(isFirstLoad){
         const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
-        if(S.session?.status==='active'&&!PLAYER_MODE){switchTab('live');startElapsed();updateProgress();}
+        // Only switch to live on the very first page load — never on reconnections.
+        // _pageFirstLoad is set to false after first successful sync (module-level).
+        if(_pageFirstLoad&&S.session?.status==='active'&&!PLAYER_MODE){
+          switchTab('live');startElapsed();updateProgress();
+        }
+        _pageFirstLoad=false;
         checkAdminAccess();
       }else{
-        toast('🔄 Synced from another device','ok');
+        // Re-render active tab with fresh Firebase data (no tab switch)
+        if(isActiveTab('standings'))renderStandings();
+        if(isActiveTab('history')){renderHistory();renderArchive();}
+        if(isActiveTab('player'))renderPlayerView();
+        // Don't toast on own-device echoes (too noisy during active session)
+        if(!data||data._by!==DEVICE_ID)toast('🔄 Synced from another device','ok');
       }
     }catch(e){console.error('_applyRemote error',e);}
   },
@@ -3483,12 +3495,18 @@ function switchTab(id){
   document.querySelectorAll('.tp').forEach(p=>p.classList.remove('on'));
   const tabBtn=document.querySelector(`[data-tab="${id}"]`);
   if(tabBtn) tabBtn.classList.add('on');
-  document.getElementById(`tab-${id}`).classList.add('on');
-  if(id==='standings')renderStandings();
+  const tabEl=document.getElementById(`tab-${id}`);
+  if(tabEl){tabEl.classList.add('on');}
+  else{console.error('Tab not found: tab-'+id);return;}
+  // Always re-render on every switch to pick up latest data
+  if(id==='standings'){renderStandings();}
   if(id==='history'){renderHistory();renderArchive();}
   if(id==='live'){renderLive();}
   if(id==='setup'){renderDB();renderRoster();}
-  if(id==='player')renderPlayerView();
+  if(id==='player'){renderPlayerView();}
+  // Scroll to top of tab content on mobile
+  tabEl.scrollTop=0;
+  window.scrollTo(0,0);
 }
 
 /* ── COURT PILLS ─────────────────────────────────── */
