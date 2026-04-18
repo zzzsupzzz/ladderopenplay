@@ -756,44 +756,33 @@ const SYNC={
   _applyRemote(data, isFirstLoad=false){
     try{
       const remote=data||{};
-      // Preserve any locally-generated suggestions that Firebase hasn't persisted yet.
-      // Scenario: CF.submitScore generates a suggestion synchronously then calls STORE.save().
-      // Firebase sends _applyRemote back within ~100ms — but that response carries the
-      // data from *this* exact save, so suggestions ARE included. However, if another
-      // device's save arrives first, it won't have our suggestions. Merging prevents
-      // those suggestions from being wiped on same-device Firebase echo.
-      const localSugs = S.session?.cfSuggestions
-        ? Object.fromEntries(Object.entries(S.session.cfSuggestions).filter(([,v])=>v))
-        : {};
-      // Preserve playing court matches — Firebase echo can arrive with stale 'ready' state
-      // before the confirm write is acknowledged, causing on-court players to reappear in queue
-      const localPlayingCourts = {};
+
+      // Preserve locally-generated suggestions not yet in Firebase
+      const localSugs=S.session?.cfSuggestions
+        ?Object.fromEntries(Object.entries(S.session.cfSuggestions).filter(([,v])=>v))
+        :{};
+
+      // Preserve playing court matches (null-safe ct guard)
+      const localPlayingCourts={};
       if(S.session?.cfMode&&S.session.cfCourts){
         Object.entries(S.session.cfCourts).forEach(([c,ct])=>{
-          if(ct.status==='playing'&&ct.match)localPlayingCourts[c]=ct;
+          if(ct&&ct.status==='playing'&&ct.match)localPlayingCourts[c]=ct;
         });
       }
-      // ── Phase 1 Sync Safety ──────────────────────────────────
-      // Backwards-compat: new writes put _ts/_by inside meta{}, old writes put them at root
+
+      // Sync metadata
       const remoteTs=(remote.meta?._ts)||remote._ts||0;
       const remoteBy=(remote.meta?._by)||remote._by||'';
       const adminPinVal=(typeof remote.meta?.adminPin!=='undefined')?remote.meta.adminPin:
                         (typeof remote.adminPin!=='undefined'?remote.adminPin:'');
       const localTs=S._lastSaveTs||0;
 
-      // ── First-load reconcile ──────────────────────────────────
-      // Compare Firebase timestamp against local backup timestamp.
-      // If local backup is clearly newer (e.g. offline edits), push local to Firebase
-      // instead of overwriting with stale remote data.
+      // First-load reconcile: local newer than Firebase → push local up
       if(isFirstLoad&&remoteTs>0){
         const localBackupTs=_getLocalBackup()?.savedAt||0;
         if(localBackupTs>remoteTs+5000){
-          // Local is more than 5s newer — we have offline changes Firebase doesn't know about
-          console.log(`[sync] Local backup (${localBackupTs}) is newer than Firebase (${remoteTs}) — pushing local state up`);
-          // Don't apply remote; push our current local state to Firebase instead
+          console.log(`[sync] Local (${localBackupTs}) newer than Firebase (${remoteTs}) — pushing local up`);
           setTimeout(()=>STORE.save('all'),200);
-          // Still do the first-load housekeeping (hide overlay, etc.) below
-          // by falling through with remote=local sentinel
           const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
           if(_pageFirstLoad&&S.session?.status==='active'&&!PLAYER_MODE){
             switchTab('live');startElapsed();updateProgress();
@@ -804,100 +793,72 @@ const SYNC={
           return;
         }
       }
-      // ─────────────────────────────────────────────────────────
 
       const isStale=!isFirstLoad&&remoteTs>0&&remoteTs<localTs-2000;
-      if(isStale){
-        console.warn(`[sync] Rejected stale remote write (remote _ts ${remoteTs} < local ${localTs})`);
-        return;
-      }
+      if(isStale){console.warn(`[sync] Rejected stale remote (${remoteTs}<${localTs})`);return;}
 
-      // (2) cfLog shrink guard — never let a remote payload reduce match history.
-      //     If remote has fewer log entries, keep the local log.
+      // cfLog shrink guard
       const localCfLogLen=S.session?.cfLog?.length||0;
       const remoteCfLogLen=remote.session?.cfLog?.length||0;
       let preservedCfLog=null;
       if(!isFirstLoad&&remoteCfLogLen<localCfLogLen){
         preservedCfLog=[...S.session.cfLog];
-        console.warn(`[sync] cfLog shrink blocked (remote ${remoteCfLogLen} < local ${localCfLogLen})`);
+        console.warn(`[sync] cfLog shrink blocked (${remoteCfLogLen}<${localCfLogLen})`);
       }
 
-      // (3) Archive shrink guard — never discard archived sessions.
+      // Archive shrink guard
       const localArchiveLen=S.archive?.length||0;
       const remoteArchiveLen=(remote.archive||[]).length;
       let preservedArchive=null;
       if(!isFirstLoad&&remoteArchiveLen<localArchiveLen){
         preservedArchive=[...S.archive];
-        console.warn(`[sync] Archive shrink blocked (remote ${remoteArchiveLen} < local ${localArchiveLen})`);
+        console.warn(`[sync] Archive shrink blocked (${remoteArchiveLen}<${localArchiveLen})`);
       }
-      // ────────────────────────────────────────────────────────
 
       S.db=remote.db||[];
       S.session=remote.session||null;
       S.archive=preservedArchive||(remote.archive||[]);
-
-      // Restore preserved cfLog after session is assigned
       if(preservedCfLog&&S.session)S.session.cfLog=preservedCfLog;
-      if(typeof adminPinVal!=='undefined') S.adminPin=adminPinVal;
+      if(typeof adminPinVal!=='undefined')S.adminPin=adminPinVal;
+
       if(S.session){
-        // Merge: keep local suggestions that Firebase data doesn't have yet
         if(S.session.cfMode){
+          // Merge local suggestions
           S.session.cfSuggestions=S.session.cfSuggestions||{};
           Object.entries(localSugs).forEach(([c,sug])=>{
             if(!S.session.cfSuggestions[c])S.session.cfSuggestions[c]=sug;
           });
-          // Restore locally-playing courts: if remote shows 'ready' but we locally
-          // confirmed a match 100ms ago, keep our playing state until Firebase catches up
+          // Restore locally-playing courts (null-safe existing slot check)
           S.session.cfCourts=S.session.cfCourts||{};
           Object.entries(localPlayingCourts).forEach(([c,ct])=>{
-            const remote=S.session.cfCourts[c];
-            if(!remote||remote.status==='ready')S.session.cfCourts[c]=ct;
+            const existing=S.session.cfCourts[c];
+            if(!existing||existing.status==='ready')S.session.cfCourts[c]=ct;
           });
-          // Remove from queue any players who are now confirmed on a court
-          const onCourtIds=new Set(Object.values(S.session.cfCourts)
-            .filter(ct=>ct&&ct.status==='playing'&&ct.match)
-            .flatMap(ct=>[...ct.match.t1,...ct.match.t2]));
+          // Remove on-court players from queue (null-safe court iteration)
+          const onCourtIds=new Set(
+            Object.values(S.session.cfCourts)
+              .filter(ct=>ct&&ct.status==='playing'&&ct.match)
+              .flatMap(ct=>[...ct.match.t1,...ct.match.t2])
+          );
           if(onCourtIds.size)S.session.cfQueue=(S.session.cfQueue||[]).filter(q=>!onCourtIds.has(q.id));
-        }
-        // Guard all session fields — safe for sessions saved before these fields existed
-        // CF session fields — all guards in one place
-        if(S.session.cfMode){
-          S.session.soStreak=S.session.soStreak||{};
-          S.session.plStreak=S.session.plStreak||{};
-          S.session.sitOutHx=S.session.sitOutHx||{};
-          S.session.partnerHx=S.session.partnerHx||{};
-          S.session.oppHx=S.session.oppHx||{};
-          S.session.oppHxTime=S.session.oppHxTime||{};
-          S.session.nrPairingHx=S.session.nrPairingHx||{};
-          S.session.ratingOverrides=S.session.ratingOverrides||{};
-          S.session.neverPair=S.session.neverPair||{};
-          S.session.cfLog=S.session.cfLog||[];
-          S.session.cfQueue=S.session.cfQueue||[];
-          S.session.cfPaused=S.session.cfPaused||[];
-          S.session.cfCourts=S.session.cfCourts||{};
-          S.session.cfSuggestions=S.session.cfSuggestions||{};
-          S.session.cfMatchupHx=S.session.cfMatchupHx||{};
-          S.session.cfPairConsec=S.session.cfPairConsec||{};
-          S.session.cfPairWins=S.session.cfPairWins||{};
-          S.session.cfPairSessionCount=S.session.cfPairSessionCount||{};
-          S.session.cfPairLastAt=S.session.cfPairLastAt||{};
-          S.session.cfPairLastLost=S.session.cfPairLastLost||{};
+          // Ensure all CF fields exist
+          const _d=x=>S.session[x]=S.session[x]||{};
+          const _a=x=>S.session[x]=S.session[x]||[];
+          _d('soStreak');_d('plStreak');_d('sitOutHx');_d('partnerHx');
+          _d('oppHx');_d('oppHxTime');_d('nrPairingHx');_d('ratingOverrides');
+          _d('neverPair');_d('cfSuggestions');_d('cfMatchupHx');
+          _d('cfPairConsec');_d('cfPairWins');_d('cfPairSessionCount');
+          _d('cfPairLastAt');_d('cfPairLastLost');
+          _a('cfLog');_a('cfQueue');_a('cfPaused');
+          _d('cfCourts');
         }
         S.checkedIn.clear();
         S.session.activePlayers?.forEach(id=>S.checkedIn.add(id));
-        // Restore CF tick if session is active and in CF mode
         if(S.session.status==='active'&&S.session.cfMode)startCFTick();
       }else{S.checkedIn.clear();}
-      // Invalidate matchmaking caches — archive may have changed on remote
+
       _invalidateMatchmakingCaches();
-
-      // PB-004: Auto-seeding disabled — demo data must be loaded explicitly.
-
-      // Always-safe lightweight state sync (no DOM render, just data)
-      updateHeader();
-      updatePinStatus();
-      updatePvSelect();
-      updatePvSessFilter();
+      updateHeader();updatePinStatus();updatePvSelect();updatePvSessFilter();
       if(S.session?.status==='active'){
         S.courts=S.session.courts||1;
         S.extendedMin=S.session.extendedMin||16;
@@ -906,9 +867,7 @@ const SYNC={
       }
 
       if(isFirstLoad){
-        // First load: render all tabs so they're initialized before the user navigates
-        renderDB();renderRoster();
-        renderHistory();renderArchive();
+        renderDB();renderRoster();renderHistory();renderArchive();
         if(!PLAYER_MODE)renderLive();
         const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
         if(_pageFirstLoad&&S.session?.status==='active'&&!PLAYER_MODE){
@@ -917,15 +876,30 @@ const SYNC={
         _pageFirstLoad=false;
         checkAdminAccess();
       }else{
-        // Subsequent remote updates: render ONLY the active tab.
-        // Other tabs render fresh on demand when the user navigates via switchTab.
-        // This is the structural fix for cross-tab render contamination.
         _renderActiveTab();
-        const remoteBy=data?.meta?._by||data?._by||'';
-        if(remoteBy&&remoteBy!==DEVICE_ID)toast('🔄 Synced from another device','ok');
+        const rb=data?.meta?._by||data?._by||'';
+        if(rb&&rb!==DEVICE_ID)toast('🔄 Synced from another device','ok');
       }
-    }catch(e){console.error('_applyRemote error',e);}
-  },
+    }catch(e){
+      console.error('[sync] _applyRemote error',e);
+      // Never block the UI — show local state if loading overlay is still up
+      const fl=document.getElementById('fb-loading');
+      if(fl&&!fl.classList.contains('hidden')){
+        fl.classList.add('hidden');
+        _pageFirstLoad=false;
+        try{renderDB();renderRoster();renderHistory();renderArchive();renderStandings();}catch(e2){}
+        updateHeader();_setSaveStatus('error');checkAdminAccess();
+        // Persistent sync-error banner
+        if(!document.getElementById('sync-error-banner')){
+          const b=document.createElement('div');
+          b.id='sync-error-banner';
+          b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:rgba(248,113,113,.15);border-bottom:2px solid rgba(248,113,113,.4);padding:8px 16px;font-size:.73rem;font-weight:600;color:var(--re);text-align:center;font-family:"DM Sans",sans-serif';
+          b.innerHTML='⚠️ Sync error — showing last local data. <a href="#" onclick="location.reload();return false" style="color:var(--or);text-decoration:underline">Reload to retry</a> &nbsp;·&nbsp; <a href="#" onclick="document.getElementById(\'sync-error-banner\').remove();return false" style="color:var(--mu);text-decoration:underline">Dismiss</a>';
+          document.body.prepend(b);
+        }
+      }
+    }
+  },,
 
   _updateBadge(state=''){
     const b=document.getElementById('sync-badge');
