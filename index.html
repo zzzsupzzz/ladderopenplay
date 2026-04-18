@@ -2999,37 +2999,50 @@ function initCourtPills(containerId,onSel){
    · Backwards-compat: if a stored PIN is 4 chars (old plaintext),
      it is migrated to a hash on the next successful unlock.
 ──────────────────────────────────────────────────────────────────── */
-let _pinBuffer='';
-let ADMIN_UNLOCKED=false;
+/* ══════════════════════════════════════════════════════════════════
+   ADMIN SYSTEM
+   ─────────────────────────────────────────────────────────────────
+   Room PIN  = shared via S.adminPin (Firebase-synced, SHA-256 hashed)
+   Device lock = local per device (localStorage, room-scoped, persists across refresh)
 
-// ── Crypto helpers ─────────────────────────────────────────────────
+   Rules:
+   · Lock state is NEVER synced to Firebase
+   · Lock state persists across refreshes (stays locked if locked)
+   · Each room has its own lock key — switching rooms starts fresh
+   · PIN is shared; lock state is not
+   ══════════════════════════════════════════════════════════════════ */
+
+let ADMIN_UNLOCKED=false;
+let _pinBuffer='';
+
+// ── Room-scoped device lock key ──────────────────────────────────
+function _deviceLockKey(){
+  return`pb_dev_lock_${SYNC.roomId||localStorage.getItem('pb_room_id')||'local'}`;
+}
+function _setDeviceLocked(value){
+  try{localStorage.setItem(_deviceLockKey(),JSON.stringify({locked:!!value}));}
+  catch(e){}
+}
+function _isDeviceLocked(){
+  try{const raw=localStorage.getItem(_deviceLockKey());if(!raw)return false;return!!JSON.parse(raw).locked;}
+  catch(e){return false;}
+}
+
+// ── SHA-256 PIN hashing ──────────────────────────────────────────
 async function _hashPin(pin){
   const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(pin));
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
-function _deviceSessionKey(){return`pb_adm_${SYNC.roomId||localStorage.getItem('pb_room_id')||'local'}`;}
-function _saveDeviceSession(pinHash){
-  try{localStorage.setItem(_deviceSessionKey(),JSON.stringify({h:pinHash,exp:Date.now()+12*3600*1000}));}
-  catch(e){}
-}
-function _clearDeviceSession(){try{localStorage.removeItem(_deviceSessionKey());}catch(e){}}
-function _checkDeviceSession(pinHash){
-  try{
-    const raw=localStorage.getItem(_deviceSessionKey());
-    if(!raw)return false;
-    const {h,exp}=JSON.parse(raw);
-    return h===pinHash&&Date.now()<exp;
-  }catch(e){return false;}
-}
 
-// ── Public API ─────────────────────────────────────────────────────
+// ── Public PIN API ───────────────────────────────────────────────
 function getAdminPin(){return S.adminPin||'';}
 
 async function setAdminPin(pin){
-  S.adminPin=await _hashPin(pin);
+  S.adminPin=pin?await _hashPin(pin):'';
   STORE.save();
 }
 
+// ── PIN dot display ──────────────────────────────────────────────
 function _updatePinDots(){
   for(let i=0;i<4;i++){
     const d=document.getElementById(`pd${i}`);
@@ -3045,13 +3058,14 @@ function pinKey(k){
 }
 function pinDel(){if(_pinBuffer.length>0){_pinBuffer=_pinBuffer.slice(0,-1);_updatePinDots();}}
 
+// ── PIN entry flow ───────────────────────────────────────────────
 async function _checkPin(){
   const stored=getAdminPin();
   const entered=_pinBuffer;
   _pinBuffer='';
 
   if(!stored){
-    // First time: setting the PIN — two-step confirm flow
+    // No PIN set yet: two-step set flow
     if(!window._pinStage){
       window._pinStage='confirm';window._pinFirst=entered;
       document.getElementById('lock-sub').textContent='Re-enter PIN to confirm.';
@@ -3060,7 +3074,7 @@ async function _checkPin(){
     if(entered===window._pinFirst){
       window._pinStage=null;window._pinFirst=null;
       await setAdminPin(entered);
-      _unlockAdmin(S.adminPin);
+      _doUnlock();
       toast('Admin PIN set ✓','ok');
     }else{
       window._pinStage=null;window._pinFirst=null;
@@ -3070,20 +3084,18 @@ async function _checkPin(){
     return;
   }
 
-  // Verify: hash the entered PIN and compare
-  // Backwards compat: if stored is 4 chars it's an old plaintext PIN — migrate it
+  // Verify PIN (backwards-compat: migrate 4-char plaintext to hash)
   let hash;
   if(stored.length===4){
-    // Old plaintext format — check directly, then migrate
     if(entered!==stored){_pinFail();return;}
     hash=await _hashPin(entered);
     S.adminPin=hash;
-    STORE.save(); // write the hashed version
+    STORE.save();
   }else{
     hash=await _hashPin(entered);
     if(hash!==stored){_pinFail();return;}
   }
-  _unlockAdmin(hash);
+  _doUnlock();
 }
 
 function _pinFail(){
@@ -3096,42 +3108,57 @@ function _pinFail(){
   },1800);
 }
 
-function _unlockAdmin(pinHash){
-  ADMIN_UNLOCKED=true;_pinBuffer='';_updatePinDots();
+// ── Lock / Unlock ────────────────────────────────────────────────
+function _showAdminLockOverlay(){
+  document.getElementById('admin-lock').classList.add('open');
+}
+function _hideAdminLockOverlay(){
   document.getElementById('admin-lock').classList.remove('open');
+}
+
+function _doUnlock(){
+  ADMIN_UNLOCKED=true;
+  _pinBuffer='';_updatePinDots();
+  _setDeviceLocked(false);   // persist unlocked state locally
+  _hideAdminLockOverlay();
   const lb=document.getElementById('lock-btn');
   if(lb)lb.style.display=getAdminPin()?'inline-block':'none';
   updatePinStatus();
-  // Save device session so this device doesn't need to re-enter for 12h
-  if(pinHash)_saveDeviceSession(pinHash);
 }
 
 function lockAdmin(){
   if(!getAdminPin()){toast('Set a PIN first (Setup tab → Admin PIN)','warn');return;}
   ADMIN_UNLOCKED=false;
-  _clearDeviceSession();
-  document.getElementById('admin-lock').classList.add('open');
+  _setDeviceLocked(true);    // persist locked state locally
   document.getElementById('lock-sub').textContent='Enter your admin PIN to continue.';
   document.getElementById('lock-sub').style.color='';
   _pinBuffer='';_updatePinDots();
   const lb=document.getElementById('lock-btn');if(lb)lb.style.display='none';
+  _showAdminLockOverlay();
 }
 
+// ── Called after state is restored (init, _applyRemote first load) ──
 function checkAdminAccess(){
   if(PLAYER_MODE)return;
   const pin=getAdminPin();
   const sub=document.getElementById('lock-sub');
-  // Auto-unlock if this device has a valid session token for this room
-  if(pin&&_checkDeviceSession(pin)){
-    _unlockAdmin(null); // null = don't re-save session (already valid)
+
+  if(!pin){
+    // No PIN — open access, show set-PIN prompt
+    if(sub)sub.textContent='Set a 4-digit PIN to protect admin access.';
+    _showAdminLockOverlay();
     return;
   }
-  if(!pin){
-    if(sub)sub.textContent='Set a 4-digit PIN to protect admin access.';
-  }else{
+
+  // PIN is set: check persistent device lock state
+  if(_isDeviceLocked()){
     if(sub){sub.textContent='Enter your admin PIN to continue.';sub.style.color='';}
+    _showAdminLockOverlay();
+    return;
   }
-  document.getElementById('admin-lock').classList.add('open');
+
+  // Not locked (was previously unlocked on this device)
+  _doUnlock();
 }
 
 function updatePinStatus(){
@@ -3141,14 +3168,15 @@ function updatePinStatus(){
   el.style.color=pin?'var(--gr)':'var(--or)';
 }
 
+// ── PIN setup modal ──────────────────────────────────────────────
 function openPinSetupModal(){
   const pin=getAdminPin();
   openModal(`<div class="modal-title">🔐 Admin PIN ${pin?'Change':'Setup'}</div>
     <p style="font-size:.76rem;color:var(--mu);margin-bottom:12px;line-height:1.55">
-      ${pin?'Enter your current PIN, then set a new one.':'Set a 4-digit PIN. Required every time the app is opened.'}
+      ${pin?'Enter your current PIN, then set a new one.':'Set a 4-digit PIN. Required every time the app is opened on a new device.'}
     </p>
     ${pin?`<label>CURRENT PIN</label>
-    <input id="cur-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:8px;letter-spacing:6px;text-align:center;font-size:1.2rem"/>`:''}
+    <input id="cur-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:8px;letter-spacing:6px;text-align:center;font-size:1.2rem"/>`:``}
     <label>NEW PIN (4 digits)</label>
     <input id="new-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:8px;letter-spacing:6px;text-align:center;font-size:1.2rem"/>
     <label>CONFIRM NEW PIN</label>
@@ -3157,29 +3185,60 @@ function openPinSetupModal(){
       <button class="btn bp" style="flex:2" onclick="_savePinModal()">Save PIN</button>
       ${pin?`<button class="btn bd2 sm" onclick="_removePinModal()">Remove PIN</button>`:''}
       <button class="btn bg2 sm" onclick="closeModal()">Cancel</button>
-    </div>`);
+    </div>
+    ${pin?`<div class="dv" style="margin:12px 0"></div>
+    <div style="font-size:.72rem;color:var(--re);font-weight:700;margin-bottom:4px">⚠️ RESET PIN FOR ALL DEVICES</div>
+    <button class="btn bd2 sm" style="width:100%" onclick="_resetPinAllDevices()">Reset PIN (affects all devices)</button>`:''}
+  `);
 }
 
-function _removePinModal(){
-  const cur=(document.getElementById('cur-pin')?.value||'').trim();
-  const stored=getAdminPin();
-  if(cur!==stored){toast('Current PIN is wrong','err');return;}
-  showCfm('Remove admin PIN? Anyone will be able to access admin mode.','Remove PIN','bd2',()=>{
-    setAdminPin('');ADMIN_UNLOCKED=true;closeModal();updatePinStatus();toast('PIN removed','warn');
-  });
-}
-
-function _savePinModal(){
+async function _removePinModal(){
   const stored=getAdminPin();
   if(stored){
     const cur=(document.getElementById('cur-pin')?.value||'').trim();
-    if(cur!==stored){toast('Current PIN is wrong','err');return;}
+    const curHash=await _hashPin(cur);
+    if(curHash!==stored){toast('Current PIN is wrong','err');return;}
+  }
+  showCfm('Remove admin PIN? Anyone will be able to access admin mode.','Remove PIN','bd2',()=>{
+    S.adminPin='';
+    STORE.save();
+    _setDeviceLocked(false);
+    ADMIN_UNLOCKED=true;
+    _hideAdminLockOverlay();
+    closeModal();
+    updatePinStatus();
+    toast('PIN removed','warn');
+  });
+}
+
+async function _savePinModal(){
+  const stored=getAdminPin();
+  if(stored){
+    const cur=(document.getElementById('cur-pin')?.value||'').trim();
+    const curHash=await _hashPin(cur);
+    if(curHash!==stored){toast('Current PIN is wrong','err');return;}
   }
   const p1=(document.getElementById('new-pin')?.value||'').trim();
   const p2=(document.getElementById('conf-pin')?.value||'').trim();
   if(!/^\d{4}$/.test(p1)){toast('PIN must be exactly 4 digits','err');return;}
   if(p1!==p2){toast('PINs do not match','err');return;}
   setAdminPin(p1);closeModal();updatePinStatus();toast('Admin PIN updated ✓','ok');
+}
+
+// Reset PIN globally — forces all devices to re-enter PIN on next access
+function _resetPinAllDevices(){
+  showCfm(
+    '<strong>Reset PIN for ALL devices?</strong><br/><span style="font-size:.73rem;color:var(--mu)">Every connected device will be locked out until a new PIN is set. This affects the shared room immediately.</span>',
+    '🔑 Reset PIN','bd2',()=>{
+      S.adminPin='';
+      STORE.save();                    // pushes null PIN to Firebase — affects all devices
+      _setDeviceLocked(false);         // this device: clear lock state (will show set-PIN prompt)
+      ADMIN_UNLOCKED=false;
+      closeModal();
+      checkAdminAccess();              // show the lock overlay with set-PIN prompt
+      toast('Admin PIN reset — all devices will require a new PIN','warn',5000);
+    }
+  );
 }
 
 
