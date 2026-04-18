@@ -780,6 +780,32 @@ const SYNC={
       const adminPinVal=(typeof remote.meta?.adminPin!=='undefined')?remote.meta.adminPin:
                         (typeof remote.adminPin!=='undefined'?remote.adminPin:'');
       const localTs=S._lastSaveTs||0;
+
+      // ── First-load reconcile ──────────────────────────────────
+      // Compare Firebase timestamp against local backup timestamp.
+      // If local backup is clearly newer (e.g. offline edits), push local to Firebase
+      // instead of overwriting with stale remote data.
+      if(isFirstLoad&&remoteTs>0){
+        const localBackupTs=_getLocalBackup()?.savedAt||0;
+        if(localBackupTs>remoteTs+5000){
+          // Local is more than 5s newer — we have offline changes Firebase doesn't know about
+          console.log(`[sync] Local backup (${localBackupTs}) is newer than Firebase (${remoteTs}) — pushing local state up`);
+          // Don't apply remote; push our current local state to Firebase instead
+          setTimeout(()=>STORE.save('all'),200);
+          // Still do the first-load housekeeping (hide overlay, etc.) below
+          // by falling through with remote=local sentinel
+          const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
+          if(_pageFirstLoad&&S.session?.status==='active'&&!PLAYER_MODE){
+            switchTab('live');startElapsed();updateProgress();
+          }
+          _pageFirstLoad=false;
+          checkAdminAccess();
+          _renderActiveTab();
+          return;
+        }
+      }
+      // ─────────────────────────────────────────────────────────
+
       const isStale=!isFirstLoad&&remoteTs>0&&remoteTs<localTs-2000;
       if(isStale){
         console.warn(`[sync] Rejected stale remote write (remote _ts ${remoteTs} < local ${localTs})`);
@@ -829,7 +855,7 @@ const SYNC={
           });
           // Remove from queue any players who are now confirmed on a court
           const onCourtIds=new Set(Object.values(S.session.cfCourts)
-            .filter(ct=>ct.status==='playing'&&ct.match)
+            .filter(ct=>ct&&ct.status==='playing'&&ct.match)
             .flatMap(ct=>[...ct.match.t1,...ct.match.t2]));
           if(onCourtIds.size)S.session.cfQueue=(S.session.cfQueue||[]).filter(q=>!onCourtIds.has(q.id));
         }
@@ -968,8 +994,8 @@ const SYNC={
 
 /* § STORE */
 const STORE={
-  // segment: 'session' | 'db' | 'archive' | 'all' (default)
   save(segment='all'){
+    _backupToLocal(); // snapshot locally on every save — Firebase confirm updates timestamp
     SYNC.push(segment);
     _setSaveStatus('saving');
   }
@@ -2070,7 +2096,7 @@ function renderSessStd(){
     const d=sp.sRating-sp.startRating,pd=sp.ptsFor-sp.ptsAgainst;
     const nrTag=sp.isNR?`<span class="nr-badge">NR</span>`:sp.isSeeding?`<span class="nr-seed">~${Math.round(sp.sRating)}</span>`:'';
     // Court indicator only relevant when live
-    const onCourt=(!isFinal&&sess.cfMode)?Object.values(sess.cfCourts||{}).find(c=>c.match&&[...c.match.t1,...c.match.t2].includes(sp.id)):null;
+    const onCourt=(!isFinal&&sess.cfMode)?Object.values(sess.cfCourts||{}).find(c=>c&&c.match&&[...c.match.t1,...c.match.t2].includes(sp.id)):null;
     const courtTag=onCourt?`<span style="font-size:.6rem;color:var(--cy);background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.25);border-radius:4px;padding:1px 4px;margin-left:3px">▶C${onCourt.match?.courtNum||''}</span>`:'';
     const rtgCell=sp.isNR?'NR':Math.round(sp.sRating);
     const sos=sosMap[sp.id];
@@ -4281,9 +4307,9 @@ const CF={
 
     // Avg idle time per court between matches (= score-entry + confirm delay, per court per match)
     const courtData=Object.values(S.session.cfCourts||{});
-    const totalIdleMs=courtData.reduce((s,c)=>s+(c.totalIdleMs||0),0);
-    const totalStarts=courtData.reduce((s,c)=>s+(c.matchCount||0),0);
-    const liveIdleMs=courtData.filter(c=>c.status==='ready'&&c.idleStart)
+    const totalIdleMs=courtData.reduce((s,c)=>s+((c&&c.totalIdleMs)||0),0);
+    const totalStarts=courtData.reduce((s,c)=>s+((c&&c.matchCount)||0),0);
+    const liveIdleMs=courtData.filter(c=>c&&c.status==='ready'&&c.idleStart)
       .reduce((s,c)=>s+(Date.now()-c.idleStart),0);
     const avgIdleMin=totalStarts>0
       ?Math.round((totalIdleMs+liveIdleMs)/totalStarts/60000*10)/10:null;
@@ -4469,16 +4495,17 @@ function cfMaybeAutoConfirm(courtNum){
    Offered on loading screen if Firebase fails to connect.
 ──────────────────────────────────────────────────────────────────── */
 function _backupToLocal(){
-  if(!S.session)return;
+  // Always save — even when session is null (db + archive must survive reload)
   try{
     localStorage.setItem('pb_local_backup',JSON.stringify({
-      session:JSON.parse(JSON.stringify(S.session)),
-      db:JSON.parse(JSON.stringify(S.db)),
+      db:JSON.parse(JSON.stringify(S.db||[])),
+      session:S.session?JSON.parse(JSON.stringify(S.session)):null,
       archive:JSON.parse(JSON.stringify(S.archive||[])),
+      checkedIn:[...S.checkedIn],
       savedAt:Date.now(),
       roomId:SYNC.roomId||localStorage.getItem('pb_room_id')||'?'
     }));
-  }catch(e){console.warn('Local backup failed:',e);}
+  }catch(e){console.warn('[backup] Local backup failed:',e);}
 }
 
 function _getLocalBackup(){
@@ -4502,14 +4529,60 @@ function _restoreFromLocal(){
   if(!b){toast('No local backup found','err');return;}
   S.session=b.session;S.db=b.db;S.archive=b.archive||[];
   S.checkedIn.clear();
+  (b.checkedIn||[]).forEach(id=>S.checkedIn.add(id));
   S.session?.activePlayers?.forEach(id=>S.checkedIn.add(id));
   const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
-  renderDB();renderRoster();renderHistory();renderArchive();renderLive();
+  renderDB();renderRoster();renderHistory();renderArchive();renderLive();renderStandings();
   updateHeader();updatePinStatus();_updateRoomBadge();
   _setSaveStatus('offline');
   toast('📦 Session restored from local backup — working offline','ok',5000);
-  // Attempt to reconnect silently in background
   setTimeout(()=>{if(!SYNC.ready)SYNC.autoConnect();},8000);
+}
+
+// Called automatically on every page load before Firebase connects.
+// Gives the app its last-known state immediately so it's never blank on reload.
+// Returns true if a valid backup was found and applied.
+function _autoRestoreFromLocal(){
+  const b=_getLocalBackup();
+  if(!b||!b.db)return false;
+  const roomId=localStorage.getItem('pb_room_id');
+  const ageMs=Date.now()-(b.savedAt||0);
+  // Discard if older than 48 h or belongs to a different room
+  if(ageMs>48*3600*1000){console.log('[backup] Local snapshot too old, skipping');return false;}
+  if(b.roomId&&roomId&&b.roomId!==roomId){console.log('[backup] Snapshot is for a different room, skipping');return false;}
+
+  // Apply snapshot into S
+  S.db=b.db||[];
+  S.session=b.session||null;
+  S.archive=b.archive||[];
+  S.checkedIn.clear();
+  (b.checkedIn||[]).forEach(id=>S.checkedIn.add(id));
+  if(S.session?.activePlayers)S.session.activePlayers.forEach(id=>S.checkedIn.add(id));
+
+  // Pre-fill courts/extendedMin from session if active
+  if(S.session?.status==='active'){
+    S.courts=S.session.courts||1;
+    S.extendedMin=S.session.extendedMin||16;
+  }
+
+  // Render immediately with local data — loading overlay stays up while Firebase syncs
+  try{
+    renderDB();renderRoster();renderHistory();renderArchive();renderStandings();
+    updateHeader();updatePinStatus();
+    if(S.session?.status==='active') renderLive();
+  }catch(e){
+    // Corrupt backup — clear it and fall through to normal Firebase load
+    console.error('[backup] Corrupt local snapshot, clearing:',e);
+    localStorage.removeItem('pb_local_backup');
+    S.db=[];S.session=null;S.archive=[];S.checkedIn.clear();
+    return false;
+  }
+
+  const mins=Math.round(ageMs/60000);
+  const ago=mins<=0?'just now':`${mins}m ago`;
+  console.log(`[backup] Auto-restored local snapshot from ${ago}`);
+  _setSaveStatus('saving'); // will update to 'saved' once Firebase confirms
+  return true;
 }
 
 /* ── Item 1+5: Connection state + save confirmation + write retry ──
@@ -4951,6 +5024,10 @@ function init(){
   document.getElementById('cfm-bg').addEventListener('click',function(e){if(e.target===this)document.getElementById('cfm-no').click();});
   initPlayerMode();
   _updateRoomBadge();
+
+  // Auto-restore local snapshot immediately — app is usable before Firebase responds
+  const _didRestore=_autoRestoreFromLocal();
+
   SYNC._updateBadge('connecting');
   SYNC.autoConnect();
 }
