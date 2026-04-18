@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+<meta http-equiv="Pragma" content="no-cache"/>
+<meta http-equiv="Expires" content="0"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>🏓 Pickleball Ladder V20</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet"/>
@@ -118,7 +121,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--tx);min-h
 
 /* LAYOUT */
 #mc{max-width:1080px;margin:0 auto;padding:12px 12px 50px}
-.tp{display:none}.tp.on{display:block}
+.tp{display:none!important}.tp.on{display:block!important}.tp-forced-hide{display:none!important}
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
 @media(max-width:600px){.g2{grid-template-columns:1fr}}
 
@@ -3505,14 +3508,14 @@ function switchTab(id){
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
   document.querySelectorAll('.tp').forEach(p=>{
     p.classList.remove('on');
-    p.style.display='none'; // explicit override — belt and braces
+    p.setAttribute('style','display:none!important'); // belt-and-braces: force via attribute
   });
   const tabBtn=document.querySelector(`[data-tab="${id}"]`);
   if(tabBtn) tabBtn.classList.add('on');
   const tabEl=document.getElementById(`tab-${id}`);
   if(!tabEl){console.error('Tab not found: tab-'+id);return;}
   tabEl.classList.add('on');
-  tabEl.style.display='block'; // explicit override
+  tabEl.setAttribute('style','display:block'); // clear the force-none, .on CSS takes over
   // Always re-render on every switch to pick up latest data
   if(id==='standings'){renderStandings();}
   if(id==='history'){renderHistory();renderArchive();}
@@ -4058,21 +4061,35 @@ const CF={
         const subRaw=remaining.slice(0,Math.min(12,remaining.length));
         // Anchor: pinned > 0-game first-timer > MGL player (matchGap>=4)
         // Same logic as _generateSingleSuggestion — ensures MGL is honoured in all paths
-        const subAnchor=subRaw.find(p=>
+        const subPriority=subRaw.filter(p=>
           (S.session.cfPinnedIds||[]).includes(p.id)||
           (gsp(p.id)?.matchesPlayed||0)===0||
           this.matchGap(p.id)>=4
         );
         let best=null;
-        if(subAnchor){
-          const subOthers=subRaw.filter(p=>p.id!==subAnchor.id);
-          const so=subOthers.length;
-          let bScore=Infinity;
-          for(let i=0;i<so-2;i++)for(let j=i+1;j<so-1;j++)for(let k=j+1;k<so;k++){
-            const g=[subAnchor,subOthers[i],subOthers[j],subOthers[k]];
+        // Try all-priority group first (same logic as single-court path)
+        if(subPriority.length>=4){
+          const sp2=subPriority.slice(0,Math.min(8,subPriority.length));
+          const spn=sp2.length;let bScore=Infinity;
+          for(let i=0;i<spn-3;i++)for(let j=i+1;j<spn-2;j++)for(let k=j+1;k<spn-1;k++)for(let l=k+1;l<spn;l++){
+            const g=[sp2[i],sp2[j],sp2[k],sp2[l]];
             const res=this._scoreGroup(g,mustSplit);
             if(!this._withinTeamGapOk(res.t1,res.t2,600))continue;
             if(res.score<bScore){bScore=res.score;best={...res,group:g};}
+          }
+        }
+        // Fallback: single anchor + best 3
+        if(!best){
+          const subAnchor=subPriority[0]||null;
+          if(subAnchor){
+            const subOthers=subRaw.filter(p=>p.id!==subAnchor.id);
+            const so=subOthers.length;let bScore=Infinity;
+            for(let i=0;i<so-2;i++)for(let j=i+1;j<so-1;j++)for(let k=j+1;k<so;k++){
+              const g=[subAnchor,subOthers[i],subOthers[j],subOthers[k]];
+              const res=this._scoreGroup(g,mustSplit);
+              if(!this._withinTeamGapOk(res.t1,res.t2,600))continue;
+              if(res.score<bScore){bScore=res.score;best={...res,group:g};}
+            }
           }
         }
         if(!best)best=this._findBestGroup(subRaw,mustSplit,nrIds,n);
@@ -4298,12 +4315,33 @@ const CF={
     const tier2pIds=new Set(tier2p.map(p=>p.id));
     const tier3p=pool.filter(p=>!tier0pIds.has(p.id)&&!tier1pIds.has(p.id)&&!tier2pIds.has(p.id));
     const orderedPool=[...tier0p,...tier1p,...tier2p,...tier3p];
-    // Anchor: any player in tier0 (pinned), tier1 (0-game), or tier2 (MGL>=4) must be served.
-    // Use the highest-priority unserved player as a forced anchor.
+    // Priority pool: pinned + 0-game + MGL-waiters
+    const priorityPool=orderedPool.filter(p=>
+      pinnedSg.has(p.id)||
+      (gsp(p.id)?.matchesPlayed||0)===0||
+      this.matchGap(p.id)>=4
+    );
+    // STEP 1: If 4+ priority players exist, try pairing them ALL together first.
+    // This prevents priority players from being spread thin (1 per court as anchor).
+    // E.g. 4 NR players all waiting → let them play each other rather than being
+    // split across 4 courts as anchors paired with already-played players.
+    if(priorityPool.length>=4){
+      const pp=priorityPool.slice(0,Math.min(8,priorityPool.length));
+      const pn=pp.length;
+      let best=null,bestScore=Infinity;
+      for(let i=0;i<pn-3;i++)for(let j=i+1;j<pn-2;j++)for(let k=j+1;k<pn-1;k++)for(let l=k+1;l<pn;l++){
+        const group=[pp[i],pp[j],pp[k],pp[l]];
+        const res=this._scoreGroup(group,mustSplit);
+        if(!this._withinTeamGapOk(res.t1,res.t2,600))continue;
+        if(res.score<bestScore){bestScore=res.score;best={...res,group};}
+      }
+      if(best){this._storeSuggestion(courtNum,best,finishedMatch);return;}
+    }
+    // STEP 2: If <4 priority players, anchor the highest-priority one + best 3 from pool
     const anchor=orderedPool.find(p=>
-      pinnedSg.has(p.id)||                          // pinned
-      (gsp(p.id)?.matchesPlayed||0)===0||           // never played  
-      this.matchGap(p.id)>=4                        // missed 4+ matches
+      pinnedSg.has(p.id)||
+      (gsp(p.id)?.matchesPlayed||0)===0||
+      this.matchGap(p.id)>=4
     );
     if(anchor){
       const others=orderedPool.filter(p=>p.id!==anchor.id).slice(0,15);
@@ -4480,7 +4518,9 @@ const CF={
     // Log
     if(!S.session.cfLog)S.session.cfLog=[];
     S.session.cfLog.push({...m});
-    // Return all 4 to queue with stagger (0–15s offsets to desync simultaneous finishes)
+    // Return all 4 to queue. Stagger by 0-12s to break priority ties only.
+    // NO short-game boost: we don't want players playing consecutively.
+    // If they just finished a match they go to back of queue naturally (0 wait time).
     const prevCourt=S.session.cfCourts[courtNum]||{};
     S.session.cfCourts[courtNum]={status:'ready',match:null,
       idleStart:Date.now(),
@@ -4488,9 +4528,9 @@ const CF={
       matchCount:(prevCourt.matchCount||0)+1};
     [...m.t1,...m.t2].forEach((id,idx)=>{
       if((S.session.cfPaused||[]).find(q=>q.id===id))return;
-      if(S.session.cfQueue.find(q=>q.id===id))return; // guard: no double-push on duplicate event
+      if(S.session.cfQueue.find(q=>q.id===id))return;
       const staggerMs=idx*4000;
-      const boostMs=shortGame?5*60000:0;
+      const boostMs=0; // No boost — prevents consecutive play
       // Record pair last-at at queue re-entry — cooldown counts from HERE, not game-end
       // This ensures gamesSinceA starts at 0 when they re-enter and counts up correctly
       [st1k,st2k].forEach(pk=>{
