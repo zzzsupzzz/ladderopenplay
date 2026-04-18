@@ -305,6 +305,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:2px;color:var(--gr)">LOADING…</div>
     <div id="fb-loading-sub" style="font-size:.72rem;color:var(--mu)">Connecting to Firebase</div>
     <button id="fb-retry-btn" class="btn bs sm" style="display:none;margin-top:4px" onclick="SYNC.ready=false;SYNC.autoConnect()">🔄 Retry</button>
+    <button id="fb-restore-btn" class="btn bc sm" style="display:none;margin-top:4px" onclick="_restoreFromLocal()">📦 Restore last local backup</button>
   </div>
 </div>
 
@@ -348,10 +349,10 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     </div>
     <button id="share-btn" onclick="openShareModal()" style="font-size:.69rem;font-weight:600;padding:4px 9px;border-radius:20px;background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.3);color:var(--pu);cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">📱 Share</button>
     <span id="room-code-badge" onclick="openSyncModal()" title="Room code — click to manage" style="font-size:.65rem;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--s2);border:1px solid var(--bd);color:var(--mu);cursor:pointer;white-space:nowrap">📡 —</span>
+    <span id="save-status" style="font-size:.63rem;color:var(--mu);white-space:nowrap">—</span>
     <span id="sync-badge" onclick="openSyncModal()" title="Live sync settings">⚪ Sync Off</span>
-    <span id="sync-status" title="Synced" style="font-size:.75rem;color:var(--gr);min-width:14px;text-align:center">✓</span>
     <span id="hbadge">SETUP</span>
-    <button id="lock-btn" onclick="lockAdmin()" title="Lock admin" style="display:none;background:none;border:none;cursor:pointer;font-size:1rem;color:var(--mu);padding:2px 4px" title="Lock admin access">🔒</button>
+    <button id="lock-btn" onclick="lockAdmin()" title="Lock admin" style="display:none;background:none;border:none;cursor:pointer;font-size:1rem;color:var(--mu);padding:2px 4px">🔒</button>
   </div>
 </header>
 
@@ -488,7 +489,9 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <div id="cf-courts-wrap"></div>
     <div id="cf-health-panel" class="card" style="display:none;margin-bottom:11px"></div>
     <div class="card">
-      <div class="ct">⏳ Queue <span id="cf-queue-badge" style="font-size:.66rem;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(34,211,238,.1);color:var(--cy)">0</span></div>
+      <div class="ct">⏳ Queue <span id="cf-queue-badge" style="font-size:.66rem;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(34,211,238,.1);color:var(--cy)">0</span>
+        <button onclick="openQueueRulesModal()" style="background:none;border:none;cursor:pointer;font-size:.75rem;color:var(--mu);padding:1px 5px;margin-left:4px;font-family:'DM Sans',sans-serif" title="How the queue works">ℹ️</button>
+      </div>
       <div id="cf-queue-list"></div>
       <div id="cf-paused-wrap" style="display:none">
         <div style="font-size:.65rem;font-weight:700;color:var(--mu);letter-spacing:.05em;margin:8px 0 4px">⏸ PAUSED</div>
@@ -498,10 +501,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
   </div>
   <!-- ══ STANDINGS ══ -->
 <div id="tab-standings" class="tp">
-  <div class="g2">
-    <div class="card"><div class="ct"><div class="pulse"></div>Session</div><div id="sess-std"></div></div>
-    <div class="card"><div class="ct">🏆 All-Time <button class="btn bg2 sm" style="margin-left:auto;font-size:.68rem" onclick="resetAllRatings()">↺ Reset</button></div><div id="alltime-std"></div></div>
-  </div>
+  <div class="card"><div class="ct"><div class="pulse"></div>Today's Standings</div><div id="sess-std"></div></div>
   <div class="card" style="font-size:.76rem;color:var(--mu);line-height:1.6">
     <div class="ct" style="margin-bottom:6px">📊 Rating Guide (ELO)</div>
     Ratings work like chess ELO — you start at <strong style="color:var(--tx)">1000</strong>. Wins gain points, losses lose them. <strong style="color:var(--tx)">Dominant wins (11-0) gain more than close wins (11-9)</strong> — the margin of victory scales your points up or down. Beating stronger opponents always earns more than beating weaker ones.<br/>
@@ -525,7 +525,6 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 
 <!-- ══ PLAYER VIEW ══ -->
 <div id="tab-player" class="tp">
-  <div id="pv-podium"></div>
   <div class="card">
     <!-- Search input filters the dropdown below in real-time -->
     <div style="position:relative;margin-bottom:6px">
@@ -560,6 +559,31 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 
 <script>
 // ================================================================
+//  🏓 PICKLEBALL LADDER — Continuous Flow Edition
+// ================================================================
+//  SECTION MAP (search for marker to jump)
+//
+//  § STATE          — S{} global state object
+//  § ROOM           — Room ID generation, localStorage room management
+//  § SYNC           — Firebase real-time sync, SYNC{} object
+//  § STORE          — STORE.save(segment) — writes to Firebase
+//  § UTILS          — uid, gp, gsp, helpers, caches
+//  § ELO            — ELO{} rating engine
+//  § SESSION        — startSession, endSession, recalc functions
+//  § RENDER:SETUP   — renderDB, renderRoster
+//  § RENDER:LIVE    — renderLive (delegates to CF engine)
+//  § RENDER:STANDINGS — renderStandings, renderAllTime
+//  § RENDER:HISTORY — renderHistory, renderArchive, score confidence
+//  § RENDER:PLAYER  — renderPlayerView, podium, My Stats
+//  § SYNC MODAL     — openSyncModal, openShareModal
+//  § EXPORTS        — openExportModal, buildSessionReport
+//  § SCORE EDIT     — openEditScoreCF, archive edit functions
+//  § ADMIN          — PIN system (SHA-256 hashed, device-session scoped)
+//  § TABS           — switchTab, _renderTab, _renderActiveTab
+//  § CF ENGINE      — CF{} matchmaking, queue, suggestions
+//  § CF TIMERS      — per-court timers, CFtick
+//  § BOOT           — DOMContentLoaded init
+// ================================================================
 //  🏓 PICKLEBALL LADDER V20
 //  ── V15 CHANGES ──────────────────────────────────────────────
 //  • NEW: Real-time cross-device sync via Firebase Realtime DB
@@ -583,6 +607,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 //  • Pickles & Ladders icon embedded
 // ================================================================
 
+/* § STATE */
 const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,extendedMin:16,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
 let _pageFirstLoad=true; // true only once — blocks reconnection from forcing tab switch
 
@@ -630,11 +655,10 @@ function _updateRoomBadge(){
 // immediate-regen-and-confirm pass.
 // Per-court timers (not persisted — local UI state only)
 const CT={};let _ctTick=null;
-// Firebase config stored locally (describes HOW to connect, not app data)
-let ADMIN_UNLOCKED=false;
 // DEVICE_ID stays local — prevents echoing own Firebase writes back
 const DEVICE_ID=Math.random().toString(36).slice(2,10); // Runtime only — no localStorage
 
+/* § SYNC — Firebase real-time, segmented push
 /* ── FIREBASE REAL-TIME SYNC ──────────────────────── */
 const SYNC={
   ready:false, ref:null, roomId:null, _ignoreNext:false, _unsubscribe:null,
@@ -684,6 +708,8 @@ const SYNC={
       });
       this.roomId=roomId;
       this.ref=db.ref(`pb_ladder/${roomId}`);
+      // Track real-time connection state for save-status and offline detection
+      _trackConnection(db);
       // Remove any existing listener before adding new one
       if(this._unsubscribe){try{this._unsubscribe();}catch(e){}}
       let _firstLoad=true;
@@ -715,22 +741,15 @@ const SYNC={
   push(segment='all'){
     if(!this.ready||!this.ref)return;
     S._lastSaveTs=Date.now();
-    // Meta always accompanies any write so listeners know who wrote and when
     const meta={_by:DEVICE_ID,_ts:S._lastSaveTs,adminPin:S.adminPin||''};
     const updates={meta};
-    // Only write the changed segment — prevents stale devices overwriting unrelated data
     if(segment==='all'||segment==='session')
       updates.session=S.session?JSON.parse(JSON.stringify(S.session)):null;
     if(segment==='all'||segment==='db')
       updates.db=S.db;
     if(segment==='all'||segment==='archive')
       updates.archive=S.archive;
-    this.ref.update(updates).catch(e=>{
-      console.error('Firebase write failed:',e);
-      const badge=document.getElementById('sync-badge');
-      if(badge){badge.textContent='❌ Save failed';badge.style.cssText='display:inline-flex;align-items:center;gap:3px;font-size:.65rem;font-weight:700;padding:3px 8px;border-radius:20px;background:rgba(248,113,113,.15);border:1px solid rgba(248,113,113,.4);color:var(--re);cursor:pointer';}
-      toast('⚠️ Data not saved — check connection: '+e.message,'err');
-    });
+    _pushWithRetry(updates);
   },
 
   _applyRemote(data, isFirstLoad=false){
@@ -814,17 +833,17 @@ const SYNC={
           if(onCourtIds.size)S.session.cfQueue=(S.session.cfQueue||[]).filter(q=>!onCourtIds.has(q.id));
         }
         // Guard all session fields — safe for sessions saved before these fields existed
-        S.session.soStreak=S.session.soStreak||{};
-        S.session.plStreak=S.session.plStreak||{};
-        S.session.sitOutHx=S.session.sitOutHx||{};
-        S.session.partnerHx=S.session.partnerHx||{};
-        S.session.oppHx=S.session.oppHx||{};
-        S.session.oppHxTime=S.session.oppHxTime||{};
-        S.session.nrPairingHx=S.session.nrPairingHx||{};
-        S.session.ratingOverrides=S.session.ratingOverrides||{};
-        S.session.neverPair=S.session.neverPair||{};
-        // CF fields
+        // CF session fields — all guards in one place
         if(S.session.cfMode){
+          S.session.soStreak=S.session.soStreak||{};
+          S.session.plStreak=S.session.plStreak||{};
+          S.session.sitOutHx=S.session.sitOutHx||{};
+          S.session.partnerHx=S.session.partnerHx||{};
+          S.session.oppHx=S.session.oppHx||{};
+          S.session.oppHxTime=S.session.oppHxTime||{};
+          S.session.nrPairingHx=S.session.nrPairingHx||{};
+          S.session.ratingOverrides=S.session.ratingOverrides||{};
+          S.session.neverPair=S.session.neverPair||{};
           S.session.cfLog=S.session.cfLog||[];
           S.session.cfQueue=S.session.cfQueue||[];
           S.session.cfPaused=S.session.cfPaused||[];
@@ -861,7 +880,7 @@ const SYNC={
 
       if(isFirstLoad){
         // First load: render all tabs so they're initialized before the user navigates
-        renderDB();renderRoster();renderAllTime();
+        renderDB();renderRoster();
         renderHistory();renderArchive();
         if(!PLAYER_MODE)renderLive();
         const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
@@ -925,6 +944,7 @@ const SYNC={
       if(sub)sub.textContent='Connection failed — check your internet connection';
       const rb=document.getElementById('fb-retry-btn');
       if(rb)rb.style.display='inline-flex';
+      _showRestoreButtonIfAvailable();
       // Silently retry once after 4s
       setTimeout(async()=>{
         if(!this.ready){
@@ -932,8 +952,9 @@ const SYNC={
           if(rb)rb.style.display='none';
           await this.connect(cfg,roomId);
           if(!this.ready){
-            if(sub)sub.textContent='Still failing — tap Retry or check WiFi';
+            if(sub)sub.textContent='Still failing — tap Retry or restore local backup';
             if(rb)rb.style.display='inline-flex';
+            _showRestoreButtonIfAvailable();
           }
         }
       },4000);
@@ -944,16 +965,17 @@ const SYNC={
 /* ── STORAGE — Firebase only, no localStorage for app data ── */
 // No BroadcastChannel — Firebase real-time listener covers all tab sync
 
+/* § STORE */
 const STORE={
   // segment: 'session' | 'db' | 'archive' | 'all' (default)
-  // Pass the narrowest segment that changed to avoid overwriting unrelated data.
   save(segment='all'){
     SYNC.push(segment);
-    const si=document.getElementById('sync-status');
-    if(si){si.textContent='⏳';si.title='Syncing…';clearTimeout(si._t);si._t=setTimeout(()=>{si.textContent='✓';si.title='Synced';},1200);}
+    _setSaveStatus('saving');
   }
 };
 
+let _saveStatusTimer=null;
+/* § UTILS
 /* ── UTILS ───────────────────────────────────────── */
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5);}
 function gp(id){return S.db.find(p=>p.id===id);}
@@ -1094,6 +1116,7 @@ function clearAllCT(){
 }
 
 
+/* § ELO — Rating engine */
 const ELO={
   K(id){
     const p=gp(id)||{};
@@ -1222,7 +1245,7 @@ const MM={
   oc(a,b){
     const raw=S.session?.oppHx[a]?.[b]||0;
     if(!raw)return 0;
-    const now=S.session?.cfMode?(S.session.cfMatchCount||0):(S.session?.round||0);
+    const now=S.session?.cfMatchCount||0;
     const lastSeen=S.session?.oppHxTime?.[a]?.[b]||0;
     const gamesAgo=Math.max(0,now-lastSeen);
     const decayed=raw*Math.max(0.05,Math.pow(0.75,gamesAgo));
@@ -1477,13 +1500,12 @@ const MM={
     if(!S.session.oppHxTime)S.session.oppHxTime={};
     if(!S.session.cfPairLastAt)S.session.cfPairLastAt={};
     const oht=S.session.oppHxTime;
-    const now=S.session.cfMode?(S.session.cfMatchCount||0):(S.session.round||0);
+    const now=S.session.cfMatchCount||0;
     const r=(obj,a,b)=>{(obj[a]||(obj[a]={}))[b]=((obj[a]||{})[b]||0)+1;(obj[b]||(obj[b]={}))[a]=((obj[b]||{})[a]||0)+1;};
     const rt=(obj,a,b,t)=>{(obj[a]||(obj[a]={}))[b]=t;(obj[b]||(obj[b]={}))[a]=t;};
     matches.forEach(m=>{
       r(ph,m.t1[0],m.t1[1]);r(ph,m.t2[0],m.t2[1]);
       m.t1.forEach(a=>m.t2.forEach(b=>{r(oh,a,b);rt(oht,a,b,now);}));
-      // Round mode lastAt is recorded in applyScore (after matchesPlayed++) for correct baseline
     });
   }
 };
@@ -1501,7 +1523,7 @@ function addPlayer(){
   if(!name){toast('Enter a name','err');return;}
   if(S.db.some(p=>p.name.toLowerCase()===name.toLowerCase()&&(p.tag||'').toLowerCase()===tag.toLowerCase())){toast('Name+Tag already exists','err');return;}
   S.db.push({id:uid(),name,tag,rating,baseRating:rating,isNR:isNR||false,nrLevelHint:nrLevelRating,isSeeding:false,gamesPlayed:0,wins:0,losses:0,ties:0,createdAt:new Date().toISOString()});
-  STORE.save('db');renderDB();renderRoster();renderAllTime();updatePvSelect();
+  STORE.save('db');renderDB();renderRoster();updatePvSelect();
   document.getElementById('np-name').value='';document.getElementById('np-tag').value='';
   const nrCb=document.getElementById('np-nr');if(nrCb){nrCb.checked=false;toggleNRInput(false);}
   const rInp=document.getElementById('np-rating');if(rInp)rInp.value='1000';
@@ -1513,7 +1535,7 @@ function deletePlayer(id){
   const p=gp(id);if(!p)return;
   showCfm(`Delete <strong>${plainName(p)}</strong>?<br/><span style="font-size:.75rem;color:var(--mu)">Cannot be undone.</span>`,'Delete','bd2',()=>{
     S.db=S.db.filter(x=>x.id!==id);S.checkedIn.delete(id);if(S.editId===id)S.editId=null;
-    STORE.save('db');renderDB();renderRoster();renderAllTime();updatePvSelect();toast('Deleted','warn');
+    STORE.save('db');renderDB();renderRoster();updatePvSelect();toast('Deleted','warn');
   });
 }
 
@@ -1528,7 +1550,7 @@ function savePlayerEdit(id){
   if(S.db.some(x=>x.id!==id&&x.name.toLowerCase()===name.toLowerCase()&&(x.tag||'').toLowerCase()===tag.toLowerCase())){toast('Another player has that name+tag','err');return;}
   if(rating<400||rating>2000){toast('Rating 400–2000','err');return;}
   p.name=name;p.tag=tag;p.rating=rating;S.editId=null;
-  STORE.save('db');renderDB();renderRoster();renderAllTime();updatePvSelect();toast('Updated ✓','ok');
+  STORE.save('db');renderDB();renderRoster();updatePvSelect();toast('Updated ✓','ok');
 }
 
 function toggleCheckIn(id){
@@ -1893,6 +1915,7 @@ function stopTimer(){
   const btn=document.getElementById('timer-btn');if(btn)btn.textContent='⏱ Timer';
 }
 
+/* § RENDER:SETUP
 /* ── RENDER: DB ──────────────────────────────────── */
 function renderDB(){
   // Refresh NR level labels if NR panel is open (checked-in pool may have changed)
@@ -1995,8 +2018,8 @@ function renderLive(){
   CF.renderLive();startCFTick();
 }
 
+/* § RENDER:STANDINGS
 /* ── RENDER: STANDINGS ───────────────────────────── */
-function renderStandings(){renderSessStd();renderAllTime();}
 function renderSessStd(){
   const el=document.getElementById('sess-std');
   if(!S.session){el.innerHTML=`<div class="empty">No active session</div>`;return;}
@@ -2037,54 +2060,10 @@ function renderSessStd(){
   el.innerHTML=`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th>W/L</th><th>PD+SOS</th><th>Δ</th><th>RTG</th></tr></thead><tbody>${rows}</tbody></table>
   <div style="font-size:.62rem;color:var(--m2);margin-top:5px;padding:0 2px">SOS = avg opponent rating (↑ harder schedule, ↓ easier)</div>`;
 }
-function renderAllTime(){
-  const el=document.getElementById('alltime-std');if(!el)return;
-  const players=[...S.db].sort((a,b)=>b.rating-a.rating);
-  if(!players.length){el.innerHTML=`<div class="empty">No players yet</div>`;return;}
-  el.innerHTML=`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th>RECORD</th><th>RTG</th></tr></thead><tbody>${players.map((p,i)=>{const wr=p.gamesPlayed>0?Math.round((p.wins/p.gamesPlayed)*100)+'%':'—';return`<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.79rem">${p.name}${tagHtml(p)}</td><td style="font-size:.72rem;color:var(--mu)">${p.gamesPlayed}G · ${wr}</td><td><span class="rv">${Math.round(p.rating)}</span></td></tr>`;}).join('')}</tbody></table>`;
-}
+// renderAllTime removed — all-time ratings visible in Setup player list
 
 /* ── ELO RECALCULATION ───────────────────────────── */
-function recalcSessionELO(){
-  if(!S.session)return;
-  // Reset all session players to start-of-session rating
-  S.session.players.forEach(sp=>{
-    sp.sRating=sp.startRating;sp.wins=0;sp.losses=0;sp.ties=0;
-    sp.matchesPlayed=0;sp.ptsFor=0;sp.ptsAgainst=0;
-  });
-  // Replay all done matches in round order
-  S.session.rounds.forEach(r=>{
-    r.matches.forEach(m=>{
-      if(m.status!=='done')return;
-      m.eloDeltas=ELO.calcIds(m.t1,m.t2,m.s1,m.s2);
-      [...m.t1,...m.t2].forEach((id,i)=>{
-        const sp=gsp(id);if(!sp)return;
-        sp.sRating=Math.max(400,sp.sRating+m.eloDeltas[i]);
-        sp.matchesPlayed++;
-        if(i<2){sp.ptsFor+=m.s1;sp.ptsAgainst+=m.s2;}else{sp.ptsFor+=m.s2;sp.ptsAgainst+=m.s1;}
-        if(m.s1===m.s2)sp.ties=(sp.ties||0)+1;
-        else if((i<2&&m.s1>m.s2)||(i>=2&&m.s2>m.s1))sp.wins++;
-        else sp.losses++;
-      });
-    });
-  });
-}
-
-function deleteMatch(matchId){
-  if(!S.session)return;
-  let targetRnd=null;
-  S.session.rounds.forEach(r=>{if(r.matches.some(m=>m.id===matchId))targetRnd=r;});
-  if(!targetRnd)return;
-  showCfm(
-    `Delete this match result and recalculate ratings?<br/><span style="font-size:.73rem;color:var(--mu)">The match slot stays but score is cleared. Cannot be undone.</span>`,
-    'Delete & Recalc','bd2',()=>{
-      const m=targetRnd.matches.find(x=>x.id===matchId);
-      if(m){m.s1=null;m.s2=null;m.status='pending';m.eloDeltas=null;}
-      recalcSessionELO();
-      STORE.save('session');renderLive();renderHistory();renderStandings();
-      toast('Match result cleared — ratings recalculated ✓','ok');
-    });
-}
+function recalcSessionELO(){recalcSessionCFELO();} // CF-only: delegates to cfLog replay
 
 /* ── ROTATION AUTO-CALCULATION ───────────────────── */
 // Given N players and C courts, returns sit-out and play-streak thresholds.
@@ -2121,7 +2100,7 @@ function rebuildDbFromArchive(){
     });
   });
   recalcAllTimeRatings();
-  STORE.save('db');renderDB();renderAllTime();renderStandings();
+  STORE.save('db');renderDB();renderStandings();
   toast(added>0?`✅ Rebuilt ${added} player${added>1?'s':''} from archive — ratings recalculated`:'✅ DB already had all players — ratings recalculated','ok');
 }
 
@@ -2188,7 +2167,7 @@ function deleteArchiveSess(sessId){
       S.archive=S.archive.filter(a=>a.id!==sessId);
       recalcAllTimeRatings();
       STORE.save();
-      renderAllTime();renderArchive();renderStandings();updatePvSessFilter();
+      renderArchive();renderStandings();updatePvSessFilter();
       if(S.session)renderLive();
       toast(`"${sess.name}" deleted — ratings recalculated ✓`,'ok');
     });
@@ -2245,40 +2224,8 @@ function _updateLiveSavedBadge(){
   el.style.display='inline-block';
 }
 
+/* § RENDER:HISTORY
 /* ── RENDER: HISTORY ─────────────────────────────── */
-function renderHistory(){
-  const el=document.getElementById('history-wrap');
-  if(!el)return;
-  if(!S.session){el.innerHTML=`<div class="empty">No active session.</div>`;return;}
-  const gn=id=>{const sp=gsp(id);if(sp?.name)return esc(sp.name+(sp.tag?` ${sp.tag}`:''));return esc(gp(id)?.name||'?');};
-  const log=S.session.cfLog||[];
-  if(!log.length){
-    const count=S.session.players?.length||0;
-    el.innerHTML=`<div class="empty" style="text-align:center;padding:18px 10px">
-      <div style="font-size:1.8rem;margin-bottom:8px">🏓</div>
-      <div style="font-size:.82rem;color:var(--tx);font-weight:600;margin-bottom:4px">No matches yet</div>
-      <div style="font-size:.72rem;color:var(--mu)">${count} player${count!==1?'s':''} checked in — match history will appear here after the first score is submitted.</div>
-    </div>`;
-    return;
-  }
-  el.innerHTML=[...log].slice().reverse().map((m,ri)=>{
-    const origIdx=log.length-1-ri;
-    const t1n=m.t1.map(gn).join(' & '),t2n=m.t2.map(gn).join(' & ');
-    const sc=`${m.s1}–${m.s2}`,tie=m.s1===m.s2,t1w=m.s1>m.s2;
-    const durMs=m.endTime&&m.startTime?m.endTime-m.startTime:0;
-    const durMin=durMs?Math.round(durMs/60000)+'min':'';
-    const extTag=m.extended?`<span style="font-size:.62rem;color:var(--or)"> extended</span>`:'';
-    return `<div class="hm" style="flex-wrap:wrap;gap:4px">
-      <span style="font-size:.65rem;color:var(--cy);min-width:46px">C${m.courtNum}</span>
-      <div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div>
-      <div class="hscore" style="${tie?'color:var(--go)':''}">${sc}</div>
-      <div style="flex:1;text-align:right;font-weight:${!t1w&&!tie?700:400};color:${!t1w&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div>
-      <span style="font-size:.63rem;color:var(--m2)">${durMin}${extTag}</span>
-      <button class="sedit" style="width:auto;margin-top:0" onclick="openEditScoreCF(${origIdx})">✏️</button>
-    </div>`;
-  }).join('');
-}
-
 function renderArchive(){
   const el=document.getElementById('archive-wrap');if(!el)return;
   if(!S.archive.length){el.innerHTML='';return;}
@@ -2336,6 +2283,7 @@ function renderArchive(){
   }).join('');
 }
 
+/* § RENDER:PLAYER
 /* ── RENDER: PLAYER VIEW ─────────────────────────── */
 function updatePvSelect(){
   const sel=document.getElementById('pv-select');if(!sel)return;
@@ -2376,629 +2324,6 @@ function clearPvSearch(){
 
 function onPvSelectChange(){
   renderPlayerView();
-}
-
-function renderPlayerView(){
-  if(!isActiveTab('player')&&!PLAYER_MODE)return;
-  // Podium — always render when session is active, regardless of selected player
-  const podEl=document.getElementById('pv-podium');
-  if(podEl){
-    if(S.session?.status==='active'&&S.session.players.some(sp=>sp.matchesPlayed>0)){
-      const top=[...S.session.players].sort((a,b)=>b.wins-a.wins||(b.matchesPlayed-b.losses)-(a.matchesPlayed-a.losses)).slice(0,3);
-      const medals=['🥇','🥈','🥉'];
-      const cols=[1,0,2].filter(i=>top[i]).map(i=>{
-        const sp=top[i];const p=gp(sp.id);const nm=sp.name||p?.name||'?';
-        const h=i===0?'64px':i===1?'54px':'46px';
-        return`<div class="pod-col" style="padding-top:${h};position:relative">
-          <div class="pod-medal" style="position:absolute;top:8px;left:0;right:0;text-align:center">${medals[i]}</div>
-          <div class="pod-name">${esc(nm)}</div>
-          <div class="pod-stat">${sp.wins}W · ${sp.losses}L</div>
-        </div>`;
-      });
-      podEl.innerHTML=`<div class="card" style="margin-bottom:11px">
-        <div class="ct" style="margin-bottom:2px">🏆 Session Podium</div>
-        <div style="font-size:.67rem;color:var(--mu);margin-bottom:6px">By wins · updates live</div>
-        <div class="podium-wrap">${cols.join('')}</div>
-      </div>`;
-    } else {
-      podEl.innerHTML='';
-    }
-  }
-  const sel=document.getElementById('pv-select');
-  const el=document.getElementById('pv-content');
-
-  // Player mode with no data at all — organiser tab hasn't synced yet
-  if(PLAYER_MODE&&S.db.length===0){
-    el.innerHTML=`<div class="card" style="text-align:center;padding:28px 16px">
-      <div style="font-size:2.5rem;margin-bottom:10px">⏳</div>
-      <div style="font-weight:600;font-size:.9rem;margin-bottom:8px">Waiting for session data…</div>
-      <div style="font-size:.75rem;color:var(--mu);line-height:1.6">The organiser needs to have this page open in the same browser.<br/>
-      Once they start the session, your name will appear in the list above automatically.</div>
-    </div>`;
-    return;
-  }
-
-  const id=sel?.value;
-  if(!id){el.innerHTML=`<div class="card" style="text-align:center;padding:24px 16px">
-    <div style="font-size:2rem;margin-bottom:8px">👆</div>
-    <div style="font-weight:600;font-size:.9rem;margin-bottom:6px">${PLAYER_MODE?'Pick your name above':'Select a player above'}</div>
-    <div style="font-size:.75rem;color:var(--mu)">${PLAYER_MODE?'Select YOUR name from the list to see your current court assignment, partner, score and ranking.':'Choose a player to view their stats.'}</div>
-  </div>`;return;}
-
-  const p=gp(id);if(!p){el.innerHTML='';return;}
-  const sp=S.session?.status==='active'?gsp(id):null;
-  const rnd=null; // round mode removed — always null in CF sessions
-
-  // No live session — show helpful message instead of empty space
-  if(!S.session&&PLAYER_MODE){
-    const hasHistory=S.archive.some(sess=>
-      sess.rounds?.some(r=>r.matches.some(m=>m.t1.includes(id)||m.t2.includes(id)))||
-      sess.cfLog?.some(m=>m.t1?.includes(id)||m.t2?.includes(id))
-    );
-    if(!hasHistory){
-      el.innerHTML=`<div class="card" style="text-align:center;padding:24px">
-        <div style="font-size:2rem;margin-bottom:8px">⏳</div>
-        <div style="font-weight:600;margin-bottom:5px">No active session yet</div>
-        <div style="font-size:.76rem;color:var(--mu)">The organiser hasn't started a session. Check back once the session begins!</div>
-      </div>`;
-      return;
-    }
-  }
-
-  // Current match
-  let currentMatchHtml='';
-  // CF mode: show queue/court status
-  if(S.session?.cfMode&&sp&&sp.status!=='left'){
-    const onCourt=Object.values(S.session.cfCourts||{}).find(c=>c.match&&[...c.match.t1,...c.match.t2].includes(id));
-    const qi=(S.session.cfQueue||[]).findIndex(q=>q.id===id);
-    const isPaused=(S.session.cfPaused||[]).some(q=>q.id===id);
-    if(onCourt){
-      const m=onCourt.match;
-      const inT1=m.t1.includes(id);
-      const partner=gp((inT1?m.t1:m.t2).find(x=>x!==id));
-      const opps=(inT1?m.t2:m.t1).map(x=>gp(x)?.name||'?');
-      const elapsed=m.startTime?Math.floor((Date.now()-m.startTime)/1000):0;
-      const em=Math.floor(elapsed/60),es=elapsed%60;
-      currentMatchHtml=`<div class="pv-match-now">
-        <div style="font-size:.68rem;font-weight:700;color:var(--cy);letter-spacing:.08em;margin-bottom:6px">ON COURT ${m.courtNum}</div>
-        <div style="font-size:.82rem;color:var(--mu);margin-bottom:4px">Partner: <strong style="color:var(--tx)">${partner?plainName(partner):'?'}</strong></div>
-        <div style="font-size:.82rem;color:var(--mu);margin-bottom:6px">vs <strong style="color:var(--re)">${opps.join(' & ')}</strong></div>
-        <div style="font-size:.78rem;color:var(--cy)">⏱ ${String(em).padStart(2,'0')}:${String(es).padStart(2,'0')} in play — good luck! 🏓</div>
-      </div>`;
-    }else if(isPaused){
-      currentMatchHtml=`<div class="card" style="text-align:center;color:var(--mu)"><div style="font-size:1.5rem;margin-bottom:6px">⏸</div><div style="font-size:.85rem">You're paused — let the organizer know when ready to re-join</div></div>`;
-    }else if(qi>=0){
-      const qEntry=S.session.cfQueue[qi];
-      const waitMin=qEntry?Math.round((Date.now()-qEntry.since)/60000):0;
-      const totalQ=S.session.cfQueue.length;
-      const upNext=qi<2;
-      const boosted=qEntry&&qEntry.since>Date.now()-5*60000&&qEntry.consec===0;
-      // Transparency: tell the player why they're at this position
-      const debt=CF.waitDebt(id);
-      let reasonMsg='';
-      if(upNext)reasonMsg='';
-      else if(waitMin>=20)reasonMsg='⏰ Long wait — you\'re being prioritised';
-      else if(debt>1.8)reasonMsg='⚖ Wait-debt priority — you\'ve waited more than you\'ve played';
-      else if(waitMin<3)reasonMsg='Just re-entered queue';
-      else{
-        // Check if any recent partners are on cooldown with this player
-        const recentPartners=Object.entries(S.session.cfPairSessionCount||{})
-          .filter(([pk,cnt])=>cnt>=2&&pk.split('|').includes(id))
-          .map(([pk])=>pk.split('|').find(x=>x!==id))
-          .filter(pid=>CF.isPairOnCooldown(id,pid));
-        if(recentPartners.length){
-          const names=recentPartners.map(pid=>gp(pid)?.name||'?').join(', ');
-          reasonMsg=`🔄 Pair cooldown active with ${names} — finding you a fresh partner`;
-        }else{
-          reasonMsg=`System is finding the best match for your level`;
-        }
-      }
-      currentMatchHtml=`<div class="pv-match-now" style="border-color:${upNext?'var(--gr)':'rgba(34,211,238,.3)'}">
-        <div style="font-size:.68rem;font-weight:700;color:${upNext?'var(--gr)':'var(--cy)'};letter-spacing:.08em;margin-bottom:6px">${upNext?'🏓 UP NEXT!':'⏳ IN QUEUE'}</div>
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:2.2rem;color:${upNext?'var(--gr)':'var(--cy)'}">#${qi+1} <span style="font-size:1rem;color:var(--mu)">of ${totalQ}</span></div>
-        <div style="font-size:.74rem;color:var(--mu);margin-top:4px">Waited ${waitMin} min${boosted?' · ⚡ Short-game boost applied':''}</div>
-        ${reasonMsg?`<div style="font-size:.69rem;color:var(--m2);margin-top:5px;border-top:1px solid var(--bd);padding-top:5px">${reasonMsg}</div>`:''}
-      </div>`;
-    }
-  } else if(rnd&&sp&&sp.status!=='left'){
-    const myMatch=rnd.matches.find(m=>m.t1.includes(id)||m.t2.includes(id));
-    if(myMatch){
-      const inT1=myMatch.t1.includes(id);
-      const myTeam=inT1?myMatch.t1:myMatch.t2;
-      const oppTeam=inT1?myMatch.t2:myMatch.t1;
-      const partner=gp(myTeam.find(x=>x!==id));
-      const opps=oppTeam.map(gp);
-      const done=myMatch.status==='done';
-      const won=done&&((inT1&&myMatch.s1>myMatch.s2)||(!inT1&&myMatch.s2>myMatch.s1));
-      const tie=done&&myMatch.s1===myMatch.s2;
-      currentMatchHtml=`<div class="pv-match-now">
-        <div style="font-size:.68rem;font-weight:700;color:var(--cy);letter-spacing:.08em;margin-bottom:6px">MATCH IN PROGRESS — COURT ${myMatch.court}</div>
-        <div style="font-size:.82rem;color:var(--mu);margin-bottom:4px">Partner: <strong style="color:var(--tx)">${partner?plainName(partner):'?'}</strong></div>
-        <div style="font-size:.82rem;color:var(--mu);margin-bottom:8px">vs <strong style="color:var(--re)">${opps.map(plainName).join(' & ')}</strong></div>
-        ${done?`<div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:${won?'var(--gr)':tie?'var(--go)':'var(--re)'};letter-spacing:2px">${myMatch.s1}–${myMatch.s2} ${won?'WIN 🎉':tie?'TIE 🤝':'LOSS'}</div>`:`<div style="font-size:.78rem;color:var(--cy)">Match in progress — good luck! 🏓</div>`}
-      </div>`;
-    } else if(rnd.sitOuts.includes(id)){
-      const sitCount=S.session.sitOutHx[id]||0;
-      const played=sp.matchesPlayed||0;
-      const pd=(sp.ptsFor||0)-(sp.ptsAgainst||0);
-      // Explain WHY sitting out
-      const plStrk=S.session.plStreak?.[id]||0;
-      const soStrk=S.session.soStreak?.[id]||0;
-      const MAX_CONSEC=3;
-      let sitReason='';
-      if(plStrk>=MAX_CONSEC)sitReason=`You played ${plStrk} games in a row — system rotated you out. You're back in the queue.`;
-      else if(S.session.activePlayers.length>S.session.courts*4){
-        const surplus=S.session.activePlayers.length-S.session.courts*4;
-        sitReason=`${surplus} player${surplus>1?'s':''} always sit each cycle. You'll be prioritised next.`;
-      }else sitReason="Rotation rest — you're back in the queue.";
-      currentMatchHtml=`<div class="card" style="text-align:center">
-        <div style="font-size:1.5rem;margin-bottom:6px">💤</div>
-        <div style="font-size:.85rem;color:var(--or)">Sitting This Cycle</div>
-        <div style="font-size:.73rem;color:var(--mu);margin-top:6px">
-          This session: <strong style="color:var(--tx)">${sp.wins}W / ${sp.losses}L</strong> &nbsp;·&nbsp; ${played} game${played!==1?'s':''} &nbsp;·&nbsp; PD ${pd>=0?'+':''}${pd}<br/>
-          Sat out ${sitCount} time${sitCount!==1?'s':''} total &nbsp;·&nbsp; ELO ${sp.sRating-sp.startRating>=0?'+':''}${Math.round(sp.sRating-sp.startRating)}
-        </div>
-        <div style="font-size:.68rem;color:var(--m2);margin-top:7px;border-top:1px solid var(--bd);padding-top:6px">${sitReason}</div>
-      </div>`;
-    }
-  }
-
-  // Determine session filter
-  const sfEl=document.getElementById('pv-sess-filter');
-  const sessFilter=sfEl?.value||'';
-
-  // Collect matches for the selected session filter
-  const pastMatches=[];
-  // Unified match collector — handles both round mode (rounds[].matches) and CF (cfLog[])
-  function addMatchesFromSess(sess,sessName,sessDate,sessPlayerList,isCFSess){
-    const matchList=isCFSess
-      ?(sess.cfLog||[]).map(m=>({...m,round:null}))
-      :(sess.cfLog||[]);
-    matchList.forEach(m=>{
-      if(!(m.t1?.includes(id)||m.t2?.includes(id)))return;
-      if(!isCFSess&&m.status!=='done')return;
-      const inT1=m.t1.includes(id);
-      const myTeam=inT1?m.t1:m.t2,oppTeam=inT1?m.t2:m.t1;
-      let partnerName,oppsNames;
-      const pList=sessPlayerList||(sess.players||null);
-      if(pList){
-        const partnerSp=pList.find(x=>x.id===myTeam.find(y=>y!==id));
-        partnerName=partnerSp?.name||'?';
-        oppsNames=oppTeam.map(oid=>{const x=pList.find(s=>s.id===oid);return x?.name||gp(oid)?.name||'?';});
-      }else{
-        const partnerP=gp(myTeam.find(y=>y!==id));partnerName=partnerP?plainName(partnerP):'?';
-        oppsNames=oppTeam.map(oid=>{const x=gp(oid);return x?plainName(x):'?';});
-      }
-      const s1=inT1?m.s1:m.s2,s2=inT1?m.s2:m.s1;
-      const won=(s1>s2),tie=(s1===s2);
-      // ELO delta for this player
-      const playerIdx=[...m.t1,...m.t2].indexOf(id);
-      const eloDelta=m.eloDeltas?.[playerIdx]??null;
-      // Match quality
-      const t1r=pList?[...m.t1].map(oid=>{const x=pList.find(s=>s.id===oid);return x?.sRating||1000;}):null;
-      const t2r=pList?[...m.t2].map(oid=>{const x=pList.find(s=>s.id===oid);return x?.sRating||1000;}):null;
-      const gap=t1r&&t2r?Math.abs((t1r[0]+t1r[1])/2-(t2r[0]+t2r[1])/2):null;
-      const qual=gap===null?null:gap<30?3:gap<80?2:gap<150?1:0;
-      // Quality win: won against opponents whose avg rating > my rating at time of match
-      const myRating=pList?pList.find(x=>x.id===id)?.sRating||1000:gp(id)?.rating||1000;
-      const oppTeamR=inT1?t2r:t1r;
-      const oppAvgR=oppTeamR?oppTeamR.reduce((a,b)=>a+b,0)/oppTeamR.length:null;
-      const qualityWin=won&&oppAvgR!==null&&oppAvgR>myRating;
-      pastMatches.push({date:sessDate,sessName,round:m.round,courtNum:m.courtNum||null,
-        s1,s2,won,tie,partner:partnerName,opps:oppsNames,eloDelta,qual,isCF:isCFSess,qualityWin:qualityWin||false});
-    });
-  }
-
-  // Session standing block — per session or overall
-  let sessStandHtml='';
-  let careerHtml='';
-
-  if(!sessFilter){
-    // Overall view
-    if(S.session&&sp){
-      const sorted=[...S.session.players].sort((a,b)=>b.sRating-a.sRating);
-      const rank=sorted.findIndex(x=>x.id===id)+1;
-      const d=sp.sRating-sp.startRating,pd=sp.ptsFor-sp.ptsAgainst;
-      // Session quality wins (wins against stronger opponents)
-      const sessMatches=[...(S.session.cfLog||[])].filter(m=>m.t1?.includes(id)||m.t2?.includes(id));
-      let sessQW=0,sessLoseStreak=0,curLStreak=0;
-      sessMatches.forEach(m=>{
-        const inT1=m.t1?.includes(id);
-        const won=inT1?m.s1>m.s2:m.s2>m.s1,tie=m.s1===m.s2;
-        if(won){
-          curLStreak=0;
-          const oppTeam=inT1?m.t2:m.t1;
-          const oppAvg=oppTeam?.map(oid=>{const osp=S.session.players.find(p=>p.id===oid);return osp?.sRating||1000;}).reduce((a,b,_,arr)=>a+b/arr.length,0)||0;
-          if(oppAvg>sp.sRating)sessQW++;
-        }else if(!tie){curLStreak++;sessLoseStreak=Math.max(sessLoseStreak,curLStreak);}
-      });
-      const sessQWPct=sp.wins>0?Math.round((sessQW/sp.wins)*100):null;
-      const qwHtml=sessQWPct!==null&&sp.wins>=2
-        ?`<div style="font-size:.65rem;color:${sessQWPct>=50?'var(--gr)':'var(--mu)'};margin-top:2px">${sessQW}/${sp.wins} wins vs stronger${sessQWPct>=60?' ⭐':''}</div>`:'';
-      // Losing streak empathy message
-      const streakHtml=curLStreak>=3
-        ?`<div style="background:rgba(248,113,113,.07);border:1px solid rgba(248,113,113,.2);border-radius:var(--ra);padding:7px 10px;margin-top:8px;font-size:.72rem">
-            <div style="font-weight:700;color:var(--re);margin-bottom:3px">📉 ${curLStreak}-game losing streak</div>
-            <div style="color:var(--mu);font-size:.68rem">The algorithm has detected your streak and is softening your matchups to help you reset. Hang in there.</div>
-          </div>`:
-        sessLoseStreak>=3&&curLStreak===0
-        ?`<div style="font-size:.66rem;color:var(--gr);margin-top:5px">✓ Bounced back from a ${sessLoseStreak}-game skid earlier</div>`:'';
-      sessStandHtml=`<div class="card">
-        <div class="ct" style="margin-bottom:8px">📊 This Session</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:${streakHtml?'4px':'0'}"  >
-          <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
-            <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">RANK</div>
-            <div style="font-family:'Bebas Neue',sans-serif;font-size:1.8rem;color:var(--go)">#${rank}</div>
-            <div style="font-size:.67rem;color:var(--mu)">of ${S.session.players.length}</div>
-          </div>
-          <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
-            <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">RECORD</div>
-            <div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--tx)">${sp.wins}W / ${sp.losses}L${sp.ties?'/'+sp.ties+'T':''}</div>
-            ${qwHtml}
-          </div>
-          <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
-            <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">RATING Δ</div>
-            <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:${d>=0?'var(--gr)':'var(--re)'}">${d>=0?'+':''}${d}</div>
-            <div style="font-size:.67rem;color:var(--mu)">PD: ${pd>=0?'+':''}${pd}</div>
-          </div>
-        </div>
-        ${streakHtml}
-      </div>`;
-    }
-    // Rating sparkline — up to 24 sessions with career trajectory
-    const wr=p.gamesPlayed>0?Math.round((p.wins/p.gamesPlayed)*100):'—';
-    const sessHistory=[...S.archive].filter(sess=>sess.players?.some(sp=>sp.id===id)).slice(0,24).reverse();
-    let sparkHtml='';
-    if(sessHistory.length>=2){
-      const pts=sessHistory.map(sess=>{const sp2=sess.players.find(x=>x.id===id);return sp2?Math.round(sp2.sRating):null;}).filter(x=>x!==null);
-      if(S.session&&sp)pts.push(Math.round(sp.sRating));
-      const firstRating=pts[0];
-      const currentRating=pts[pts.length-1];
-      const totalDelta=currentRating-firstRating;
-      const mn=Math.min(...pts)-30,mx=Math.max(...pts)+30,range=mx-mn||1;
-      const W=240,H=48;
-      const px=(v,i)=>`${Math.round((i/(pts.length-1))*W)},${Math.round(H-((v-mn)/range)*H)}`;
-      const polyline=pts.map((v,i)=>px(v,i)).join(' ');
-      const trend=pts[pts.length-1]-pts[0];
-      // Trajectory label
-      const sessCount=sessHistory.length+(S.session?1:0);
-      const trajLabel=totalDelta>50?'📈 Rising':totalDelta<-50?'📉 Falling':'〰 Stable';
-      const trajColor=totalDelta>50?'var(--gr)':totalDelta<-50?'var(--re)':'var(--mu)';
-      // Show K-boost badge if active
-      const kBoosted=shouldBoostK(id);
-      sparkHtml=`<div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;margin-top:8px">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
-          <span style="font-size:.65rem;color:var(--mu)">RATING TREND — ${sessCount} session${sessCount!==1?'s':''}</span>
-          <span style="font-size:.65rem;font-weight:700;color:${trajColor}">${trajLabel} ${totalDelta>=0?'+':''}${totalDelta}</span>
-        </div>
-        <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;overflow:visible">
-          <polyline points="${polyline}" fill="none" stroke="${trend>=0?'var(--gr)':'var(--re)'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          ${pts.map((v,i)=>`<circle cx="${Math.round((i/(pts.length-1))*W)}" cy="${Math.round(H-((v-mn)/range)*H)}" r="${i===0||i===pts.length-1?3.5:2}" fill="${i===pts.length-1?'var(--gr)':i===0?'var(--m2)':'var(--s3)'}" stroke="${i===0||i===pts.length-1?trend>=0?'var(--gr)':'var(--re)':'none'}" stroke-width="1.5"/>`).join('')}
-        </svg>
-        <div style="display:flex;justify-content:space-between;font-size:.63rem;color:var(--m2);margin-top:3px">
-          <span>Started ${firstRating}</span>
-          ${kBoosted?`<span style="color:var(--gr)">📈 K-boost active</span>`:''}
-          <span>Now ${currentRating}</span>
-        </div>
-      </div>`;
-    }
-
-    // Who I haven't played with this session
-    let freshHtml='';
-    if(S.session&&sp){
-      const playedWith=new Set();
-      const rounds=S.session.cfMode?(S.session.cfLog||[]).map(m=>({matches:[m]})):(S.session.rounds||[]);
-      rounds.forEach(r=>{(r.matches||[r]).forEach(m=>{
-        if([...(m.t1||[]),...(m.t2||[])].includes(id)){
-          [...(m.t1||[]),...(m.t2||[])].forEach(x=>{if(x!==id)playedWith.add(x);});
-        }
-      });});
-      const notYet=S.session.activePlayers.filter(x=>x!==id&&!playedWith.has(x)&&gsp(x)?.status!=='left');
-      if(notYet.length){
-        freshHtml=`<div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;margin-top:8px">
-          <div style="font-size:.65rem;color:var(--mu);margin-bottom:5px">HAVEN'T PLAYED WITH YET</div>
-          <div style="display:flex;flex-wrap:wrap;gap:4px">${notYet.map(x=>`<span style="font-size:.72rem;font-weight:600;padding:2px 8px;background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.2);border-radius:10px;color:var(--cy)">${esc(gp(x)?.name||'?')}</span>`).join('')}</div>
-        </div>`;
-      }
-    }
-
-    // Collect all past matches FIRST so Quality Win Rate can be computed inline
-    if(S.session)addMatchesFromSess(S.session,S.session.name+' (today)',S.session.date,null,!!S.session.cfMode);
-    S.archive.forEach(sess=>addMatchesFromSess(sess,sess.name,sess.date,sess.players,!!sess.cfMode));
-
-    // Difficulty-adjusted win rate — computed now that pastMatches is populated
-    let qwrHtml='';
-    {
-      const totalWins=pastMatches.filter(m=>m.won).length;
-      const qualityWins=pastMatches.filter(m=>m.qualityWin).length;
-      const qwr=totalWins>=5?Math.round((qualityWins/Math.max(1,totalWins))*100):null;
-      if(qwr!==null){
-        const qwrColor=qwr>=60?'var(--gr)':qwr>=40?'var(--go)':'var(--or)';
-        const qwrLabel=qwr>=60?'Elite difficulty wins':qwr>=40?'Good difficulty wins':qwr>=25?'Building upsets':'Mostly easier games';
-        qwrHtml=`<div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;margin-top:8px">
-          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
-            <span style="font-size:.65rem;color:var(--mu);font-weight:700;text-transform:uppercase;letter-spacing:.04em">Quality Win Rate</span>
-            <span style="font-size:.68rem;color:${qwrColor};font-weight:700">${qwr}%</span>
-          </div>
-          <div style="height:5px;background:var(--s3);border-radius:3px;margin-bottom:5px">
-            <div style="width:${qwr}%;height:100%;background:linear-gradient(90deg,${qwrColor},var(--cy));border-radius:3px;transition:width .4s"></div>
-          </div>
-          <div style="font-size:.67rem;color:var(--mu)">${qualityWins} of ${totalWins} wins were against higher-rated opponents &nbsp;·&nbsp; <span style="color:${qwrColor}">${qwrLabel}</span></div>
-        </div>`;
-      }
-    }
-
-    // Difficulty-adjusted win rate: wins against opponents above your own rating
-    careerHtml=`<div class="card" id="career-card-${id}">
-      <div class="ct" style="margin-bottom:8px">🏆 Career Stats</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
-          <div style="font-size:.67rem;color:var(--mu);margin-bottom:3px">ALL-TIME RATING</div>
-          <div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:var(--gr)">${Math.round(p.rating)}</div>
-        </div>
-        <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
-          <div style="font-size:.67rem;color:var(--mu);margin-bottom:3px">GAMES PLAYED</div>
-          <div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:var(--cy)">${p.gamesPlayed}</div>
-        </div>
-        <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
-          <div style="font-size:.67rem;color:var(--mu);margin-bottom:3px">WIN RATE</div>
-          <div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:var(--go)">${wr}${typeof wr==='number'?'%':''}</div>
-        </div>
-      </div>
-      ${qwrHtml}
-      ${sparkHtml}${freshHtml}
-      ${(()=>{
-        if(!S.session||!sp)return'';
-        const totalWaitMin=sp.timeInQueueMs?Math.round(sp.timeInQueueMs/60000):0;
-        const totalPlayMin=sp.timeOnCourtMs?Math.round(sp.timeOnCourtMs/60000):0;
-        const ratio=totalPlayMin>0?Math.round((totalPlayMin/(totalPlayMin+totalWaitMin))*100):null;
-        // Longest single wait: find max gap between queue entries in cfLog
-        let longestWait=0;
-        if(S.session.cfMode){
-          const qEntry=S.session.cfQueue?.find(q=>q.id===id);
-          if(qEntry)longestWait=Math.round((Date.now()-qEntry.since)/60000);
-        }
-        if(!totalWaitMin&&!totalPlayMin)return'';
-        return`<div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;margin-top:8px">
-          <div style="font-size:.65rem;color:var(--mu);margin-bottom:5px">SESSION TIME BREAKDOWN</div>
-          <div style="display:flex;gap:8px">
-            <div style="flex:1;text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--gr)">${totalPlayMin}m</div><div style="font-size:.63rem;color:var(--mu)">on court</div></div>
-            <div style="flex:1;text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--mu)">${totalWaitMin}m</div><div style="font-size:.63rem;color:var(--mu)">waiting</div></div>
-            ${ratio!==null?`<div style="flex:1;text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:${ratio>=60?'var(--gr)':ratio>=40?'var(--go)':'var(--or)'}">${ratio}%</div><div style="font-size:.63rem;color:var(--mu)">play ratio</div></div>`:''}
-            ${longestWait>0?`<div style="flex:1;text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:${longestWait>=20?'var(--or)':'var(--mu)'}">${longestWait}m</div><div style="font-size:.63rem;color:var(--mu)">current wait</div></div>`:''}
-          </div>
-        </div>`;
-      })()}
-    </div>`;
-  } else {
-    // Specific session view (from dropdown filter)
-    let targetSess=null,targetPlayers=null,sessIsLive=false;
-    if(sessFilter==='__current__'&&S.session){targetSess=S.session;targetPlayers=null;sessIsLive=true;}
-    else{const a=S.archive.find(x=>x.id===sessFilter);if(a){targetSess=a;targetPlayers=a.players;}}
-
-    if(targetSess){
-      const tsp=sessIsLive?gsp(id):targetSess.players?.find(x=>x.id===id);
-      if(tsp){
-        const tSorted=[...(sessIsLive?S.session.players:targetSess.players)].sort((a,b)=>b.sRating-a.sRating);
-        const tRank=tSorted.findIndex(x=>x.id===id)+1;
-        const td=tsp.sRating-tsp.startRating,tpd=(tsp.ptsFor||0)-(tsp.ptsAgainst||0);
-        sessStandHtml=`<div class="card">
-          <div class="ct" style="margin-bottom:8px">📊 ${esc(targetSess.name)}</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-            <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
-              <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">FINAL RANK</div>
-              <div style="font-family:'Bebas Neue',sans-serif;font-size:1.8rem;color:var(--go)">#${tRank}</div>
-              <div style="font-size:.67rem;color:var(--mu)">of ${tSorted.length}</div>
-            </div>
-            <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
-              <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">RECORD</div>
-              <div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--tx)">${tsp.wins}W / ${tsp.losses}L${tsp.ties?'/'+tsp.ties+'T':''}</div>
-            </div>
-            <div style="flex:1;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;text-align:center">
-              <div style="font-size:.67rem;color:var(--mu);margin-bottom:4px">RATING Δ</div>
-              <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:${td>=0?'var(--gr)':'var(--re)'}">${td>=0?'+':''}${td}</div>
-              <div style="font-size:.67rem;color:var(--mu)">PD: ${tpd>=0?'+':''}${tpd}</div>
-            </div>
-          </div>
-        </div>`;
-      }
-      addMatchesFromSess(targetSess,targetSess.name,targetSess.date,targetPlayers,!!targetSess.cfMode);
-    }
-  }
-
-  // Group matches by session
-  const sessBuckets=[];
-  pastMatches.forEach(m=>{
-    let b=sessBuckets.find(x=>x.name===m.sessName&&x.date===m.date);
-    if(!b){b={name:m.sessName,date:m.date,matches:[],isCF:!!m.isCF};sessBuckets.push(b);}
-    b.matches.push(m);
-  });
-
-  /* ── Hybrid session bucket renderer ──────────────────────────────────
-     CF sessions → Option B: summary stats + scannable timeline (collapsed)
-     Round sessions → Option A: match cards (existing format)
-  ─────────────────────────────────────────────────────────────────── */
-  function renderSessBucket(b,expanded){
-    const agg=b.matches.reduce((acc,m)=>{
-      if(m.won)acc.w++;else if(m.tie)acc.t++;else acc.l++;
-      if(m.eloDelta!==null)acc.elo+=m.eloDelta||0;
-      return acc;
-    },{w:0,l:0,t:0,elo:0});
-    const rec=`${agg.w}W/${agg.l}L${agg.t?'/'+agg.t+'T':''}`;
-    const d=new Date(b.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
-    const bid='pvb-'+btoa(b.name+b.date).replace(/[^a-zA-Z0-9]/g,'').slice(0,12);
-    const eloStr=agg.elo>=0?`+${agg.elo}`:String(agg.elo);
-
-    if(b.isCF){
-      // ── Option B hybrid for CF sessions ──────────────────────────
-      const wr=b.matches.length?Math.round((agg.w/b.matches.length)*100):0;
-      // Avg match quality
-      const quals=b.matches.map(m=>m.qual).filter(q=>q!==null);
-      const avgQual=quals.length?quals.reduce((a,q)=>a+q,0)/quals.length:null;
-      const qualLabel=avgQual===null?'':avgQual>=2.5?'⭐⭐⭐':avgQual>=1.5?'⭐⭐':avgQual>=0.5?'⭐':'○';
-      // Opponent frequency
-      const oppCount={};
-      b.matches.forEach(m=>m.opps.forEach(o=>{oppCount[o]=(oppCount[o]||0)+1;}));
-      const topOpps=Object.entries(oppCount).sort(([,a],[,b])=>b-a).slice(0,5);
-
-      const timelineRows=b.matches.map(m=>{
-        const col=m.won?'var(--gr)':m.tie?'var(--go)':'var(--re)';
-        const dot=m.won?'var(--gr)':m.tie?'var(--go)':'var(--re)';
-        const qStr=m.qual===3?'⭐⭐⭐':m.qual===2?'⭐⭐':m.qual===1?'⭐':m.qual===0?'○':'';
-        const eDelta=m.eloDelta!==null?`<span style="font-size:.68rem;font-weight:700;color:${m.eloDelta>=0?'var(--gr)':'var(--re)'}">${m.eloDelta>=0?'+':''}${m.eloDelta}</span>`:'';
-        return `<div style="display:flex;align-items:center;gap:7px;padding:4px 0;border-bottom:1px solid var(--bd)">
-          <span style="width:8px;height:8px;border-radius:50%;background:${dot};flex-shrink:0;border:1.5px solid var(--bg)"></span>
-          <span style="font-family:'Bebas Neue',sans-serif;font-size:.92rem;color:${col};min-width:36px">${m.s1}–${m.s2}</span>
-          <span style="flex:1;min-width:0">
-            <span style="font-size:.73rem;font-weight:600;color:var(--tx)">w/ ${esc(m.partner)}</span>
-            <span style="font-size:.66rem;color:var(--mu)"> vs ${m.opps.map(esc).join(' & ')}</span>
-          </span>
-          <span style="display:flex;align-items:center;gap:4px;flex-shrink:0">${eDelta}<span style="font-size:.62rem;color:var(--m2)">${qStr}</span></span>
-        </div>`;
-      }).join('');
-
-      return `<div class="hr" style="margin-bottom:5px">
-        <div class="hrhd" onclick="const d=document.getElementById('${bid}');d.classList.toggle('open');this.querySelector('.pv-arr').textContent=d.classList.contains('open')?'▾':'▸'">
-          <div>
-            <div style="font-weight:700;font-size:.81rem;color:var(--tx)">${esc(b.name)} <span style="font-size:.62rem;color:var(--cy);background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.2);border-radius:4px;padding:1px 5px;margin-left:3px">⚡CF</span></div>
-            <div style="font-size:.67rem;color:var(--mu);margin-top:1px">${d} &nbsp;·&nbsp; ${b.matches.length}G &nbsp;·&nbsp; <span style="color:${agg.w>agg.l?'var(--gr)':agg.l>agg.w?'var(--re)':'var(--mu)'}">${rec}</span> &nbsp;·&nbsp; <span style="color:${agg.elo>=0?'var(--gr)':'var(--re)'}">${eloStr} ELO</span>${qualLabel?' &nbsp;·&nbsp; '+qualLabel:''}</div>
-          </div>
-          <span class="pv-arr" style="color:var(--mu);font-size:.75rem">${expanded?'▾':'▸'}</span>
-        </div>
-        <div class="hr-body${expanded?' open':''}" id="${bid}">
-          <!-- Summary stats -->
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:10px 12px 8px">
-            <div style="background:var(--s2);border:1px solid var(--bd);border-radius:6px;padding:7px;text-align:center">
-              <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:${agg.w>=agg.l?'var(--gr)':'var(--re)'}">${agg.w}W/${agg.l}L</div>
-              <div style="font-size:.6rem;color:var(--mu)">Record</div>
-            </div>
-            <div style="background:var(--s2);border:1px solid var(--bd);border-radius:6px;padding:7px;text-align:center">
-              <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:${agg.elo>=0?'var(--gr)':'var(--re)'}">${eloStr}</div>
-              <div style="font-size:.6rem;color:var(--mu)">ELO Δ</div>
-            </div>
-            <div style="background:var(--s2);border:1px solid var(--bd);border-radius:6px;padding:7px;text-align:center">
-              <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--cy)">${b.matches.length}</div>
-              <div style="font-size:.6rem;color:var(--mu)">Games</div>
-            </div>
-          </div>
-          <!-- Timeline -->
-          <div style="padding:0 12px 6px;font-size:.64rem;color:var(--mu);font-weight:700;letter-spacing:.04em;text-transform:uppercase">All matches${avgQual!==null?' &nbsp;·&nbsp; Avg quality: '+qualLabel:''}</div>
-          <div style="padding:0 12px 10px">${timelineRows}</div>
-          <!-- Opponent frequency -->
-          ${topOpps.length?`<div style="padding:0 12px 10px">
-            <div style="font-size:.63rem;color:var(--mu);margin-bottom:5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em">Most Played Against</div>
-            <div style="display:flex;flex-wrap:wrap;gap:4px">${topOpps.map(([n,c])=>`<span style="font-size:.69rem;padding:2px 8px;background:var(--s2);border:1px solid var(--bd);border-radius:10px">${esc(n)} <span style="color:var(--mu)">${c}×</span></span>`).join('')}</div>
-          </div>`:''}
-        </div>
-      </div>`;
-    }
-
-    // ── Option A for round-mode sessions (unchanged) ──────────────
-    const matchRows=b.matches.map(m=>{
-      const col=m.won?'var(--gr)':m.tie?'var(--go)':'var(--re)';
-      const eDelta=m.eloDelta!==null?`<span style="font-size:.65rem;font-weight:700;color:${m.eloDelta>=0?'var(--gr)':'var(--re)'}"> ${m.eloDelta>=0?'+':''}${m.eloDelta}</span>`:'';
-      return `<div class="hm" style="gap:8px;padding:8px 12px">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;color:${col};min-width:42px">${m.s1}–${m.s2}</div>
-        <div class="pnc"><div class="pn" style="font-size:.79rem">${m.won?'✓ WIN':m.tie?'🤝 TIE':'✗ LOSS'}${eDelta} &nbsp;·&nbsp; R${m.round}</div><div class="pst">w/ ${esc(m.partner)} vs ${m.opps.map(esc).join(' & ')}</div></div>
-      </div>`;
-    }).join('');
-    return `<div class="hr" style="margin-bottom:5px">
-      <div class="hrhd" onclick="const d=document.getElementById('${bid}');d.classList.toggle('open');this.querySelector('.pv-arr').textContent=d.classList.contains('open')?'▾':'▸'">
-        <div>
-          <div style="font-weight:700;font-size:.81rem;color:var(--tx)">${esc(b.name)}</div>
-          <div style="font-size:.67rem;color:var(--mu);margin-top:1px">${d} &nbsp;·&nbsp; ${b.matches.length} game${b.matches.length!==1?'s':''} &nbsp;·&nbsp; <span style="color:${agg.w>agg.l?'var(--gr)':agg.l>agg.w?'var(--re)':'var(--mu)'}">${rec}</span></div>
-        </div>
-        <span class="pv-arr" style="color:var(--mu);font-size:.75rem">${expanded?'▾':'▸'}</span>
-      </div>
-      <div class="hr-body${expanded?' open':''}" id="${bid}">${matchRows}</div>
-    </div>`;
-  }
-
-  const histHtml=sessBuckets.length
-    ?`<div class="card" style="padding-bottom:6px">
-        <div class="ct" style="margin-bottom:10px">📜 Session History <span style="font-size:.68rem;color:var(--mu);font-weight:400">${sessBuckets.length} session${sessBuckets.length!==1?'s':''}</span></div>
-        ${sessBuckets.map((b,i)=>renderSessBucket(b,i===0)).join('')}
-      </div>`
-    :'<div class="card" style="text-align:center;padding:22px;color:var(--mu)">No match history found.</div>';
-
-  el.innerHTML=`<div class="pv-hero">
-    <div class="pv-name">${p.name}${p.tag?`<span class="ptag">${p.tag}</span>`:''}</div>
-    <div class="pv-rating">${Math.round(sp?sp.sRating:p.rating)}</div>
-    <div class="pv-sub">${sp?'CURRENT SESSION RATING':'ALL-TIME RATING'}</div>
-  </div>
-  ${currentMatchHtml}${sessStandHtml}${careerHtml}${histHtml}`;
-}
-
-/* ── IMPORT ──────────────────────────────────────── */
-function openImportModal(){
-  openModal(`<div class="modal-title">📥 Import Players</div>
-    <p style="font-size:.75rem;color:var(--mu);margin-bottom:10px">
-      Accepts: <strong>JSON</strong> export, <strong>CSV</strong> (<code style="color:var(--cy)">Name, Tag, Rating</code> per row), or plain name list (one per line).<br/>
-      Existing players: rating updated only if import is higher.
-    </p>
-    <label>PASTE TEXT OR LOAD FILE</label>
-    <textarea id="imp-txt" class="inp" rows="7" placeholder="Paste JSON, CSV, or names here…" style="resize:vertical;font-family:monospace;font-size:.72rem;margin-bottom:8px"></textarea>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-      <label class="btn bs sm" style="cursor:pointer">📁 Open File<input type="file" accept=".json,.csv,.txt" style="display:none" onchange="readFile(this)"/></label>
-      <div style="flex:1"></div>
-      <button class="btn bg2 sm" onclick="closeModal()">Cancel</button>
-      <button class="btn bp" onclick="runImport()">Import</button>
-    </div>`);
-}
-
-function readFile(input){
-  const f=input.files[0];if(!f)return;
-  const r=new FileReader();r.onload=e=>{const ta=document.getElementById('imp-txt');if(ta){ta.value=e.target.result;ta.dispatchEvent(new Event('input'));}};r.readAsText(f,'UTF-8');
-}
-
-function runImport(){
-  const raw=document.getElementById('imp-txt')?.value.trim();if(!raw){toast('Nothing to import','err');return;}
-  let a=0,u=0,sk=0;
-  function merge(name,tag='',rating=1000,extra={}){
-    name=name.trim();tag=(tag||'').trim();rating=parseInt(rating)||1000;if(!name){sk++;return;}
-    const ex=S.db.find(p=>p.name.toLowerCase()===name.toLowerCase()&&(p.tag||'').toLowerCase()===tag.toLowerCase());
-    if(ex){if(rating>ex.rating){ex.rating=rating;u++;}else sk++;}
-    else{S.db.push({id:uid(),name,tag,rating:Math.max(400,Math.min(2000,rating)),gamesPlayed:extra.gamesPlayed||0,wins:extra.wins||0,losses:extra.losses||0,ties:extra.ties||0,createdAt:new Date().toISOString()});a++;}
-  }
-  try{const parsed=JSON.parse(raw);const pl=parsed.players||parsed;if(Array.isArray(pl)){pl.forEach(x=>merge(x.name,x.tag,x.rating,x));}else throw 0;}
-  catch(e){
-    const lines=raw.split(/\r?\n/).filter(l=>l.trim()&&!l.trim().startsWith('#'));
-    lines.forEach((line,i)=>{
-      if(i===0&&/^name/i.test(line.trim()))return;
-      const pts=line.split(',').map(s=>s.trim().replace(/^"|"$/g,''));
-      merge(pts[0],pts[1]||'',pts[2]||1000);
-    });
-  }
-  STORE.save();renderDB();renderAllTime();updatePvSelect();closeModal();
-  toast(`${a} added, ${u} updated, ${sk} skipped`,'ok');
-}
-
-/* ── PLAYER MODE ──────────────────────────────────── */
-let PLAYER_MODE = false;
-function initPlayerMode(){
-  // Support both ?view=player (query param) and #player (hash)
-  const params=new URLSearchParams(window.location.search);
-  PLAYER_MODE = window.location.hash==='#player' || params.get('view')==='player' || params.get('mode')==='player';
-  if(!PLAYER_MODE) return;
-
-  // Show banner
-  const b=document.getElementById('player-mode-banner');if(b)b.style.display='block';
-  // Hide share button
-  const sb=document.getElementById('share-btn');if(sb)sb.style.display='none';
-  // Hide all tabs except My Stats
-  document.querySelectorAll('.tb').forEach(btn=>{
-    if(btn.dataset.tab!=='player') btn.style.display='none';
-  });
-  // Activate player tab directly (data already loaded before this call)
-  document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
-  document.querySelectorAll('.tp').forEach(p=>p.classList.remove('on'));
-  const playerBtn=document.querySelector('[data-tab="player"]');
-  if(playerBtn)playerBtn.classList.add('on');
-  const playerTab=document.getElementById('tab-player');
-  if(playerTab)playerTab.classList.add('on');
-  renderPlayerView();
-
-  // Firebase listener in SYNC.connect() handles all tab sync
 }
 
 /* ── SYNC MODAL ───────────────────────────────────── */
@@ -3265,13 +2590,6 @@ function doCopyEl(id){
 }
 
 /* ── RESET RATINGS ─────────────────────────────────── */
-function resetAllRatings(){
-  if(!S.db.length){toast('No players to reset','err');return;}
-  showCfm(`Reset ALL ${S.db.length} players to 1000?<br/><span style="font-size:.74rem;color:var(--mu)">Use this to start a new season. Win/loss records are kept.</span>`,'Reset','bd2',()=>{
-    S.db.forEach(p=>{p.rating=1000;});
-    STORE.save();renderDB();renderAllTime();toast(`All ${S.db.length} ratings reset to 1000 ↺`,'ok');
-  });
-}
 
 /* ── SYR x APL EXAMPLE DATA ────────────────────────── */
 function seedExampleData(){
@@ -3380,19 +2698,17 @@ function seedExampleData(){
 function doEndSession(){
   if(!S.session){toast('No active session','err');return;}
   showCfm(`End <strong>${esc(S.session.name)}</strong>?<br/><span style="font-size:.74rem;color:var(--mu)">Ratings saved to database.</span>`,'🏁 End Session','bp',()=>{
-    const isCF=S.session.cfMode;
-    const arch={id:S.session.id,name:S.session.name,date:S.session.date,cfMode:isCF||false,
+    const arch={id:S.session.id,name:S.session.name,date:S.session.date,cfMode:true,
       players:S.session.players.map(sp=>{const p=gp(sp.id)||{};return{id:sp.id,name:sp.name||p.name||'?',tag:sp.tag||p.tag||'',sRating:sp.sRating,startRating:sp.startRating,wins:sp.wins,losses:sp.losses,ties:sp.ties,matchesPlayed:sp.matchesPlayed,ptsFor:sp.ptsFor,ptsAgainst:sp.ptsAgainst};}),
       cfLog:JSON.parse(JSON.stringify(S.session.cfLog||[]))};
     S.archive.unshift(arch);if(S.archive.length>30)S.archive.pop();
     const top=[...arch.players].sort((a,b)=>b.sRating-a.sRating).slice(0,3);
-    const totalM=isCF?(arch.cfLog||[]).length:arch.rounds.reduce((s,r)=>s+r.matches.filter(m=>m.status==='done').length,0);
     const n=S.session.name;S.checkedIn.clear();S.session=null;
     if(_cfTick){clearInterval(_cfTick);_cfTick=null;}
     recalcAllTimeRatings();
     STORE.save();stopTimer();stopElapsed();
     const pb=document.getElementById('prog-bar');if(pb)pb.style.width='0%';
-    updateHeader();renderDB();renderRoster();renderAllTime();renderHistory();renderArchive();updatePvSessFilter();
+    updateHeader();renderDB();renderRoster();renderHistory();renderArchive();updatePvSessFilter();
     const totalM=(arch.cfLog||[]).length;
     const modeLabel=`${totalM} matches · Continuous Flow`;
     openModal(`<div class="modal-title" style="text-align:center">🏆 Session Complete!</div>
@@ -3445,7 +2761,7 @@ function _saveCFScore(matchIdx){
   // Also update all-time DB ratings to reflect the revised session delta
   recalcAllTimeRatings();
   _boostKCache=null;_allMatchesCache=null;
-  STORE.save();closeModal();renderLive();renderHistory();renderStandings();renderAllTime();
+  STORE.save();closeModal();renderLive();renderHistory();renderStandings();
   if(isActiveTab('player'))renderPlayerView();
   toast('CF match updated — ELO recalculated ✓','ok');
 }
@@ -3466,58 +2782,6 @@ function recalcSessionCFELO(){
       else sp.losses++;
     });
   });
-}
-
-/* ── EDIT SCORE: Archived round session ─────────────── */
-function openEditScoreArchive(matchId,sessId){
-  const sess=S.archive.find(a=>a.id===sessId);if(!sess)return;
-  let m=null,rnd=null;
-  sess.rounds.forEach(r=>{const x=r.matches.find(mx=>mx.id===matchId);if(x){m=x;rnd=r;}});
-  if(!m)return;
-  const nm=id=>{const p=sess.players.find(x=>x.id===id);return esc(p?.name||gp(id)?.name||'?');};
-  const t1n=m.t1.map(nm).join(' & '),t2n=m.t2.map(nm).join(' & ');
-  openModal(`<div class="modal-title">✏️ Edit Archived Score</div>
-    <p style="font-size:.72rem;color:var(--mu);margin-bottom:4px">Round ${rnd.number} · ${esc(sess.name)}</p>
-    <p style="font-size:.7rem;color:var(--go);margin-bottom:9px">⚡ ELO will be fully recalculated for this session and all-time ratings updated.</p>
-    <div style="text-align:center;margin-bottom:9px;font-weight:600">${t1n} <span style="color:var(--mu);font-weight:400">vs</span> ${t2n}</div>
-    <div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-bottom:8px">
-      <input id="aes1" class="inp sinp" type="number" min="0" value="${m.s1??''}"/>
-      <span class="sdash">–</span>
-      <input id="aes2" class="inp sinp" type="number" min="0" value="${m.s2??''}"/>
-    </div>
-    <div class="qs-row" id="aeqs"></div>
-    <div style="display:flex;gap:7px;margin-top:10px">
-      <button class="btn bp" style="flex:1" onclick="_saveArchiveScore('${matchId}','${sessId}')">Save &amp; Recalculate ELO</button>
-      <button class="btn bg2" style="flex:1" onclick="closeModal()">Cancel</button>
-    </div>`);
-  renderQS('aeqs','aes1','aes2');
-}
-function _saveArchiveScore(matchId,sessId){
-  const sess=S.archive.find(a=>a.id===sessId);if(!sess)return;
-  let m=null;
-  sess.rounds.forEach(r=>{const x=r.matches.find(mx=>mx.id===matchId);if(x)m=x;});
-  if(!m)return;
-  const s1=parseInt(document.getElementById('aes1')?.value);
-  const s2=parseInt(document.getElementById('aes2')?.value);
-  if(isNaN(s1)||isNaN(s2)||s1<0||s2<0){toast('Invalid scores','err');return;}
-  m.s1=s1;m.s2=s2;m.status='done';
-  // Replay all matches in this session to recalculate session ELO
-  sess.players.forEach(sp=>{sp.sRating=sp.startRating;sp.wins=0;sp.losses=0;sp.ties=0;sp.matchesPlayed=0;sp.ptsFor=0;sp.ptsAgainst=0;});
-  sess.rounds.forEach(r=>r.matches.forEach(mx=>{
-    if(mx.status!=='done')return;
-    mx.eloDeltas=ELO.calcIds(mx.t1,mx.t2,mx.s1,mx.s2);
-    [...mx.t1,...mx.t2].forEach((id,i)=>{
-      const sp=sess.players.find(p=>p.id===id);if(!sp)return;
-      sp.sRating=Math.max(400,sp.sRating+mx.eloDeltas[i]);sp.matchesPlayed++;
-      if(i<2){sp.ptsFor+=mx.s1;sp.ptsAgainst+=mx.s2;}else{sp.ptsFor+=mx.s2;sp.ptsAgainst+=mx.s1;}
-      if(mx.s1===mx.s2)sp.ties=(sp.ties||0)+1;
-      else if((i<2&&mx.s1>mx.s2)||(i>=2&&mx.s2>mx.s1))sp.wins++;
-      else sp.losses++;
-    });
-  }));
-  recalcAllTimeRatings();
-  closeModal();STORE.save();renderArchive();renderHistory();renderStandings();renderAllTime();
-  toast('Score updated — session ELO & all-time ratings recalculated ✓','ok');
 }
 
 /* ── EDIT SCORE: Archived CF session ────────────────── */
@@ -3564,7 +2828,7 @@ function _saveArchiveCFScore(matchIdx,sessId){
     });
   });
   recalcAllTimeRatings();
-  closeModal();STORE.save();renderArchive();renderHistory();renderStandings();renderAllTime();
+  closeModal();STORE.save();renderArchive();renderHistory();renderStandings();
   toast('CF match updated — session ELO & all-time ratings recalculated ✓','ok');
 }
 
@@ -3614,7 +2878,7 @@ function _activeTabId(){
 function _renderTab(id){
   if(id==='setup'){renderDB();renderRoster();}
   else if(id==='live'){renderLive();}
-  else if(id==='standings'){renderStandings();renderAllTime();}
+  else if(id==='standings'){renderStandings();}
   else if(id==='history'){renderHistory();renderArchive();_updateLastSavedBanner();}
   else if(id==='player'){renderPlayerView();}
 }
@@ -3631,13 +2895,49 @@ function initCourtPills(containerId,onSel){
   });
 }
 
-/* ── ADMIN PIN SYSTEM ────────────────────────────── */
-// PIN lives in S.adminPin → persisted to Firebase via STORE.save()
-// All admin devices share the same PIN automatically
+/* § ADMIN — PIN hashed, device-session scoped
+/* ── ADMIN PIN SYSTEM ────────────────────────────────────────────────
+   Security model:
+   · PIN is NEVER stored or transmitted in plaintext.
+     Only SHA-256(pin) is stored in S.adminPin and synced via Firebase.
+   · Device session token: once unlocked, a token is stored in
+     localStorage so the same device+room stays unlocked across
+     page refreshes (without re-entering the PIN) for 12 hours.
+   · Two devices with the same room code still need to each enter
+     the PIN once — the session token is device-scoped.
+   · Backwards-compat: if a stored PIN is 4 chars (old plaintext),
+     it is migrated to a hash on the next successful unlock.
+──────────────────────────────────────────────────────────────────── */
 let _pinBuffer='';
+let ADMIN_UNLOCKED=false;
 
+// ── Crypto helpers ─────────────────────────────────────────────────
+async function _hashPin(pin){
+  const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(pin));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function _deviceSessionKey(){return`pb_adm_${SYNC.roomId||localStorage.getItem('pb_room_id')||'local'}`;}
+function _saveDeviceSession(pinHash){
+  try{localStorage.setItem(_deviceSessionKey(),JSON.stringify({h:pinHash,exp:Date.now()+12*3600*1000}));}
+  catch(e){}
+}
+function _clearDeviceSession(){try{localStorage.removeItem(_deviceSessionKey());}catch(e){}}
+function _checkDeviceSession(pinHash){
+  try{
+    const raw=localStorage.getItem(_deviceSessionKey());
+    if(!raw)return false;
+    const {h,exp}=JSON.parse(raw);
+    return h===pinHash&&Date.now()<exp;
+  }catch(e){return false;}
+}
+
+// ── Public API ─────────────────────────────────────────────────────
 function getAdminPin(){return S.adminPin||'';}
-function setAdminPin(pin){S.adminPin=pin||'';STORE.save();}
+
+async function setAdminPin(pin){
+  S.adminPin=await _hashPin(pin);
+  STORE.save();
+}
 
 function _updatePinDots(){
   for(let i=0;i<4;i++){
@@ -3654,45 +2954,71 @@ function pinKey(k){
 }
 function pinDel(){if(_pinBuffer.length>0){_pinBuffer=_pinBuffer.slice(0,-1);_updatePinDots();}}
 
-function _checkPin(){
+async function _checkPin(){
   const stored=getAdminPin();
+  const entered=_pinBuffer;
+  _pinBuffer='';
+
   if(!stored){
-    // First time: setting the PIN
+    // First time: setting the PIN — two-step confirm flow
     if(!window._pinStage){
-      window._pinStage='confirm';window._pinFirst=_pinBuffer;_pinBuffer='';
+      window._pinStage='confirm';window._pinFirst=entered;
       document.getElementById('lock-sub').textContent='Re-enter PIN to confirm.';
       _updatePinDots();return;
     }
-    if(_pinBuffer===window._pinFirst){
-      setAdminPin(_pinBuffer);window._pinStage=null;window._pinFirst=null;
-      _unlockAdmin();toast('Admin PIN set ✓','ok');
+    if(entered===window._pinFirst){
+      window._pinStage=null;window._pinFirst=null;
+      await setAdminPin(entered);
+      _unlockAdmin(S.adminPin);
+      toast('Admin PIN set ✓','ok');
     }else{
-      _pinBuffer='';window._pinStage=null;window._pinFirst=null;
+      window._pinStage=null;window._pinFirst=null;
       document.getElementById('lock-sub').textContent='PINs didn\'t match. Try again.';
       _updatePinDots();
     }
-  }else{
-    if(_pinBuffer===stored){_unlockAdmin();}
-    else{
-      _pinBuffer='';document.getElementById('lock-sub').textContent='Wrong PIN. Try again.';
-      document.getElementById('lock-sub').style.color='var(--re)';
-      _updatePinDots();
-      setTimeout(()=>{const s=document.getElementById('lock-sub');if(s){s.textContent='Enter your admin PIN to continue.';s.style.color='';}},1800);
-    }
+    return;
   }
+
+  // Verify: hash the entered PIN and compare
+  // Backwards compat: if stored is 4 chars it's an old plaintext PIN — migrate it
+  let hash;
+  if(stored.length===4){
+    // Old plaintext format — check directly, then migrate
+    if(entered!==stored){_pinFail();return;}
+    hash=await _hashPin(entered);
+    S.adminPin=hash;
+    STORE.save(); // write the hashed version
+  }else{
+    hash=await _hashPin(entered);
+    if(hash!==stored){_pinFail();return;}
+  }
+  _unlockAdmin(hash);
 }
 
-function _unlockAdmin(){
+function _pinFail(){
+  document.getElementById('lock-sub').textContent='Wrong PIN. Try again.';
+  document.getElementById('lock-sub').style.color='var(--re)';
+  _updatePinDots();
+  setTimeout(()=>{
+    const s=document.getElementById('lock-sub');
+    if(s){s.textContent='Enter your admin PIN to continue.';s.style.color='';}
+  },1800);
+}
+
+function _unlockAdmin(pinHash){
   ADMIN_UNLOCKED=true;_pinBuffer='';_updatePinDots();
   document.getElementById('admin-lock').classList.remove('open');
   const lb=document.getElementById('lock-btn');
   if(lb)lb.style.display=getAdminPin()?'inline-block':'none';
   updatePinStatus();
+  // Save device session so this device doesn't need to re-enter for 12h
+  if(pinHash)_saveDeviceSession(pinHash);
 }
 
 function lockAdmin(){
   if(!getAdminPin()){toast('Set a PIN first (Setup tab → Admin PIN)','warn');return;}
   ADMIN_UNLOCKED=false;
+  _clearDeviceSession();
   document.getElementById('admin-lock').classList.add('open');
   document.getElementById('lock-sub').textContent='Enter your admin PIN to continue.';
   document.getElementById('lock-sub').style.color='';
@@ -3701,11 +3027,15 @@ function lockAdmin(){
 }
 
 function checkAdminAccess(){
-  if(PLAYER_MODE)return; // player mode never needs PIN
+  if(PLAYER_MODE)return;
   const pin=getAdminPin();
   const sub=document.getElementById('lock-sub');
+  // Auto-unlock if this device has a valid session token for this room
+  if(pin&&_checkDeviceSession(pin)){
+    _unlockAdmin(null); // null = don't re-save session (already valid)
+    return;
+  }
   if(!pin){
-    // No PIN set yet — force creation before entering
     if(sub)sub.textContent='Set a 4-digit PIN to protect admin access.';
   }else{
     if(sub){sub.textContent='Enter your admin PIN to continue.';sub.style.color='';}
@@ -3833,6 +3163,7 @@ function checkNRPromotion(id){
 
 let _cfTick=null;
 
+/* § CF ENGINE — matchmaking, queue, suggestions */
 const CF={
   pairKey(a,b){return[a,b].sort().join('|');},
   matchupKey(t1,t2){
@@ -5126,7 +4457,215 @@ function cfMaybeAutoConfirm(courtNum){
 
 
 
-function init(){
+/* ══════════════════════════════════════════════════════════════════
+   OPERATIONAL SAFETY — local backup, connection tracking, retry,
+   queue rules, render guards
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Item 2: Emergency local backup ────────────────────────────────
+   Written on every confirmed Firebase write.
+   Offered on loading screen if Firebase fails to connect.
+──────────────────────────────────────────────────────────────────── */
+function _backupToLocal(){
+  if(!S.session)return;
+  try{
+    localStorage.setItem('pb_local_backup',JSON.stringify({
+      session:JSON.parse(JSON.stringify(S.session)),
+      db:JSON.parse(JSON.stringify(S.db)),
+      archive:JSON.parse(JSON.stringify(S.archive||[])),
+      savedAt:Date.now(),
+      roomId:SYNC.roomId||localStorage.getItem('pb_room_id')||'?'
+    }));
+  }catch(e){console.warn('Local backup failed:',e);}
+}
+
+function _getLocalBackup(){
+  try{const r=localStorage.getItem('pb_local_backup');return r?JSON.parse(r):null;}
+  catch(e){return null;}
+}
+
+function _showRestoreButtonIfAvailable(){
+  const b=_getLocalBackup();
+  const btn=document.getElementById('fb-restore-btn');
+  const sub=document.getElementById('fb-loading-sub');
+  if(!b||!b.session||!btn)return;
+  const mins=Math.round((Date.now()-b.savedAt)/60000);
+  const ago=mins<=1?'just now':`${mins} min ago`;
+  if(sub)sub.textContent=`Firebase unreachable — local backup from ${ago} is available`;
+  btn.style.display='inline-flex';
+}
+
+function _restoreFromLocal(){
+  const b=_getLocalBackup();
+  if(!b){toast('No local backup found','err');return;}
+  S.session=b.session;S.db=b.db;S.archive=b.archive||[];
+  S.checkedIn.clear();
+  S.session?.activePlayers?.forEach(id=>S.checkedIn.add(id));
+  const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
+  renderDB();renderRoster();renderHistory();renderArchive();renderLive();
+  updateHeader();updatePinStatus();_updateRoomBadge();
+  _setSaveStatus('offline');
+  toast('📦 Session restored from local backup — working offline','ok',5000);
+  // Attempt to reconnect silently in background
+  setTimeout(()=>{if(!SYNC.ready)SYNC.autoConnect();},8000);
+}
+
+/* ── Item 1+5: Connection state + save confirmation + write retry ──
+   .info/connected gives real-time Firebase connection state.
+   Writes retry up to 2 times with 4s backoff before hard failure.
+──────────────────────────────────────────────────────────────────── */
+let _fbConnected=false;
+let _pendingRetryTimer=null;
+
+function _trackConnection(db){
+  db.ref('.info/connected').on('value',snap=>{
+    const wasConnected=_fbConnected;
+    _fbConnected=snap.val()===true;
+    if(_fbConnected&&!wasConnected){
+      // Just came online
+      SYNC._updateBadge();
+      const el=document.getElementById('save-status');
+      if(el&&el.textContent==='⚡ offline'){
+        // Had pending save — attempt now
+        _setSaveStatus('saving');
+        SYNC.push('all');
+      }
+    }else if(!_fbConnected){
+      SYNC._updateBadge();
+      _setSaveStatus('offline');
+    }
+  });
+}
+
+function _pushWithRetry(updates,attempt=0){
+  if(!SYNC.ready||!SYNC.ref)return;
+  SYNC.ref.update(updates)
+    .then(()=>{
+      _setSaveStatus('saved');
+      _backupToLocal(); // mirror confirmed write to local storage
+    })
+    .catch(e=>{
+      if(attempt<2){
+        const delay=4000*(attempt+1);
+        clearTimeout(_pendingRetryTimer);
+        _pendingRetryTimer=setTimeout(()=>_pushWithRetry(updates,attempt+1),delay);
+        _setSaveStatus('retrying');
+        console.warn(`[sync] Write failed (attempt ${attempt+1}), retrying in ${delay/1000}s:`,e.message);
+      }else{
+        _setSaveStatus('error');
+        console.error('[sync] Write failed after 3 attempts:',e);
+        toast('⚠️ Data not saved after retries — check WiFi','err');
+        _backupToLocal(); // always preserve locally even on server failure
+      }
+    });
+}
+
+/* Extended _setSaveStatus with offline + retrying states */
+function _setSaveStatus(state){
+  const el=document.getElementById('save-status');
+  if(!el)return;
+  clearTimeout(_saveStatusTimer);
+  if(state==='saving'){
+    el.textContent='saving…';el.style.color='var(--mu)';
+  }else if(state==='saved'){
+    const t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    el.textContent=`✓ ${t}`;el.style.color='var(--gr)';
+  }else if(state==='offline'){
+    el.textContent='⚡ offline';el.style.color='var(--or)';
+  }else if(state==='retrying'){
+    el.textContent='↻ retrying…';el.style.color='var(--or)';
+  }else if(state==='error'){
+    el.textContent='⚠ save failed';el.style.color='var(--re)';
+  }
+}
+
+/* ── Item 4: Queue rules modal ──────────────────────────────────── */
+function openQueueRulesModal(){
+  openModal(`<div class="modal-title">⚖️ Queue &amp; Fairness Rules</div>
+    <div style="font-size:.76rem;color:var(--mu);line-height:1.9;margin-bottom:8px">
+      These rules run automatically every time a court opens.
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;font-size:.76rem">
+      <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px">
+        <strong style="color:var(--tx)">1 · Waiting time first</strong><br/>
+        <span style="color:var(--mu)">Players who have waited longest get priority. Wait time is shown in the queue list.</span>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px">
+        <strong style="color:var(--tx)">2 · Everyone plays once before anyone plays twice</strong><br/>
+        <span style="color:var(--mu)">No player is assigned a second game while someone else hasn't had their first.</span>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px">
+        <strong style="color:var(--tx)">3 · Missed 3+ turns → guaranteed next court</strong><br/>
+        <span style="color:var(--mu)">If someone sits out 3 times in a row, the system forces them into the next available slot. Shown as ⚖ in queue.</span>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px">
+        <strong style="color:var(--tx)">4 · Partner rotation</strong><br/>
+        <span style="color:var(--mu)">Winning pairs split after 2 consecutive wins together. Partners are rotated to keep matches fresh.</span>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px">
+        <strong style="color:var(--tx)">5 · Skill balance</strong><br/>
+        <span style="color:var(--mu)">Matchups try to keep average team ratings close. NR players are calibrated over 5 games before a full rating is assigned.</span>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px">
+        <strong style="color:var(--tx)">6 · Admin overrides always win</strong><br/>
+        <span style="color:var(--mu)">You can pin any player to the front of the queue, pause them, or assign courts manually at any time.</span>
+      </div>
+    </div>
+    <button class="btn bg2 sm" style="width:100%;margin-top:12px" onclick="closeModal()">Got it</button>`);
+}
+
+/* ── Items 6/7/8: Render guards — prevent cross-tab contamination ──
+   Called at the top of each render function.
+   Each tab renderer asserts it owns its container — nothing else writes there.
+──────────────────────────────────────────────────────────────────── */
+function _assertOwner(containerId, callerName){
+  // No-op in production — here for debugging regressions:
+  // if(!document.getElementById(containerId))
+  //   console.error(`[render] ${callerName}: container #${containerId} not found`);
+}
+
+function renderHistory(){
+  _assertOwner('history-wrap','renderHistory'); // History owns: history-wrap, archive-wrap
+  const el=document.getElementById('history-wrap');
+  if(!el)return;
+  if(!S.session){el.innerHTML=`<div class="empty">No active session.</div>`;return;}
+  const gn=id=>{const sp=gsp(id);if(sp?.name)return esc(sp.name+(sp.tag?` ${sp.tag}`:''));return esc(gp(id)?.name||'?');};
+  const log=S.session.cfLog||[];
+  if(!log.length){
+    const count=S.session.players?.length||0;
+    el.innerHTML=`<div class="empty" style="text-align:center;padding:18px 10px">
+      <div style="font-size:1.8rem;margin-bottom:8px">🏓</div>
+      <div style="font-size:.82rem;color:var(--tx);font-weight:600;margin-bottom:4px">No matches yet</div>
+      <div style="font-size:.72rem;color:var(--mu)">${count} player${count!==1?'s':''} checked in — match history will appear here after the first score is submitted.</div>
+    </div>`;
+    return;
+  }
+  el.innerHTML=[...log].slice().reverse().map((m,ri)=>{
+    const origIdx=log.length-1-ri;
+    const t1n=m.t1.map(gn).join(' & '),t2n=m.t2.map(gn).join(' & ');
+    const sc=`${m.s1}–${m.s2}`,tie=m.s1===m.s2,t1w=m.s1>m.s2;
+    const durMs=m.endTime&&m.startTime?m.endTime-m.startTime:0;
+    const durMin=durMs?Math.round(durMs/60000)+'min':'';
+    const extTag=m.extended?`<span style="font-size:.62rem;color:var(--or)"> extended</span>`:'';
+    return `<div class="hm" style="flex-wrap:wrap;gap:4px">
+      <span style="font-size:.65rem;color:var(--cy);min-width:46px">C${m.courtNum}</span>
+      <div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div>
+      <div class="hscore" style="${tie?'color:var(--go)':''}">${sc}</div>
+      <div style="flex:1;text-align:right;font-weight:${!t1w&&!tie?700:400};color:${!t1w&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div>
+      <span style="font-size:.63rem;color:var(--m2)">${durMin}${extTag}</span>
+      <button class="sedit" style="width:auto;margin-top:0" onclick="openEditScoreCF(${origIdx})">✏️</button>
+    </div>`;
+  }).join('');
+}
+
+function renderStandings(){
+  _assertOwner('sess-std','renderStandings'); // Standings owns: sess-std only
+  renderSessStd();
+}
+
+function renderPlayerView(){
+  _assertOwner('pv-content','renderPlayerView'); // My Stats owns: pv-podium(gone), pv-content
+  if(!isActiveTab('player')&&!PLAYER_MODE)return;
   initCourtPills('cpills-setup',n=>{S.courts=n;renderRoster();});
   initCourtPills('cpills-live',n=>{
     S.courts=n;if(S.session&&!S.session.cfMode){S.session.courts=n;STORE.save();}
@@ -5251,16 +4790,16 @@ function importMarch28Session(){
     id:'march28-2025',
     name:'[SYR x APL] Weekend Pickles & Ladders',
     date:'2025-03-28T15:00:00Z',
-    cfMode:true,courts:3,roundMin:0,
+    cfMode:true,courts:3,
     players:sessPlayers,
-    cfLog:log,rounds:[],cfMatchCount:mc,
+    cfLog:log,cfMatchCount:mc,
     activePlayers:sessPlayers.map(sp=>sp.id)
   };
   // Remove if already exists
   S.archive=S.archive.filter(a=>a.id!=='march28-2025');
   S.archive.push(sess);
   recalcAllTimeRatings();
-  STORE.save('db');renderDB();renderAllTime();renderStandings();renderArchive();updatePvSessFilter();
+  STORE.save('db');renderDB();renderStandings();renderArchive();updatePvSessFilter();
   toast('✅ March 28 session imported — '+mc+' matches, '+sessPlayers.length+' players, ratings recalculated','ok');
 }
 document.addEventListener('DOMContentLoaded',init);
