@@ -632,10 +632,13 @@ function generateNewRoom(){
     `<strong>Generate a new room?</strong><br/>
     <span style="font-size:.74rem;color:var(--mu)">This device will disconnect from the current room and join a new one. Other devices will stay on the old room until you share the new code.</span>`,
     '🔀 New Room','bc',()=>{
+      const prevRoomId=SYNC.roomId||localStorage.getItem('pb_room_id')||'local';
       const newId=_generateRoomId();
+      // Clear old room's local backup and admin token before switching
+      localStorage.removeItem('pb_local_backup');
+      localStorage.removeItem(`pb_adm_${prevRoomId}`);
       localStorage.setItem('pb_room_id',newId);
       SYNC.clearConfig();
-      SYNC.ready=false;
       SYNC.autoConnect();
       closeModal();
     }
@@ -663,12 +666,35 @@ const DEVICE_ID=Math.random().toString(36).slice(2,10); // Runtime only — no l
 /* ── FIREBASE REAL-TIME SYNC ──────────────────────── */
 const SYNC={
   ready:false, ref:null, roomId:null, _ignoreNext:false, _unsubscribe:null,
+  // Connection state: 'idle' | 'connecting' | 'connected' | 'error'
+  state:'idle',
 
-  // No localStorage — Firebase is the single source of truth
   clearConfig(){
-    this.ready=false;this.ref=null;this.roomId=null;
+    this.ready=false;this.ref=null;this.roomId=null;this.state='idle';
     if(this._unsubscribe){this._unsubscribe();this._unsubscribe=null;}
     this._updateBadge();
+  },
+
+  // Full leave: detach Firebase, clear all local keys, reset app state, reload-safe
+  leaveRoom(){
+    const prevRoomId=this.roomId||localStorage.getItem('pb_room_id')||'local';
+    this.clearConfig();
+    // Clear room key so next load generates a fresh one
+    localStorage.removeItem('pb_room_id');
+    // Clear local backup to avoid re-populating stale state
+    localStorage.removeItem('pb_local_backup');
+    // Clear admin session token
+    const adminKey=`pb_adm_${prevRoomId}`;
+    localStorage.removeItem(adminKey);
+    // Reset app state
+    S.db=[];S.session=null;S.archive=[];S.checkedIn.clear();
+    ADMIN_UNLOCKED=false;
+    // Reset UI
+    renderDB();renderRoster();renderHistory();renderArchive();renderStandings();
+    updateHeader();updatePinStatus();_updateRoomBadge();
+    switchTab('setup');
+    _setSaveStatus('idle');
+    toast('Room left — ready to join a new room','ok');
   },
 
   _loadScript(src){
@@ -728,12 +754,12 @@ const SYNC={
       });
       this._unsubscribe=()=>this.ref.off('value',listener);
       this.ready=true;
-      // No config saved — Firebase only
+      this.state='connected';
       this._updateBadge();
       toast(`🟢 Live sync ON — Room ${roomId}`,'ok');
       return true;
     }catch(e){
-      this.ready=false;this._updateBadge();
+      this.ready=false;this.state='error';this._updateBadge();
       toast(`Sync failed: ${e.message||e}`,'err');
       return false;
     }
@@ -901,17 +927,25 @@ const SYNC={
     }
   },
 
-  _updateBadge(state=''){
+  _updateBadge(st=''){
+    // st overrides this.state for transient states like 'connecting'
+    if(st)this.state=st;
     const b=document.getElementById('sync-badge');
     if(!b)return;
-    if(state==='connecting'){
+    const s=this.state;
+    if(s==='connecting'){
       b.textContent='⏳ Connecting…';
       b.style.cssText='display:inline-flex;align-items:center;gap:3px;font-size:.65rem;font-weight:700;padding:3px 8px;border-radius:20px;background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.3);color:var(--go);cursor:pointer';
-    }else if(this.ready){
-      b.textContent=`🟢 Live`;
+    }else if(s==='connected'||this.ready){
+      this.state='connected';
+      b.textContent='🟢 Live';
       b.style.cssText='display:inline-flex;align-items:center;gap:3px;font-size:.65rem;font-weight:700;padding:3px 8px;border-radius:20px;background:rgba(52,217,116,.12);border:1px solid rgba(52,217,116,.35);color:var(--gr);cursor:pointer';
+    }else if(s==='error'){
+      b.textContent='🔴 Error';
+      b.style.cssText='display:inline-flex;align-items:center;gap:3px;font-size:.65rem;font-weight:700;padding:3px 8px;border-radius:20px;background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.35);color:var(--re);cursor:pointer';
     }else{
-      b.textContent='⚪ Sync Off';
+      this.state='idle';
+      b.textContent='⚪ Offline';
       b.style.cssText='display:inline-flex;align-items:center;gap:3px;font-size:.65rem;font-weight:700;padding:3px 8px;border-radius:20px;background:var(--s2);border:1px solid var(--bd);color:var(--mu);cursor:pointer';
     }
     _updateRoomBadge();
@@ -2349,51 +2383,76 @@ function onPvSelectChange(){
 
 /* ── SYNC MODAL ───────────────────────────────────── */
 function openSyncModal(){
-  const isOn=SYNC.ready;
   const roomId=SYNC.roomId||localStorage.getItem('pb_room_id')||'—';
+  const state=SYNC.state||'idle';
+  const stateLabel={
+    connected:'<span style="color:var(--gr);font-weight:700">🟢 Connected</span>',
+    connecting:'<span style="color:var(--go);font-weight:700">⏳ Connecting…</span>',
+    error:'<span style="color:var(--re);font-weight:700">🔴 Connection error</span>',
+    idle:'<span style="color:var(--mu);font-weight:700">⚪ Offline</span>'
+  }[state]||'<span style="color:var(--mu)">Unknown</span>';
+
   openModal(`<div class="modal-title">📡 Room & Sync</div>
 
-    <div style="background:rgba(34,211,238,.07);border:1px solid rgba(34,211,238,.25);border-radius:var(--ra);padding:14px;text-align:center;margin-bottom:12px">
-      <div style="font-size:.68rem;color:var(--mu);margin-bottom:3px;letter-spacing:.08em">ROOM CODE</div>
+    <div style="background:rgba(34,211,238,.07);border:1px solid rgba(34,211,238,.25);border-radius:var(--ra);padding:12px;text-align:center;margin-bottom:10px">
+      <div style="font-size:.68rem;color:var(--mu);margin-bottom:2px;letter-spacing:.08em">ROOM CODE</div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:var(--cy);letter-spacing:6px">${esc(roomId)}</div>
-      <div style="font-size:.71rem;color:var(--mu);margin-top:3px">All devices that auto-connect share this room</div>
+      <div style="font-size:.71rem;margin-top:3px">${stateLabel}</div>
     </div>
 
-    ${isOn?`
-    <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
-      <span style="font-size:.72rem;color:var(--gr);font-weight:700">🟢 Live sync ON</span>
-      <span style="font-size:.72rem;color:var(--mu)">· scores and players sync in real-time</span>
-    </div>
+    ${state==='connected'?`
     <div style="font-size:.73rem;color:var(--mu);background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px;margin-bottom:10px;line-height:1.6">
-      <strong style="color:var(--tx)">Add another device:</strong> open this app on the other device — it auto-joins room <strong style="color:var(--cy)">${esc(roomId)}</strong>.<br/>
-      Every score and roster change syncs instantly.
+      <strong style="color:var(--tx)">Add another device:</strong> open this app on any device — it auto-joins room <strong style="color:var(--cy)">${esc(roomId)}</strong> and syncs live.
+    </div>`:`
+    <div style="background:rgba(251,191,36,.07);border:1px solid rgba(251,191,36,.25);border-radius:var(--ra);padding:9px;margin-bottom:10px;font-size:.73rem;color:var(--go)">
+      ${state==='error'?'Connection failed. Tap Retry or join a specific room below.':'Not connected. Tap Retry to reconnect.'}
     </div>
-    <button class="btn bd2 sm" style="width:100%;margin-bottom:6px"
-      onclick="showCfm('Disconnect live sync on this device?','Disconnect','bd2',()=>{SYNC.clearConfig();closeModal();toast('Sync disconnected','warn');})">
-      Disconnect This Device
-    </button>`:`
-    <div style="background:rgba(251,191,36,.07);border:1px solid rgba(251,191,36,.25);border-radius:var(--ra);padding:10px;margin-bottom:10px;font-size:.73rem;color:var(--go)">
-      ⏳ Not connected — check your internet connection or tap Retry.
-    </div>
-    <button class="btn bp" style="width:100%;margin-bottom:6px" onclick="closeModal();SYNC.ready=false;SYNC.autoConnect()">
+    <button class="btn bp" style="width:100%;margin-bottom:8px" onclick="closeModal();SYNC.ready=false;SYNC.state='idle';SYNC.autoConnect()">
       🔄 Retry Connection
     </button>`}
 
     <div class="dv" style="margin:10px 0"></div>
-    <div style="font-size:.72rem;color:var(--mu);margin-bottom:6px;font-weight:700">ROOM ISOLATION</div>
-    <div style="font-size:.71rem;color:var(--mu);margin-bottom:8px;line-height:1.6">
-      Each session should use a unique room to prevent data from different events mixing.
-      Generate a new room code before starting a new event.
-    </div>
-    <button class="btn bc sm" style="width:100%;margin-bottom:8px" onclick="closeModal();generateNewRoom()">
-      🔀 Generate New Room Code
-    </button>
 
-    <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px;font-size:.7rem;color:var(--mu)">
-      <strong style="color:var(--tx)">Firebase project:</strong> ladder-open-play &nbsp;·&nbsp;
+    <div style="font-size:.72rem;color:var(--mu);font-weight:700;margin-bottom:5px">JOIN A SPECIFIC ROOM</div>
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <input id="join-room-input" class="inp" placeholder="Enter room code…"
+        style="flex:1;text-transform:uppercase;letter-spacing:2px;font-family:'Bebas Neue',sans-serif;font-size:1rem"
+        maxlength="12" oninput="this.value=this.value.toUpperCase()"/>
+      <button class="btn bc" onclick="joinSpecificRoom()">Join</button>
+    </div>
+
+    <div class="dv" style="margin:10px 0"></div>
+
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <button class="btn bc sm" style="flex:1" onclick="closeModal();generateNewRoom()">🔀 New Room</button>
+      <button class="btn bd2 sm" style="flex:1" onclick="closeModal();SYNC.leaveRoom()">🚪 Leave Room</button>
+    </div>
+
+    <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px;font-size:.7rem;color:var(--mu)">
+      <strong style="color:var(--tx)">Firebase:</strong> ladder-open-play &nbsp;·&nbsp;
       <strong style="color:var(--tx)">Device:</strong> ${DEVICE_ID.slice(0,6)}
     </div>
     <button class="btn bg2 sm" style="width:100%;margin-top:10px" onclick="closeModal()">Close</button>`);
+}
+
+async function joinSpecificRoom(){
+  const input=document.getElementById('join-room-input');
+  const roomId=(input?.value||'').trim().toUpperCase();
+  if(!roomId||roomId.length<4){toast('Enter a room code (min 4 chars)','err');return;}
+  // Store the new room ID and reconnect
+  localStorage.setItem('pb_room_id',roomId);
+  SYNC.clearConfig();
+  closeModal();
+  toast(`Joining room ${roomId}…`,'ok');
+  const cfg={
+    apiKey:'AIzaSyCntwgc62wfRackl_sGFpp7FZiXmJvIhYI',
+    authDomain:'ladder-open-play.firebaseapp.com',
+    databaseURL:'https://ladder-open-play-default-rtdb.asia-southeast1.firebasedatabase.app',
+    projectId:'ladder-open-play',storageBucket:'ladder-open-play.firebasestorage.app',
+    messagingSenderId:'669188671832',appId:'1:669188671832:web:8335ae5c6dd9298170fd2d'
+  };
+  const ok=await SYNC.connect(cfg,roomId);
+  if(ok)_updateRoomBadge();
 }
 
 async function doConnectSync(){
@@ -4521,9 +4580,14 @@ function _autoRestoreFromLocal(){
   if(!b||!b.db)return false;
   const roomId=localStorage.getItem('pb_room_id');
   const ageMs=Date.now()-(b.savedAt||0);
-  // Discard if older than 48 h or belongs to a different room
+  // Discard if older than 48 h
   if(ageMs>48*3600*1000){console.log('[backup] Local snapshot too old, skipping');return false;}
-  if(b.roomId&&roomId&&b.roomId!==roomId){console.log('[backup] Snapshot is for a different room, skipping');return false;}
+  // Discard if belongs to a different room — don't pollute a new room with old data
+  if(b.roomId&&roomId&&b.roomId!==roomId){
+    console.log('[backup] Snapshot is for a different room, clearing stale data');
+    localStorage.removeItem('pb_local_backup');
+    return false;
+  }
 
   // Apply snapshot into S
   S.db=b.db||[];
@@ -4625,6 +4689,8 @@ function _setSaveStatus(state){
     el.textContent='↻ retrying…';el.style.color='var(--or)';
   }else if(state==='error'){
     el.textContent='⚠ save failed';el.style.color='var(--re)';
+  }else if(state==='idle'){
+    el.textContent='—';el.style.color='var(--mu)';
   }
 }
 
