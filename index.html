@@ -4566,11 +4566,16 @@ function _autoRestoreFromLocal(){
   }
 
   // Render immediately with local data — loading overlay stays up while Firebase syncs
-  renderDB();renderRoster();renderHistory();renderArchive();renderStandings();
-  updateHeader();updatePinStatus();
-  if(S.session?.status==='active'){
-    renderLive();
-    // Don't switchTab yet — let Firebase first load do that so we don't flash the wrong tab
+  try{
+    renderDB();renderRoster();renderHistory();renderArchive();renderStandings();
+    updateHeader();updatePinStatus();
+    if(S.session?.status==='active') renderLive();
+  }catch(e){
+    // Corrupt backup — clear it and fall through to normal Firebase load
+    console.error('[backup] Corrupt local snapshot, clearing:',e);
+    localStorage.removeItem('pb_local_backup');
+    S.db=[];S.session=null;S.archive=[];S.checkedIn.clear();
+    return false;
   }
 
   const mins=Math.round(ageMs/60000);
