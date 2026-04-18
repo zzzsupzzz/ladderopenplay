@@ -2023,24 +2023,43 @@ function renderLive(){
 /* ── RENDER: STANDINGS ───────────────────────────── */
 function renderSessStd(){
   const el=document.getElementById('sess-std');
-  if(!S.session){el.innerHTML=`<div class="empty">No active session</div>`;return;}
+  if(!el)return;
 
-  // Build strength-of-schedule: avg opponent rating faced this session
+  // Determine which session data to show:
+  // 1. Active session → live standings
+  // 2. No active session but archive exists → final standings of last ended session
+  // 3. Neither → empty state
+  const sess=S.session||(S.archive.length?S.archive[0]:null);
+  const isFinal=!S.session&&S.archive.length>0;
+
+  if(!sess){el.innerHTML=`<div class="empty">No session yet — start one from Setup.</div>`;return;}
+
+  // Header label
+  const labelHtml=isFinal
+    ?`<div style="font-size:.68rem;font-weight:700;color:var(--go);letter-spacing:.05em;margin-bottom:8px">
+        🏁 FINAL STANDINGS — ${esc(sess.name)}
+        <span style="font-weight:400;color:var(--mu)">&nbsp;·&nbsp;${new Date(sess.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</span>
+      </div>`
+    :`<div style="font-size:.68rem;font-weight:700;color:var(--gr);letter-spacing:.05em;margin-bottom:8px">
+        <span class="pulse" style="display:inline-block;margin-right:4px"></span>LIVE STANDINGS
+      </div>`;
+
+  // Build strength-of-schedule map
   const sosMap={};
-  const allMatches=[...(S.session.cfLog||[])];
-  S.session.players.forEach(sp=>{
+  const allMatches=[...(sess.cfLog||[])];
+  sess.players.forEach(sp=>{
     const myMatches=allMatches.filter(m=>[...m.t1,...m.t2].includes(sp.id));
     if(!myMatches.length){sosMap[sp.id]=null;return;}
     const oppRatings=myMatches.flatMap(m=>{
       const opps=[...m.t1,...m.t2].filter(x=>x!==sp.id);
-      return opps.map(oid=>{const osp=S.session.players.find(p=>p.id===oid);return osp?.sRating||1000;});
+      return opps.map(oid=>{const osp=sess.players.find(p=>p.id===oid);return osp?.sRating||1000;});
     });
     sosMap[sp.id]=Math.round(oppRatings.reduce((a,b)=>a+b,0)/oppRatings.length);
   });
   const sosValues=Object.values(sosMap).filter(v=>v!==null);
   const avgSos=sosValues.length?Math.round(sosValues.reduce((a,b)=>a+b,0)/sosValues.length):null;
 
-  const rows=[...S.session.players].sort((a,b)=>{
+  const rows=[...sess.players].sort((a,b)=>{
     if(b.wins!==a.wins)return b.wins-a.wins;
     const pda=a.ptsFor-a.ptsAgainst,pdb=b.ptsFor-b.ptsAgainst;
     if(pdb!==pda)return pdb-pda;
@@ -2050,15 +2069,16 @@ function renderSessStd(){
     const tag=sp.tag!==undefined?sp.tag:(gp(sp.id)?.tag||'');
     const d=sp.sRating-sp.startRating,pd=sp.ptsFor-sp.ptsAgainst;
     const nrTag=sp.isNR?`<span class="nr-badge">NR</span>`:sp.isSeeding?`<span class="nr-seed">~${Math.round(sp.sRating)}</span>`:'';
-    const onCourt=S.session.cfMode?Object.values(S.session.cfCourts||{}).find(c=>c.match&&[...c.match.t1,...c.match.t2].includes(sp.id)):null;
+    // Court indicator only relevant when live
+    const onCourt=(!isFinal&&sess.cfMode)?Object.values(sess.cfCourts||{}).find(c=>c.match&&[...c.match.t1,...c.match.t2].includes(sp.id)):null;
     const courtTag=onCourt?`<span style="font-size:.6rem;color:var(--cy);background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.25);border-radius:4px;padding:1px 4px;margin-left:3px">▶C${onCourt.match?.courtNum||''}</span>`:'';
     const rtgCell=sp.isNR?'NR':Math.round(sp.sRating);
-    // SOS indicator: above avg = harder schedule, below avg = softer
     const sos=sosMap[sp.id];
     const sosTag=sos&&avgSos?`<span title="Avg opponent rating: ${sos}" style="font-size:.6rem;padding:1px 4px;border-radius:4px;margin-left:2px;${sos>avgSos+50?'color:var(--or);background:rgba(251,147,60,.1)':sos<avgSos-50?'color:var(--mu);background:var(--s2)':'color:var(--mu)'}">${sos>avgSos+50?'↑':''}${sos<avgSos-50?'↓':''}${sos}</span>`:'';
     return `<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.79rem">${esc(name)}${tag?`<span class="ptag">${esc(tag)}</span>`:''}${nrTag}${courtTag}${sp.status==='left'?'<span class="tleft">LEFT</span>':''}</td><td style="font-size:.73rem;color:var(--mu)">${sp.wins}W/${sp.losses}L${sp.ties?'/'+sp.ties+'T':''}</td><td style="font-size:.71rem;color:var(--mu)">${pd>=0?'+':''}${pd}${sosTag}</td><td><span class="dl ${d>0?'du':d<0?'dd':'dz'}">${d>=0?'+':''}${d}</span></td><td><span class="rv">${rtgCell}</span></td></tr>`;
   }).join('');
-  el.innerHTML=`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th>W/L</th><th>PD+SOS</th><th>Δ</th><th>RTG</th></tr></thead><tbody>${rows}</tbody></table>
+
+  el.innerHTML=labelHtml+`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th>W/L</th><th>PD+SOS</th><th>Δ</th><th>RTG</th></tr></thead><tbody>${rows}</tbody></table>
   <div style="font-size:.62rem;color:var(--m2);margin-top:5px;padding:0 2px">SOS = avg opponent rating (↑ harder schedule, ↓ easier)</div>`;
 }
 // renderAllTime removed — all-time ratings visible in Setup player list
