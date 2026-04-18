@@ -415,6 +415,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
         <button class="btn bg2 sm" onclick="openImportModal()">📥 Import</button>
         <button class="btn bg2 sm" onclick="openExportModal()">📤 Export</button>
         <button class="btn bg2 sm" title="Reconstruct player records from archived sessions if database was wiped" onclick="rebuildDbFromArchive()">🔧 Rebuild</button>
+        <button class="btn bg2 sm" title="Import March 28 session from PDF data" onclick="importMarch28Session()">📥 Mar 28</button>
       </div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
@@ -674,16 +675,24 @@ const SYNC={
 
   push(){
     if(!this.ready||!this.ref)return;
+    let payload;
     try{
-      this.ref.set({
+      payload={
         db:S.db,
         session:S.session?JSON.parse(JSON.stringify(S.session)):null,
         archive:S.archive,
         adminPin:S.adminPin||'',
         _by:DEVICE_ID,
         _ts:Date.now()
-      });
-    }catch(e){}
+      };
+    }catch(e){console.error('STORE.push serialize error',e);return;}
+    this.ref.set(payload).catch(e=>{
+      console.error('Firebase write failed:',e);
+      // Show persistent error so organiser knows data isn't saving
+      const badge=document.getElementById('sync-badge');
+      if(badge){badge.textContent='❌ Save failed';badge.style.cssText='display:inline-flex;align-items:center;gap:3px;font-size:.65rem;font-weight:700;padding:3px 8px;border-radius:20px;background:rgba(248,113,113,.15);border:1px solid rgba(248,113,113,.4);color:var(--re);cursor:pointer';}
+      toast('⚠️ Data not saved — check connection: '+e.message,'err');
+    });
   },
 
   _applyRemote(data, isFirstLoad=false){
@@ -2140,7 +2149,8 @@ function deleteArchiveSess(sessId){
 /* ── RENDER: HISTORY ─────────────────────────────── */
 function renderHistory(){
   const el=document.getElementById('history-wrap');
-  if(!S.session){el.innerHTML=`<div class="empty">No rounds yet this session.</div>`;return;}
+  if(!el)return;
+  if(!S.session){el.innerHTML=`<div class="empty">No active session.</div>`;return;}
   const gn=id=>{const sp=gsp(id);if(sp?.name)return esc(sp.name+(sp.tag?` ${sp.tag}`:''));return esc(gp(id)?.name||'?');};
   const log=S.session.cfLog||[];
   if(!log.length){
@@ -3491,21 +3501,24 @@ function updateHeader(){
 function switchTab(id){
   // In player mode, only 'player' tab is allowed
   if(PLAYER_MODE && id!=='player') return;
+  // Force display directly — CSS class cascade can fail on Android Chrome
   document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'));
-  document.querySelectorAll('.tp').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.tp').forEach(p=>{
+    p.classList.remove('on');
+    p.style.display='none'; // explicit override — belt and braces
+  });
   const tabBtn=document.querySelector(`[data-tab="${id}"]`);
   if(tabBtn) tabBtn.classList.add('on');
   const tabEl=document.getElementById(`tab-${id}`);
-  if(tabEl){tabEl.classList.add('on');}
-  else{console.error('Tab not found: tab-'+id);return;}
+  if(!tabEl){console.error('Tab not found: tab-'+id);return;}
+  tabEl.classList.add('on');
+  tabEl.style.display='block'; // explicit override
   // Always re-render on every switch to pick up latest data
   if(id==='standings'){renderStandings();}
   if(id==='history'){renderHistory();renderArchive();}
   if(id==='live'){renderLive();}
   if(id==='setup'){renderDB();renderRoster();}
   if(id==='player'){renderPlayerView();}
-  // Scroll to top of tab content on mobile
-  tabEl.scrollTop=0;
   window.scrollTo(0,0);
 }
 
@@ -4043,15 +4056,20 @@ const CF={
       for(const c of readyCourts){
         if(remaining.length<4){S.session.cfSuggestions[c]=null;continue;}
         const subRaw=remaining.slice(0,Math.min(12,remaining.length));
-        // Starving player in sub? pre-assign them with relaxed gap cap
-        const subStarving=subRaw.find(p=>this.hungerBoost(p.id)>=50);
+        // Anchor: pinned > 0-game first-timer > MGL player (matchGap>=4)
+        // Same logic as _generateSingleSuggestion — ensures MGL is honoured in all paths
+        const subAnchor=subRaw.find(p=>
+          (S.session.cfPinnedIds||[]).includes(p.id)||
+          (gsp(p.id)?.matchesPlayed||0)===0||
+          this.matchGap(p.id)>=4
+        );
         let best=null;
-        if(subStarving){
-          const subOthers=subRaw.filter(p=>p.id!==subStarving.id);
+        if(subAnchor){
+          const subOthers=subRaw.filter(p=>p.id!==subAnchor.id);
           const so=subOthers.length;
           let bScore=Infinity;
           for(let i=0;i<so-2;i++)for(let j=i+1;j<so-1;j++)for(let k=j+1;k<so;k++){
-            const g=[subStarving,subOthers[i],subOthers[j],subOthers[k]];
+            const g=[subAnchor,subOthers[i],subOthers[j],subOthers[k]];
             const res=this._scoreGroup(g,mustSplit);
             if(!this._withinTeamGapOk(res.t1,res.t2,600))continue;
             if(res.score<bScore){bScore=res.score;best={...res,group:g};}
@@ -4991,6 +5009,121 @@ function init(){
   SYNC.autoConnect();
 }
 
+
+// March 28 session data parsed from PDF
+function importMarch28Session(){
+  if(!confirm('Import March 28 session? This will add it to your archive and recalculate all ratings.'))return;
+  const BASE=1000;
+  // All players from the March 28 session
+  const names=['Vonn','An','David Liu','Quillon','Chantana','JayKtm','Matt','Konstantin',
+    'merbg','Martin Brown','Imm Pasara','Boss','Keziah','Magilian','KK','Huy','Jon',
+    'SayantanSen','Hwasaup','Aqwa','Hai long'];
+  // Ensure all players exist in db
+  names.forEach(name=>{
+    if(!S.db.find(p=>p.name===name)){
+      S.db.push({id:uid(),name,tag:'',rating:BASE,baseRating:BASE,
+        isNR:false,nrLevelHint:null,isSeeding:false,gamesPlayed:0,wins:0,losses:0,ties:0,
+        createdAt:'2025-03-28T15:00:00Z'});
+    }
+  });
+  const pid=n=>S.db.find(p=>p.name===n)?.id||null;
+  // 36 matches across 12 rounds, 3 courts
+  const matches=[
+    // Round 1
+    {t1:['Vonn','An'],t2:['David Liu','Quillon'],s1:11,s2:4,c:1},
+    {t1:['Chantana','JayKtm'],t2:['Matt','Konstantin'],s1:11,s2:3,c:2},
+    {t1:['merbg','Martin Brown'],t2:['Imm Pasara','Boss'],s1:8,s2:11,c:3},
+    // Round 2
+    {t1:['Martin Brown','Keziah'],t2:['merbg','Konstantin'],s1:11,s2:7,c:1},
+    {t1:['David Liu','Matt'],t2:['Aqwa','Quillon'],s1:7,s2:10,c:2},
+    {t1:['Magilian','KK'],t2:['Huy','Jon'],s1:11,s2:5,c:3},
+    // Round 3
+    {t1:['JayKtm','Hwasaup'],t2:['SayantanSen','Chantana'],s1:11,s2:0,c:1},
+    {t1:['Vonn','KK'],t2:['Magilian','An'],s1:6,s2:11,c:2},
+    {t1:['Boss','Keziah'],t2:['Aqwa','Imm Pasara'],s1:0,s2:11,c:3},
+    // Round 4
+    {t1:['Hwasaup','Jon'],t2:['SayantanSen','Huy'],s1:1,s2:11,c:1},
+    {t1:['Aqwa','JayKtm'],t2:['An','Imm Pasara'],s1:11,s2:2,c:2},
+    {t1:['Martin Brown','KK'],t2:['Vonn','Magilian'],s1:10,s2:11,c:3},
+    // Round 5
+    {t1:['SayantanSen','Hwasaup'],t2:['Chantana','Huy'],s1:10,s2:8,c:1},
+    {t1:['merbg','Keziah'],t2:['Quillon','Boss'],s1:11,s2:5,c:2},
+    {t1:['David Liu','Konstantin'],t2:['Matt','Jon'],s1:0,s2:11,c:3},
+    // Round 6
+    {t1:['Aqwa','Magilian'],t2:['Imm Pasara','JayKtm'],s1:11,s2:5,c:1},
+    {t1:['Vonn','Hwasaup'],t2:['SayantanSen','An'],s1:1,s2:11,c:2},
+    {t1:['Martin Brown','Huy'],t2:['KK','Keziah'],s1:11,s2:8,c:3},
+    // Round 7
+    {t1:['merbg','Jon'],t2:['Chantana','Matt'],s1:11,s2:5,c:1},
+    {t1:['David Liu','Boss'],t2:['Quillon','Konstantin'],s1:11,s2:9,c:2},
+    {t1:['Aqwa','An'],t2:['Magilian','JayKtm'],s1:11,s2:4,c:3},
+    // Round 8
+    {t1:['merbg','Huy'],t2:['Hai long','SayantanSen'],s1:11,s2:10,c:1},
+    {t1:['Martin Brown','Jon'],t2:['Imm Pasara','Keziah'],s1:10,s2:8,c:2},
+    {t1:['Vonn','Matt'],t2:['Hwasaup','Boss'],s1:11,s2:3,c:3},
+    // Round 9
+    {t1:['Hai long','Quillon'],t2:['Chantana','David Liu'],s1:4,s2:11,c:1},
+    {t1:['Aqwa','Konstantin'],t2:['Magilian','An'],s1:8,s2:6,c:2},
+    {t1:['merbg','SayantanSen'],t2:['Huy','JayKtm'],s1:4,s2:11,c:3},
+    // Round 10
+    {t1:['Martin Brown','Vonn'],t2:['Hai long','Jon'],s1:5,s2:11,c:1},
+    {t1:['Chantana','Keziah'],t2:['Imm Pasara','Matt'],s1:11,s2:9,c:2},
+    {t1:['Quillon','Boss'],t2:['Hwasaup','David Liu'],s1:0,s2:11,c:3},
+    // Round 11
+    {t1:['Hai long','Aqwa'],t2:['JayKtm','Konstantin'],s1:11,s2:3,c:1},
+    {t1:['Magilian','Jon'],t2:['An','Huy'],s1:11,s2:5,c:2},
+    {t1:['Martin Brown','SayantanSen'],t2:['merbg','David Liu'],s1:11,s2:8,c:3},
+    // Round 12
+    {t1:['Hai long','Keziah'],t2:['Chantana','Hwasaup'],s1:11,s2:6,c:1},
+    {t1:['Vonn','Imm Pasara'],t2:['Boss','Matt'],s1:11,s2:5,c:2},
+    {t1:['Aqwa','Jon'],t2:['Quillon','Konstantin'],s1:11,s2:0,c:3},
+  ];
+  // Build session players at startRating=1000
+  const sessPlayers=names.map(name=>({
+    id:pid(name),name,tag:'',isNR:false,isSeeding:false,
+    sRating:BASE,startRating:BASE,wins:0,losses:0,ties:0,matchesPlayed:0,
+    ptsFor:0,ptsAgainst:0,timeOnCourtMs:0,timeInQueueMs:0
+  })).filter(sp=>sp.id);
+  // Build cfLog (replay ELO in order)
+  const log=[];
+  let mc=0;
+  const tmpRatings={};
+  sessPlayers.forEach(sp=>{tmpRatings[sp.id]=BASE;});
+  matches.forEach(m=>{
+    const t1ids=m.t1.map(pid).filter(Boolean);
+    const t2ids=m.t2.map(pid).filter(Boolean);
+    if(t1ids.length<2||t2ids.length<2)return;
+    const deltas=ELO.calcIds(t1ids,t2ids,m.s1,m.s2);
+    log.push({courtNum:m.c,t1:t1ids,t2:t2ids,s1:m.s1,s2:m.s2,eloDeltas:deltas,
+      extended:false,startTime:0,endTime:720000,status:'done'});
+    // Update ratings for next match ELO calculation
+    [...t1ids,...t2ids].forEach((id,i)=>{
+      const sp=sessPlayers.find(p=>p.id===id);if(!sp)return;
+      sp.sRating=Math.max(400,sp.sRating+deltas[i]);
+      sp.matchesPlayed++;
+      const s1=i<2?m.s1:m.s2,s2=i<2?m.s2:m.s1;
+      sp.ptsFor+=s1;sp.ptsAgainst+=s2;
+      if(m.s1===m.s2)sp.ties++;else if((i<2&&m.s1>m.s2)||(i>=2&&m.s2>m.s1))sp.wins++;else sp.losses++;
+    });
+    mc++;
+  });
+  // Create the archived session
+  const sess={
+    id:'march28-2025',
+    name:'[SYR x APL] Weekend Pickles & Ladders',
+    date:'2025-03-28T15:00:00Z',
+    cfMode:true,courts:3,roundMin:0,
+    players:sessPlayers,
+    cfLog:log,rounds:[],cfMatchCount:mc,
+    activePlayers:sessPlayers.map(sp=>sp.id)
+  };
+  // Remove if already exists
+  S.archive=S.archive.filter(a=>a.id!=='march28-2025');
+  S.archive.push(sess);
+  recalcAllTimeRatings();
+  STORE.save();renderDB();renderAllTime();renderStandings();renderArchive();updatePvSessFilter();
+  toast('✅ March 28 session imported — '+mc+' matches, '+sessPlayers.length+' players, ratings recalculated','ok');
+}
 document.addEventListener('DOMContentLoaded',init);
 </script>
 </body>
