@@ -1407,7 +1407,7 @@ const MM={
   //   4. Lower session rating last (top players sit last among equal candidates)
   _pickSitOuts(subpool, excess){
     const minPlay=S.session.minPlayAfterSit||2;
-    const MAX_CONSEC=2; // Change 6: tighter consecutive limit — rest after 2 games, relax only when queue is thin
+    const MAX_CONSEC=3; // 3 consecutive max — natural sit rate at 21p/3c already prevents back-to-back runs
 
     // Hard rule A: just sat → must play next (no back-to-back sits)
     const mustPlayIds=new Set(subpool.filter(p=>(S.session.soStreak[p.id]||0)>=1).map(p=>p.id));
@@ -3517,8 +3517,16 @@ const CF={
     const skillFit=Math.max(0,5-Math.abs(er-courtAvg)*0.02);
     const gap=this.matchGap(qEntry.id);
     const nc=S.session?.courts||1;
-    // MGL bonus: ramps steeply as gap exceeds NC*2, maxes at NC*3 (force-include territory)
-    const gapBonus=gap>nc*2?Math.min(200,(gap-nc*2)*25):gap>nc?gap*4:0;
+    // Graduated matchGap bonus — mirrors tier thresholds:
+    //   missed 1 round (gap=nc*1): small boost, stays in normal rotation
+    //   missed 2 rounds (gap=nc*2): mild boost — clearly waiting
+    //   missed 3 rounds (gap=nc*3): strong boost — starting to feel it
+    //   missed 4+ rounds (gap≥nc*4): maximum — must-play, override everything
+    const gapBonus=
+      gap>=nc*4 ? 200 :          // must-play tier
+      gap>=nc*3 ? 120 :          // strong boost
+      gap>=nc*2 ?  50 :          // mild boost
+      gap>=nc   ?  15 : 0;       // minor — just sat once
     const hunger=this.hungerBoost(qEntry.id);
     return waitMin*2+skillFit+gapBonus+hunger;
   },
@@ -3745,7 +3753,7 @@ const CF={
         const subPriority=subRaw.filter(p=>
           (S.session.cfPinnedIds||[]).includes(p.id)||
           (gsp(p.id)?.matchesPlayed||0)===0||
-          this.matchGap(p.id)>=4
+          this.matchGap(p.id)>=4  // must-play hard anchor
         );
         let best=null;
         // Try all-priority group first (same logic as single-court path)
@@ -3820,15 +3828,20 @@ const CF={
     // TIER 1: Players who haven't played any game yet — first-game guarantee
     const tier1=pool.filter(p=>!tier0Ids.has(p.id)&&(gsp(p.id)?.matchesPlayed||0)===0);
     const tier1Ids=new Set(tier1.map(p=>p.id));
-    // TIER 2: Players whose matchGap >= NC*3 — missed 3+ full waves, force them in
-    // This is pure game-count based: works regardless of confirmation speed
-    const mglThreshold=4; // max 4 missed matches before force-include
-    const tier2=pool.filter(p=>!tier1Ids.has(p.id)&&this.matchGap(p.id)>=mglThreshold);
-    const tier2Ids=new Set(tier2.map(p=>p.id));
+    // TIER 2: Graduated matchGap tiers
+    //   missed 1 round → normal (handled by queuePriority gapBonus)
+    //   missed 2 rounds → mild boost (tier 2c, scoring bonus only)
+    //   missed 3 rounds → strong boost (tier 2b, anchor position)
+    //   missed 4+ rounds → must-play (tier 2a, hard force-include)
+    const tier2a=pool.filter(p=>!tier1Ids.has(p.id)&&this.matchGap(p.id)>=4);  // must-play
+    const tier2b=pool.filter(p=>!tier1Ids.has(p.id)&&!tier2a.some(t=>t.id===p.id)&&this.matchGap(p.id)>=3); // strong boost
+    const tier2c=pool.filter(p=>!tier1Ids.has(p.id)&&!tier2a.some(t=>t.id===p.id)&&!tier2b.some(t=>t.id===p.id)&&this.matchGap(p.id)>=2); // mild boost
+    const tier2=tier2a; // tier2a are the force-include anchors; 2b/2c get priority pool ordering
+    const tier2Ids=new Set([...tier2a,...tier2b,...tier2c].map(p=>p.id));
     // TIER 3: Everyone else in normal priority order
     const tier3=pool.filter(p=>!tier1Ids.has(p.id)&&!tier2Ids.has(p.id));
     // Compose: pinned → first-timers → MGL-waiters → normal pool
-    const fairPool=[...tier0,...tier1,...tier2,...tier3];
+    const fairPool=[...tier0,...tier1,...tier2a,...tier2b,...tier2c,...tier3];
     const jointSearchCap=nc*4;
     // Search pool: always include all priority tiers.
     // tier0 (pinned) and tier1 (never-played) have priority via fairPool ordering.
@@ -3870,8 +3883,8 @@ const CF={
     if(bestAlloc&&(tier1.length>0||tier2.length>0)){
       const allSelected=new Set(bestAlloc.flatMap(b=>b.group.map(p=>p.id)));
       // If any 0-game or MGL player wasn't selected, force greedy path
-      const unservedPrio=[...tier1,...tier2].filter(p=>!allSelected.has(p.id));
-      if(unservedPrio.length>0&&(tier1.length+tier2.length)<allSelected.size){
+      const unservedPrio=[...tier1,...tier2a].filter(p=>!allSelected.has(p.id));
+      if(unservedPrio.length>0&&(tier1.length+tier2a.length)<allSelected.size){
         // Only override if there were enough priority players to fill a court
         // but they weren't chosen (avoids override when queue is thin)
         bestAlloc=null;
@@ -3886,9 +3899,12 @@ const CF={
         if(rem.length<4){S.session.cfSuggestions[c]=null;return;}
         // If any priority players (MGL / pinned) remain unserved, anchor group on them.
         // Anchor: pinned (tier0) > 0-game (tier1) > MGL (tier2)
+        // Priority anchor order: pinned → first-timers → must-play (4+) → strong boost (3) → mild boost (2)
         const unserved=rem.filter(p=>tier0.some(t=>t.id===p.id)||
                                       tier1.some(t=>t.id===p.id)||
-                                      tier2.some(t=>t.id===p.id));
+                                      tier2a.some(t=>t.id===p.id)||
+                                      tier2b.some(t=>t.id===p.id)||
+                                      tier2c.some(t=>t.id===p.id));
         let best=null;
         if(unserved.length>0){
           const anchor=unserved[0];
@@ -3995,16 +4011,20 @@ const CF={
     const tier0pIds=new Set(tier0p.map(p=>p.id));
     const tier1p=pool.filter(p=>!tier0pIds.has(p.id)&&(gsp(p.id)?.matchesPlayed||0)===0);
     const tier1pIds=new Set(tier1p.map(p=>p.id));
-    const mgl=4; // max 4 missed matches
-    const tier2p=pool.filter(p=>!tier0pIds.has(p.id)&&!tier1pIds.has(p.id)&&this.matchGap(p.id)>=mgl);
+    // Graduated tiers matching batch path
+    const tier2ap=pool.filter(p=>!tier0pIds.has(p.id)&&!tier1pIds.has(p.id)&&this.matchGap(p.id)>=4); // must-play
+    const tier2bp=pool.filter(p=>!tier0pIds.has(p.id)&&!tier1pIds.has(p.id)&&!tier2ap.some(t=>t.id===p.id)&&this.matchGap(p.id)>=3); // strong boost
+    const tier2cp=pool.filter(p=>!tier0pIds.has(p.id)&&!tier1pIds.has(p.id)&&!tier2ap.some(t=>t.id===p.id)&&!tier2bp.some(t=>t.id===p.id)&&this.matchGap(p.id)>=2); // mild boost
+    const tier2p=[...tier2ap,...tier2bp,...tier2cp]; // all priority players ordered by urgency
     const tier2pIds=new Set(tier2p.map(p=>p.id));
     const tier3p=pool.filter(p=>!tier0pIds.has(p.id)&&!tier1pIds.has(p.id)&&!tier2pIds.has(p.id));
     const orderedPool=[...tier0p,...tier1p,...tier2p,...tier3p];
-    // Priority pool: pinned + 0-game + MGL-waiters
+    // Priority pool: pinned + 0-game + any missed-2+ (all tiers).
+    // STEP 0 handles pinned; STEP 1 handles all 4+ waiters. 2b/2c float naturally via ordering.
     const priorityPool=orderedPool.filter(p=>
       pinnedSg.has(p.id)||
       (gsp(p.id)?.matchesPlayed||0)===0||
-      this.matchGap(p.id)>=4
+      this.matchGap(p.id)>=4  // must-play only as hard priority pool
     );
     // STEP 0 (NEW): If 2–4 players are pinned, ALL must be in the match.
     // Build candidates that contain every pinned player; pick best grouping.
@@ -4027,9 +4047,9 @@ const CF={
     }
 
     // STEP 1: If 4+ priority players exist, try pairing them ALL together first.
-    // This prevents priority players from being spread thin (1 per court as anchor).
-    // E.g. 4 NR players all waiting → let them play each other rather than being
-    // split across 4 courts as anchors paired with already-played players.
+    // Quality gate: only use this path if the group passes a reasonable skill spread check.
+    // If the priority players span too wide a rating range (e.g. 700 + 1300), skip to STEP 2
+    // so that one of them gets a good match and the other waits one more turn.
     if(priorityPool.length>=4){
       const pp=priorityPool.slice(0,Math.min(8,priorityPool.length));
       const pn=pp.length;
@@ -4037,23 +4057,37 @@ const CF={
       for(let i=0;i<pn-3;i++)for(let j=i+1;j<pn-2;j++)for(let k=j+1;k<pn-1;k++)for(let l=k+1;l<pn;l++){
         const group=[pp[i],pp[j],pp[k],pp[l]];
         const res=this._scoreGroup(group,mustSplit);
-        if(!this._withinTeamGapOk(res.t1,res.t2,600))continue;
+        // Quality gate: if best team split has large within-team gap, reject this group
+        if(!this._withinTeamGapOk(res.t1,res.t2,500))continue;
         if(res.score<bestScore){bestScore=res.score;best={...res,group};}
       }
       if(best){this._storeSuggestion(courtNum,best,finishedMatch);return;}
+      // Quality gate blocked all priority-only groups — fall through to STEP 2
     }
-    // STEP 2: If <4 priority players, anchor the highest-priority one + best 3 from pool
-    const anchor=orderedPool.find(p=>
+    // STEP 2: Anchor exactly ONE must-play player — the longest-waiting one.
+    // If there are 2 must-play players at very different skill levels, forcing both
+    // into the same match produces a bad game. Better to anchor the longer-waiting one,
+    // let the other stay as high-priority fill, and give them a quality match next round.
+    // "Must-play" means "must play the next good match available to them", not
+    // "must play right now regardless of match quality."
+    const mustPlayCandidates=orderedPool.filter(p=>
       pinnedSg.has(p.id)||
       (gsp(p.id)?.matchesPlayed||0)===0||
       this.matchGap(p.id)>=4
     );
+    // Sort by urgency: longest matchGap first, then by wait time
+    mustPlayCandidates.sort((a,b)=>{
+      const ga=this.matchGap(a.id), gb=this.matchGap(b.id);
+      if(ga!==gb)return gb-ga;
+      return (b.waitMin||0)-(a.waitMin||0);
+    });
+    const anchor=mustPlayCandidates[0]||null;
     if(anchor){
       const others=orderedPool.filter(p=>p.id!==anchor.id).slice(0,15);
       const n=others.length;
       let best=null,bestScore=Infinity;
       for(let i=0;i<n-2;i++)for(let j=i+1;j<n-1;j++)for(let k=j+1;k<n;k++){
-        const group=[anchor,others[i],others[j],others[k]];
+        const group=[anchor,...[others[i],others[j],others[k]]];
         const res=this._scoreGroup(group,mustSplit);
         if(!this._withinTeamGapOk(res.t1,res.t2,600))continue;
         if(res.score<bestScore){bestScore=res.score;best={...res,group};}
@@ -4776,7 +4810,11 @@ const CF={
           else if(upNext)reasons.push(`<span style="font-size:.59rem;color:var(--gr);font-weight:700">▶ UP NEXT</span>`);
           if(waitMin>=20)reasons.push(`<span style="font-size:.59rem;color:var(--re)">⏰ Long wait priority</span>`);
           const gap2=CF.matchGap(q.id);
-          if(gap2>=4)reasons.push(`<span style="font-size:.59rem;color:var(--or)">⚖ Missed ${gap2} matches — priority</span>`);
+          const nc2=S.session?.courts||1;
+          if(gap2>=nc2*4)reasons.push(`<span style="font-size:.59rem;color:var(--re);font-weight:700">🔴 Missed ${gap2} — MUST PLAY</span>`);
+          else if(gap2>=nc2*3)reasons.push(`<span style="font-size:.59rem;color:var(--or);font-weight:700">🟠 Missed ${gap2} — high priority</span>`);
+          else if(gap2>=nc2*2)reasons.push(`<span style="font-size:.59rem;color:var(--go)">🟡 Missed ${gap2} — boosted</span>`);
+          else if(gap2>=nc2)reasons.push(`<span style="font-size:.59rem;color:var(--mu)">Missed ${gap2}</span>`);
           const gamesPlayed=sp?.matchesPlayed||0;
           if(gamesPlayed===0)reasons.push(`<span style="font-size:.59rem;color:var(--pu)">✦ First game</span>`);
           return `<div class="cf-queue-item" style="flex-direction:column;align-items:stretch;gap:3px">
