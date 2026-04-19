@@ -3386,7 +3386,7 @@ const CF={
   cfRating(id){
     const p=gp(id),sp=gsp(id);if(!p||!sp)return 1000;
 
-    // NR path — unchanged
+    // NR path
     if(p.isNR||sp.isNR){
       if((sp.matchesPlayed||0)>=2)return Math.max(400,sp.sRating+((sp.wins||0)-(sp.losses||0))*25);
       const rated=S.session.activePlayers
@@ -3394,87 +3394,114 @@ const CF={
       return rated.length?Math.round(rated.reduce((a,b)=>a+b,0)/rated.length):1000;
     }
 
-    // ── ANCHOR ─────────────────────────────────────────────────────────
-    // All-time rating is the ground truth. Never replaced — only adjusted.
-    const anchor=p.rating||1000;
+    // ══════════════════════════════════════════════════════════════════════
+    // 3-LAYER EFFECTIVE ELO
+    //   effectiveElo = baseElo + (sessionForm × confidence)
+    //
+    //   Layer 1 baseElo     — all-time anchor, never replaced
+    //   Layer 2 sessionForm — additive components: outcome + oppStrength + partnerCarry
+    //   Layer 3 confidence  — scales with sample size, limits early volatility
+    //
+    // Opponent strength and partner carry are SEPARATE additive adjustments.
+    // They no longer blend as a single multiplier — each has its own axis.
+    // ══════════════════════════════════════════════════════════════════════
 
-    // ── SESSION FORM ADJUSTMENT ─────────────────────────────────────────
-    // Only computed from the most recent WINDOW_SIZE games.
-    // Requires MIN_EVIDENCE results before trusting the signal.
-    // Hard-capped so a cold streak can never make a 1200 play like an 800.
-    const WINDOW=5;           // look at last 5 games only
-    const MIN_EVIDENCE=2;     // need at least 2 games before any adjustment
-    const MAX_ADJ=120;        // absolute cap on session form adjustment in either direction
+    // Layer 1
+    const baseElo=p.rating||1000;
+
+    // Layer 2 + 3
+    const WINDOW=5;
+    const MAX_FORM=150;           // hard cap on session adjustment
+    const HOT_THRESHOLD=100;      // sessForm ≥ +100 → hot
+    const COLD_THRESHOLD=-70;     // sessForm ≤  -70 → cold
+    const PLAYING_UP_GAP=150;     // avg opponent > player by 150+ → playing up
 
     const allMatches=_getSessionMatches();
     const myMatches=allMatches.filter(m=>m.t1?.includes(id)||m.t2?.includes(id));
     const gamesPlayed=myMatches.length;
 
-    let formAdj=0;
-    if(gamesPlayed>=MIN_EVIDENCE){
-      const recent=myMatches.slice(-WINDOW); // last WINDOW games
+    let sessionForm=0;
+    let hotFlag=false;
+    let coldFlag=false;
+    let playingUpFlag=false; // facing opponents significantly stronger than own rating
 
-      // Evidence weight: ramps from 0.4 at MIN_EVIDENCE to 1.0 at WINDOW+ games.
-      // Prevents 2-game evidence from swinging as hard as 5-game evidence.
-      const evidenceW=Math.min(1.0, 0.4+(gamesPlayed-MIN_EVIDENCE)*0.15);
+    if(gamesPlayed>=1){
+      const recent=myMatches.slice(-WINDOW);
+      let rawForm=0;
+      let totalOppGap=0; // track avg opponent strength for playingUp
 
-      let rawAdj=0;
       recent.forEach(m=>{
         const inT1=m.t1?.includes(id);
         const won=inT1?m.s1>m.s2:m.s2>m.s1;
         const tie=m.s1===m.s2;
-        const ptsFor=inT1?m.s1:m.s2;
-        const ptsAgainst=inT1?m.s2:m.s1;
-        const pd=ptsFor-ptsAgainst;           // point differential for this game
+        const pd=(inT1?m.s1:m.s2)-(inT1?m.s2:m.s1);
 
-        // Opponent strength: how much stronger/weaker were the opponents?
-        // Win against +200 opponents counts far more than win against -200.
+        // ── Additive component 1: raw outcome signal ──────────────────
+        // win/loss weighted 70%, point differential weighted 30%
+        const winSig=won?1:tie?0:-1;
+        const pdSig=Math.max(-1,Math.min(1,pd/8));
+        const outcomeSig=(winSig*0.7+pdSig*0.3)*30; // ±30pts per game baseline
+
+        // ── Additive component 2: opponent strength adjustment ────────
+        // Independent of partner. Winning against stronger opponents earns more.
+        // Range: −10 (lost to much weaker) to +10 (beat much stronger).
         const oppIds=(inT1?m.t2:m.t1)||[];
         const oppAvg=oppIds.length
-          ?oppIds.reduce((s,oid)=>{const osp=gsp(oid);return s+(osp?.sRating||gp(oid)?.rating||anchor);},0)/oppIds.length
-          :anchor;
-        const oppStrength=(oppAvg-anchor)/300; // -1 to +1 scale (300pt diff = full unit)
-        const oppMult=Math.max(0.3, Math.min(2.0, 1.0+oppStrength));
+          ?oppIds.reduce((s,oid)=>{const osp=gsp(oid);return s+(osp?.sRating||gp(oid)?.rating||baseElo);},0)/oppIds.length
+          :baseElo;
+        const oppGap=(oppAvg-baseElo)/300;  // −1 to +1 normalised
+        const oppAdj=Math.max(-10,Math.min(10,oppGap*10)); // ±10pts additive
+        totalOppGap+=oppGap;
 
-        // Partner strength: weak partner inflates opponent carry; strong partner deflates win credit.
-        // We adjust slightly for this but keep it gentle — partner info is noisy.
+        // ── Additive component 3: partner carry correction ────────────
+        // Separate from opponent. Strong partner → deflate; weak partner → inflate.
+        // Max adjustment ±8pts — gentler than opp because partner info is noisier.
         const partIds=(inT1?m.t1:m.t2).filter(x=>x!==id)||[];
         const partAvg=partIds.length
-          ?partIds.reduce((s,pid)=>{const psp=gsp(pid);return s+(psp?.sRating||gp(pid)?.rating||anchor);},0)/partIds.length
-          :anchor;
-        const partBias=(partAvg-anchor)/600; // gentle ±0.5 at most
-        const netMult=Math.max(0.6, oppMult-partBias);
+          ?partIds.reduce((s,pid)=>{const psp=gsp(pid);return s+(psp?.sRating||gp(pid)?.rating||baseElo);},0)/partIds.length
+          :baseElo;
+        const partGap=(partAvg-baseElo)/300; // negative = weaker partner
+        const partAdj=Math.max(-8,Math.min(8,-partGap*8)); // weaker partner → +ve adj
 
-        // Base signal for this game: win/loss/tie + point differential
-        const winSignal=won?1:tie?0:-1;
-        const pdSignal=Math.max(-1,Math.min(1,pd/8));  // ±1 at ±8 pts differential
-        const gameSignal=(winSignal*0.7+pdSignal*0.3)*netMult;
-
-        rawAdj+=gameSignal*30; // 30pts per "full unit" signal game
+        rawForm+=outcomeSig+oppAdj+partAdj;
       });
 
-      // Average over games in window so a longer hot streak requires sustained evidence
-      const avgAdj=rawAdj/recent.length;
-      formAdj=Math.max(-MAX_ADJ, Math.min(MAX_ADJ, avgAdj*evidenceW));
+      sessionForm=rawForm/recent.length; // per-game average
+
+      // Layer 3: confidence — stepped to limit single-game volatility
+      // 1 game → 0.15  |  2 → 0.35  |  3 → 0.60  |  4 → 0.80  |  5+ → 1.00
+      const conf=[0,0.15,0.35,0.60,0.80][Math.min(4,gamesPlayed-1)]??1.0;
+      sessionForm=Math.max(-MAX_FORM,Math.min(MAX_FORM,sessionForm*conf));
+
+      hotFlag=sessionForm>=HOT_THRESHOLD;
+      coldFlag=sessionForm<=COLD_THRESHOLD;
+      // Playing up: averaged opponents were significantly stronger AND player is cold/neutral
+      playingUpFlag=(totalOppGap/recent.length)>(PLAYING_UP_GAP/300)&&!hotFlag;
     }
 
-    // ── RINGER REGRESSION ───────────────────────────────────────────────
-    // High-rating, low-games players regress toward session average so stale
-    // ratings don't dominate matchmaking.
+    // Ringer regression — high-rating, low-games players pulled toward session avg
     let ringerReg=0;
     if(isRinger(p)){
       const sessAvg=S.session.activePlayers
         .map(id2=>gsp(id2)).filter(s=>s&&!s.isNR&&s.status!=='left').map(s=>s.sRating||1000)
-        .reduce((a,b,_,arr)=>a+b/arr.length,0)||anchor;
-      ringerReg=Math.round((sessAvg-anchor)*0.25);
+        .reduce((a,b,_,arr)=>a+b/arr.length,0)||baseElo;
+      ringerReg=Math.round((sessAvg-baseElo)*0.25);
     }
 
-    // ── RATING OVERRIDE ─────────────────────────────────────────────────
+    // Admin override
     const ovr=S.session?.ratingOverrides?.[id]||0;
+    const effectiveElo=Math.round(baseElo+sessionForm+ringerReg+ovr);
 
-    return Math.round(anchor+formAdj+ringerReg+ovr);
+    // Cache all flags for scoring layer and UI
+    if(sp){
+      sp._hotFlag=hotFlag;
+      sp._coldFlag=coldFlag;
+      sp._playingUpFlag=playingUpFlag;
+      sp._sessForm=Math.round(sessionForm);
+    }
+
+    return effectiveElo;
   },
-
   /* Match-Gap: how many session matches have run since this player last played.
      Pure game-count — not affected by how fast/slow the organizer confirms scores.
      Gap of 0 = just played. Gap of NC*3 = missed ~3 full "waves" = force-include. */
@@ -3633,7 +3660,7 @@ const CF={
       partRpt*3 + oppRpt*5 + matchRpt + groupRpt + overlapPen + splitPen + consecPen +
       // P3: Fair playtime (negative = bonus for waiting players)
       waitBonus + gapBonus;
-    const meta={splitOverride:splitPen>0&&splitPen<200,repeatMatchup:matchRpt>0,
+    const meta={splitOverride:splitPen>0&&splitPen<200,repeatMatchup:gamesSince!==null&&gamesSince<=5,
       rawT1gap,rawT2gap};
     // NR protection:
     // a) Soft penalty for 2+ NR in same group when rated alternatives exist.
@@ -3676,7 +3703,44 @@ const CF={
     // redirect in almost all cases; won't block when the queue is thin (pass 3).
     const lastLost=S.session?.cfPairLastLost||{};
     const justLostPen=(lastLost[t1k]?60:0)+(lastLost[t2k]?60:0);
-    return{score:total+nrProtPen+losingPairPen+justLostPen,meta,t1,t2,group};
+
+    // ── Hot / cold protection (uses flags set by cfRating) ───────────────
+    // HOT player protection: if a player is on a hot streak, penalise pairing them
+    // with a much weaker partner — they'll carry the match and learn nothing.
+    // Penalty scales with the partner gap, so it redirects rather than hard-blocks.
+    //
+    // COLD player protection: if a player is struggling, penalise pairing them
+    // against the hottest player in the pool — piling on doesn't help them improve.
+    // Encourage the cold player to face balanced opposition instead.
+    let hotColdPen=0;
+    const spFn=id=>gsp(id);
+    // Hot player + weak partner → carry risk penalty (on top of within-team gap)
+    [[t1[0],t1[1]],[t2[0],t2[1]]].forEach(([a,b])=>{
+      const spA=spFn(a.id),spB=spFn(b.id);
+      if(!spA||!spB)return;
+      if(spA._hotFlag&&!spB._hotFlag){
+        const gap=Math.abs(a.sr-b.sr);
+        if(gap>100)hotColdPen+=Math.min(60,gap*0.25); // max +60 extra on top of teamPen
+      }
+      if(spB._hotFlag&&!spA._hotFlag){
+        const gap=Math.abs(a.sr-b.sr);
+        if(gap>100)hotColdPen+=Math.min(60,gap*0.25);
+      }
+    });
+    // Cold player vs hot opponent → discouragement penalty
+    // Playing-up player vs hot opponent → stronger protection (they're already struggling)
+    const allIds4=[t1[0],t1[1],t2[0],t2[1]];
+    allIds4.forEach(p=>{
+      const sp=spFn(p.id);
+      const isCold=sp?._coldFlag;
+      const isPlayingUp=sp?._playingUpFlag;
+      if(!isCold&&!isPlayingUp)return;
+      const inT1=[t1[0].id,t1[1].id].includes(p.id);
+      const oppTeam=inT1?t2:t1;
+      const hasHotOpp=oppTeam.some(o=>spFn(o.id)?._hotFlag);
+      if(hasHotOpp)hotColdPen+=isCold&&isPlayingUp?70:isPlayingUp?50:40;
+    });
+    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen,meta,t1,t2,group};
   },
 
   /* Generate a suggestion for a court */
@@ -3763,7 +3827,7 @@ const CF={
           for(let i=0;i<spn-3;i++)for(let j=i+1;j<spn-2;j++)for(let k=j+1;k<spn-1;k++)for(let l=k+1;l<spn;l++){
             const g=[sp2[i],sp2[j],sp2[k],sp2[l]];
             const res=this._scoreGroup(g,mustSplit);
-            if(!this._withinTeamGapOk(res.t1,res.t2,600))continue;
+            if(!this._withinTeamGapOk(res.t1,res.t2,300))continue;
             if(res.score<bScore){bScore=res.score;best={...res,group:g};}
           }
         }
@@ -3776,7 +3840,7 @@ const CF={
             for(let i=0;i<so-2;i++)for(let j=i+1;j<so-1;j++)for(let k=j+1;k<so;k++){
               const g=[subAnchor,subOthers[i],subOthers[j],subOthers[k]];
               const res=this._scoreGroup(g,mustSplit);
-              if(!this._withinTeamGapOk(res.t1,res.t2,600))continue;
+              if(!this._withinTeamGapOk(res.t1,res.t2,300))continue;
               if(res.score<bScore){bScore=res.score;best={...res,group:g};}
             }
           }
@@ -3914,7 +3978,7 @@ const CF={
           for(let i=0;i<olen-2;i++)for(let j=i+1;j<olen-1;j++)for(let k=j+1;k<olen;k++){
             const g=[anchor,others[i],others[j],others[k]];
             const res=this._scoreGroup(g,mustSplit);
-            if(!this._withinTeamGapOk(res.t1,res.t2,500))continue;
+            if(!this._withinTeamGapOk(res.t1,res.t2,300))continue;
             if(res.score<bScore){bScore=res.score;best={...res,group:g};}
           }
         }
@@ -3952,33 +4016,37 @@ const CF={
     return Math.abs(t1[0].sr-t1[1].sr)<=cap && Math.abs(t2[0].sr-t2[1].sr)<=cap;
   },
 
-  _findBestGroup(candidates,mustSplit,nrIds,totalQueue){
+  _findBestGroup(candidates,mustSplit,nrIds,totalQueue,lastMatchupKey=null){
     let best=null,bestScore=Infinity;
     const n=candidates.length;
-    // Helper: check if a scored group has any cooldown pair
     const hasCooldownPair=(res)=>
       this.isPairOnCooldown(res.t1[0].id,res.t1[1].id)||
       this.isPairOnCooldown(res.t2[0].id,res.t2[1].id);
-    // Pass 1: strict 350pt gap cap + pair cooldown enforced
+    // Hard block: do not repeat the exact previous matchup on this court back-to-back.
+    // Relaxed only in pass 3 when pool is too constrained to form any other valid match.
+    const isBackToBack=(res)=>!!lastMatchupKey&&
+      this.matchupKey(res.t1.map(p=>p.id),res.t2.map(p=>p.id))===lastMatchupKey;
+    // Pass 1: strict — 300pt gap + pair cooldown + back-to-back block
     for(let i=0;i<n-3;i++)for(let j=i+1;j<n-2;j++)for(let k=j+1;k<n-1;k++)for(let l=k+1;l<n;l++){
       const group=[candidates[i],candidates[j],candidates[k],candidates[l]];
-      // NR-pair: soft penalty via _scoreGroup nrProtPen — never a hard block.
       const res=this._scoreGroup(group,mustSplit);
-      if(!this._withinTeamGapOk(res.t1,res.t2,350))continue;
-      if(hasCooldownPair(res))continue; // hard cooldown filter
+      if(!this._withinTeamGapOk(res.t1,res.t2,300))continue;
+      if(hasCooldownPair(res))continue;
+      if(isBackToBack(res))continue;
       if(res.score<bestScore){bestScore=res.score;best=res;}
     }
     if(best)return best;
-    // Pass 2: relax to 400pt gap cap (cooldown still enforced)
+    // Pass 2: relax gap to 400pt — back-to-back still blocked, cooldown still enforced
     for(let i=0;i<n-3;i++)for(let j=i+1;j<n-2;j++)for(let k=j+1;k<n-1;k++)for(let l=k+1;l<n;l++){
       const group=[candidates[i],candidates[j],candidates[k],candidates[l]];
       const res=this._scoreGroup(group,mustSplit);
       if(!this._withinTeamGapOk(res.t1,res.t2,400))continue;
       if(hasCooldownPair(res))continue;
+      if(isBackToBack(res))continue;
       if(res.score<bestScore){bestScore=res.score;best=res;}
     }
     if(best)return best;
-    // Pass 3: relax gap cap AND cooldown — only fires when queue is extremely thin
+    // Pass 3: all hard rules relaxed — pool too constrained. Accept anything including back-to-back.
     for(let i=0;i<n-3;i++)for(let j=i+1;j<n-2;j++)for(let k=j+1;k<n-1;k++)for(let l=k+1;l<n;l++){
       const group=[candidates[i],candidates[j],candidates[k],candidates[l]];
       const res=this._scoreGroup(group,mustSplit);
@@ -3987,7 +4055,6 @@ const CF={
     if(!best&&candidates.length>=4){best=this._scoreGroup(candidates.slice(0,4),mustSplit);}
     return best;
   },
-
   _storeSuggestion(courtNum,best,finishedMatch){
     if(!best){S.session.cfSuggestions[courtNum]=null;return;}
     const gap=Math.abs((best.t1[0].sr+best.t1[1].sr)/2-(best.t2[0].sr+best.t2[1].sr)/2);
@@ -3997,7 +4064,7 @@ const CF={
     S.session.cfSuggestions[courtNum]={
       courtNum,t1:best.t1.map(p=>p.id),t2:best.t2.map(p=>p.id),
       allIds:best.group.map(p=>p.id),
-      meta:{...best.meta,gap:Math.round(gap),gapWarn:gap>250,maxWait:Math.round(maxWait),
+      meta:{...best.meta,gap:Math.round(gap),gapWarn:gap>80,maxWait:Math.round(maxWait),
             urgentWait:maxWait>=20,shortGameBoost:shortGame||false},
       ts:Date.now()  // staleness timestamp
     };
@@ -4057,8 +4124,8 @@ const CF={
       for(let i=0;i<pn-3;i++)for(let j=i+1;j<pn-2;j++)for(let k=j+1;k<pn-1;k++)for(let l=k+1;l<pn;l++){
         const group=[pp[i],pp[j],pp[k],pp[l]];
         const res=this._scoreGroup(group,mustSplit);
-        // Quality gate: if best team split has large within-team gap, reject this group
-        if(!this._withinTeamGapOk(res.t1,res.t2,500))continue;
+        // Quality gate: reject priority groups with carry-level within-team gap
+        if(!this._withinTeamGapOk(res.t1,res.t2,300))continue;
         if(res.score<bestScore){bestScore=res.score;best={...res,group};}
       }
       if(best){this._storeSuggestion(courtNum,best,finishedMatch);return;}
@@ -4089,7 +4156,7 @@ const CF={
       for(let i=0;i<n-2;i++)for(let j=i+1;j<n-1;j++)for(let k=j+1;k<n;k++){
         const group=[anchor,...[others[i],others[j],others[k]]];
         const res=this._scoreGroup(group,mustSplit);
-        if(!this._withinTeamGapOk(res.t1,res.t2,600))continue;
+        if(!this._withinTeamGapOk(res.t1,res.t2,300))continue;
         if(res.score<bestScore){bestScore=res.score;best={...res,group};}
       }
       if(best){this._storeSuggestion(courtNum,best,finishedMatch);return;}
@@ -4101,7 +4168,8 @@ const CF={
     //   - 0-game players float to top via hungerBoost 
     //   - MGL players (gap>=4) are in the pool via greedy anchor below
     const top=orderedPool.slice(0,Math.min(Math.max(16,orderedPool.length),orderedPool.length));
-    const best=this._findBestGroup(top,mustSplit,nrIds,orderedPool.length);
+    const _lastKey=S.session?.cfCourts?.[courtNum]?.lastMatchupKey||null;
+    const best=this._findBestGroup(top,mustSplit,nrIds,orderedPool.length,_lastKey);
     this._storeSuggestion(courtNum,best,finishedMatch);
   },
 
@@ -4264,7 +4332,8 @@ const CF={
     S.session.cfCourts[courtNum]={status:'ready',match:null,
       idleStart:Date.now(),
       totalIdleMs:prevCourt.totalIdleMs||0,
-      matchCount:(prevCourt.matchCount||0)+1};
+      matchCount:(prevCourt.matchCount||0)+1,
+      lastMatchupKey:this.matchupKey(m.t1,m.t2)};  // for back-to-back hard block
     // Pause-after: move flagged on-court players to paused instead of queue
     const _paf=Array.isArray(S.session.cfPauseAfterGame)?S.session.cfPauseAfterGame:[];
     if(_paf.length){
@@ -4400,7 +4469,7 @@ const CF={
     const gap=Math.abs((best.t1[0].sr+best.t1[1].sr)/2-(best.t2[0].sr+best.t2[1].sr)/2);
     S.session.cfSuggestions[courtNum]={...sug,
       t1:best.t1.map(p=>p.id),t2:best.t2.map(p=>p.id),allIds:best.group.map(p=>p.id),
-      meta:{...sug.meta,gap:Math.round(gap),gapWarn:gap>250}};
+      meta:{...sug.meta,gap:Math.round(gap),gapWarn:gap>80}};
     STORE.save('session');renderLive();
     toast(`Court ${courtNum} reshuffled — ${toReplace.length} player(s) replaced`,'ok');
   },
@@ -4469,7 +4538,7 @@ const CF={
     const gap=Math.abs((t1[0].sr+t1[1].sr)/2-(t2[0].sr+t2[1].sr)/2);
     S.session.cfSuggestions[courtNum]={...sug,
       t1:t1.map(p=>p.id),t2:t2.map(p=>p.id),allIds:newIds,
-      meta:{...sug.meta,gap:Math.round(gap),gapWarn:gap>250}};
+      meta:{...sug.meta,gap:Math.round(gap),gapWarn:gap>80}};
     closeModal();STORE.save('session');renderLive();
     toast(`Swapped ${gp(outId)?.name||'?'} → ${gp(inId)?.name||'?'}  ✓`,'ok');
   },
@@ -4494,7 +4563,7 @@ const CF={
     const{t1,t2}=MM.bestPair(players);
     const gap=Math.abs((t1[0].sr+t1[1].sr)/2-(t2[0].sr+t2[1].sr)/2);
     S.session.cfSuggestions[courtNum]={courtNum,t1:t1.map(p=>p.id),t2:t2.map(p=>p.id),allIds:ids,
-      meta:{gap:Math.round(gap),gapWarn:gap>250,maxWait:0,urgentWait:false,splitOverride:false,repeatMatchup:false,shortGameBoost:false}};
+      meta:{gap:Math.round(gap),gapWarn:gap>80,maxWait:0,urgentWait:false,splitOverride:false,repeatMatchup:false,shortGameBoost:false}};
     closeModal();cancelAutoConfirm(courtNum);this.confirmSuggestion(courtNum);
   },
 
@@ -4617,47 +4686,67 @@ const CF={
     const t1CoolChip=cooldownChip(sug.t1,'P1');
     const t2CoolChip=cooldownChip(sug.t2,'P2');
 
-    // ── Explainability tags ──────────────────────────────────────────────
-    // Per-player form: scan last 3 games to classify streak/cooling
+    // ── Win probability (ELO expected score) ───────────────────────────
+    const t1WinProb=Math.round(100/(1+Math.pow(10,(t2Avg-t1Avg)/400)));
+    const maxWinProb=Math.max(t1WinProb,100-t1WinProb);
+    const winProbTag=maxWinProb>=75
+      ?`<span class="cf-chip cf-chip-warn" title="One team has ${maxWinProb}% win probability — likely blowout">🎯 ${maxWinProb}% favoured</span>`
+      :maxWinProb>=65
+      ?`<span class="cf-chip cf-chip-info" title="One team ${maxWinProb}% favoured">~${maxWinProb}% favoured</span>`
+      :``;
+
+    // ── Team average gap (graduated, not binary) ────────────────────────
+    const balanceTag=
+      meta.gap<=30  ?`<span class="cf-chip cf-chip-ok" title="Teams within ${meta.gap}pts">⚖️ Even</span>`
+      :meta.gap<=80 ?`<span class="cf-chip cf-chip-ok" title="Team avg gap: ${meta.gap}pts">✓ ${meta.gap}pts</span>`
+      :meta.gap<=150?`<span class="cf-chip cf-chip-info" title="Team avg gap: ${meta.gap}pts">~ ${meta.gap}pts</span>`
+      :              `<span class="cf-chip cf-chip-warn" title="Team avg gap: ${meta.gap}pts — notable gap">⚠ ${meta.gap}pts</span>`;
+
+    // ── Partner (within-team) gap — 150/180/220 tiers ──────────────────
+    const pgapTag=(pgap,label)=>
+      pgap>=220?`<span class="cf-chip cf-chip-warn" style="border-color:rgba(248,113,113,.5)" title="${label} gap: ${pgap}pts — carry risk, reshuffle recommended">🔴 ${label} carry ${pgap}</span>`
+      :pgap>=180?`<span class="cf-chip cf-chip-warn" title="${label} gap: ${pgap}pts — high carry risk">🟠 ${label} ${pgap}</span>`
+      :pgap>=150?`<span class="cf-chip cf-chip-info" title="${label} gap: ${pgap}pts — noticeable">🟡 ${label} ${pgap}</span>`
+      :``;
+
+    // ── Wait time (graduated) ────────────────────────────────────────────
+    const waitTag=meta.maxWait>=20
+      ?`<span class="cf-chip cf-chip-warn">⏰ ${meta.maxWait}min wait</span>`
+      :meta.maxWait>=12
+      ?`<span class="cf-chip cf-chip-info">⏱ ${meta.maxWait}min</span>`
+      :`<span class="cf-chip cf-chip-ok">⏱ ${meta.maxWait}min</span>`;
+
+    // ── Repeat matchup ───────────────────────────────────────────────────
+    const repeatTag=meta.repeatMatchup
+      ?`<span class="cf-chip cf-chip-warn" title="Same 4-player matchup played before">🔁 Repeat</span>`:``;
+
+    // ── Per-player form ──────────────────────────────────────────────────
     const formTag=id=>{
-      const matches=(_getSessionMatches()||[]).filter(m=>m.t1?.includes(id)||m.t2?.includes(id));
-      const last=matches.slice(-3);
-      if(last.length<2)return '';
-      const results=last.map(m=>{const inT1=m.t1?.includes(id);return inT1?m.s1>m.s2?1:m.s1===m.s2?0:-1:m.s2>m.s1?1:m.s1===m.s2?0:-1;});
-      const net=results.reduce((s,v)=>s+v,0);
-      if(net>=2)return`<span class="cf-chip" style="background:rgba(251,147,60,.15);color:var(--or)" title="Won ${results.filter(v=>v>0).length} of last ${last.length} games">🔥 Streak</span>`;
-      if(net<=-2)return`<span class="cf-chip cf-chip-info" title="Lost ${results.filter(v=>v<0).length} of last ${last.length} games">🧊 Cooling off</span>`;
+      const sp2=gsp(id);
+      const fname=gp(id)?.name?.split(' ')[0]||'?';
+      // Use cached flags from cfRating (already computed when pool was built)
+      if(sp2?._hotFlag)return`<span class="cf-chip" style="background:rgba(251,147,60,.15);color:var(--or)" title="${gp(id)?.name} on a hot streak (form: +${sp2._sessForm})">🔥 ${fname}</span>`;
+      if(sp2?._playingUpFlag)return`<span class="cf-chip cf-chip-info" title="${gp(id)?.name} facing stronger opponents (playing up)">📈 ${fname}</span>`;
+      if(sp2?._coldFlag)return`<span class="cf-chip cf-chip-info" title="${gp(id)?.name} struggling (form: ${sp2._sessForm})">🧊 ${fname}</span>`;
       return '';
     };
-    // Balance tag: how even are the two teams?
-    const balanceTag=meta.gap<=30
-      ?`<span class="cf-chip cf-chip-ok" title="Teams within ${meta.gap}pts — very even">⚖️ Even match</span>`
-      :meta.gapWarn?`<span class="cf-chip cf-chip-warn" title="Team avg gap: ${meta.gap}pts">⚠ Skill gap</span>`:'';
-    // Repeat-avoidance tag
-    const repeatTag=meta.repeatMatchup
-      ?`<span class="cf-chip cf-chip-warn" title="These 4 players have played this matchup before">🔁 Avoid repeat</span>`:'';
-    // Fairness: any player with high match gap or hunger?
+
+    // ── Fairness ─────────────────────────────────────────────────────────
     const fairnessTag=sug.allIds.some(id=>CF.matchGap(id)>=4||CF.hungerBoost(id)>80)
-      ?`<span class="cf-chip cf-chip-info" title="Includes players due for a game — fairness-driven pick">⏳ Fairness pick</span>`:'';
-    // Form tags for all 4 players
-    const playerFormTags=sug.allIds.map(id=>formTag(id)).filter(Boolean).join('');
+      ?`<span class="cf-chip cf-chip-info" title="Includes overdue player">⏳ Fairness</span>`:``;
 
     const chips=[
-      `<span class="cf-chip ${meta.gapWarn?'cf-chip-warn':'cf-chip-ok'}">Teams ${meta.gap}pts${meta.gapWarn?' ⚠':' ✓'}</span>`,
-      balanceTag,
-      meta.urgentWait?`<span class="cf-chip cf-chip-warn">⏳ ${meta.maxWait}min wait</span>`:`<span class="cf-chip cf-chip-info">Wait ${meta.maxWait}min</span>`,
-      t1CoolChip,t2CoolChip,
-      playerFormTags,
-      repeatTag,
-      fairnessTag,
+      balanceTag, winProbTag, waitTag,
+      t1CoolChip, t2CoolChip,
+      pgapTag(t1pgap,'P1'), pgapTag(t2pgap,'P2'),
+      sug.allIds.map(id=>formTag(id)).filter(Boolean).join(''),
+      repeatTag, fairnessTag,
       meta.splitOverride?`<span class="cf-chip cf-chip-warn">⚠ Win pair kept</span>`:'',
-      meta.shortGameBoost?`<span class="cf-chip cf-chip-info">⚡ Short-game boost</span>`:'',
-      staleWarn?`<span class="cf-chip cf-chip-warn">🕐 ${staleMin}min old — refresh?</span>`:'',
-      t1pgap>250?`<span class="cf-chip cf-chip-warn" title="P1 within-team gap: ${t1pgap}pts — consider reshuffling">⚠ P1 spread</span>`:'',
-      t2pgap>250?`<span class="cf-chip cf-chip-warn" title="P2 within-team gap: ${t2pgap}pts — consider reshuffling">⚠ P2 spread</span>`:'',
+      meta.shortGameBoost?`<span class="cf-chip cf-chip-info">⚡ Short game</span>`:'',
+      staleWarn?`<span class="cf-chip cf-chip-warn">🕐 ${staleMin}min old</span>`:'',
     ].filter(Boolean).join('');
     // Team tile: show avg only publicly. Partner gap in tooltip — not broadcast to bystanders.
-    const pTeam=(ids,avg,pgap)=>`<div style="background:var(--s2);border:1px solid ${pgap>250?'rgba(248,113,113,.3)':pgap>150?'rgba(251,147,60,.2)':'var(--bd)'};border-radius:var(--ra);padding:9px;text-align:center" title="Partner skill gap: ${pgap}pts${pgap>250?' ⚠ High — reshuffle recommended':''}">
+    const pTeam=(ids,avg,pgap)=>`<div style="background:var(--s2);border:1px solid ${pgap>=220?'rgba(248,113,113,.5)':pgap>=180?'rgba(251,147,60,.4)':pgap>=150?'rgba(251,191,36,.3)':'var(--bd)'};border-radius:var(--ra);padding:9px;text-align:center" title="Partner gap: ${pgap}pts${pgap>=220?' 🔴 carry risk — reshuffle':pgap>=180?' 🟠 high carry risk':pgap>=150?' 🟡 noticeable':' ✓ ok'}">
       ${ids.map(id=>`<span style="font-weight:600">${gn(id)}</span> <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span>`).join(' <span style="color:var(--m2)"> &amp; </span> ')}
       <div style="font-size:.63rem;color:var(--m2);margin-top:3px">avg ${avg}</div></div>`;
     return `<div class="cf-suggest" data-court="${courtNum}">
@@ -4801,6 +4890,10 @@ const CF={
           const wcls=waitMin>=20?'cf-wait-hot':waitMin>=10?'cf-wait-warn':'cf-wait-ok';
           const er=this.cfRating(q.id);
           const rDisp=sp?.isNR?'<span class="nr-badge">NR</span>':Math.round(er);
+          // Trigger cfRating to update hot/cold flags before reading them
+          const _formLabel=sp?._hotFlag?'🔥':sp?._playingUpFlag?'📈':sp?._coldFlag?'🧊':'';
+          const _formTitle=sp?._hotFlag?'Hot streak':sp?._playingUpFlag?'Playing up vs stronger opponents':sp?._coldFlag?'Struggling':'';
+          const _formVal=sp?._sessForm!=null&&sp._sessForm!==0?`<span style="font-size:.58rem;color:${sp._sessForm>0?'var(--or)':'var(--cy)'}" title="${_formTitle}">${sp._sessForm>0?'+':''}${sp._sessForm}</span>`:'';
           const upNext=idx<2;
           const isPinned=(S.session.cfPinnedIds||[]).includes(q.id);
           // Transparency reason — why is this player at this position?
@@ -4821,6 +4914,7 @@ const CF={
             <div style="display:flex;align-items:center;gap:7px">
               <div style="font-size:.72rem;color:var(--m2);min-width:18px">${idx+1}</div>
               <div style="flex:1;font-weight:600;font-size:.82rem">${esc(p?.name||'?')}${tagHtml(p)}</div>
+              <div style="font-size:.7rem;color:var(--mu)" title="${_formTitle}">${_formLabel} ${_formVal}</div>
               <div style="font-size:.72rem;color:var(--mu)">${rDisp}</div>
               <span class="cf-wait ${wcls}">${waitMin}m</span>
               <button class="btn bg2 sm" style="padding:2px 7px;font-size:.65rem" onclick="cfPausePlayer('${q.id}')" title="Take a break now">⏸ Now</button>
