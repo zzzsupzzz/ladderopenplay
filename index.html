@@ -3388,7 +3388,26 @@ const CF={
 
     // NR path
     if(p.isNR||sp.isNR){
-      if((sp.matchesPlayed||0)>=2)return Math.max(400,sp.sRating+((sp.wins||0)-(sp.losses||0))*25);
+      const nrGames=sp.matchesPlayed||0;
+      // After 3+ games including at least 1 against a rated player:
+      // abandon the manual seed entirely — use session rating as anchor.
+      // This lets session performance override bad initial placement quickly.
+      if(nrGames>=3){
+        const myMatches=_getSessionMatches().filter(m=>m.t1?.includes(id)||m.t2?.includes(id));
+        const playedRated=myMatches.some(m=>{
+          const opps=(m.t1?.includes(id)?m.t2:m.t1)||[];
+          return opps.some(oid=>gp(oid)&&!gp(oid).isNR&&!gsp(oid)?.isNR);
+        });
+        if(playedRated){
+          // Switch: use sRating as base, apply normal 3-layer form on top
+          // (falls through to rated path below with sRating as anchor)
+          const sessBase=sp.sRating||1000;
+          const ovr=S.session?.ratingOverrides?.[id]||0;
+          return Math.round(sessBase+ovr);
+        }
+      }
+      // Early-game NR: use session average as a reasonable seed
+      if(nrGames>=2)return Math.max(400,sp.sRating+((sp.wins||0)-(sp.losses||0))*25);
       const rated=S.session.activePlayers
         .map(id2=>gsp(id2)).filter(s=>s&&!s.isNR&&s.status!=='left').map(s=>s.sRating||1000);
       return rated.length?Math.round(rated.reduce((a,b)=>a+b,0)/rated.length):1000;
@@ -3617,17 +3636,21 @@ const CF={
     const groupRpt=groupGS!==null?Math.max(0,120-groupGS*12):0;
     // b) 3-player overlap with any recent court match → strong penalty
     // Prevents "swap one player each round" pattern (seen in screenshots)
-    const recentMatches=Object.values(S.session.cfGroupHx||{})
-      .filter(v=>(S.session.cfMatchCount||0)-v<=2); // last 2 matches
+    // Dynamic overlap window: shrinks for small groups to avoid late-session over-penalty.
+    // <14 active players: disable overlapPen entirely — combination space is too small.
+    // <16 active players: last 1 match only.
+    // 16+: last 2 matches (original behaviour).
+    const activePlCount=(S.session.activePlayers||[]).filter(ap=>ap.status!=='left').length;
+    const overlapWindow=activePlCount<14?0:activePlCount<16?1:2;
     let overlapPen=0;
-    if(recentMatches.length>0){
+    if(overlapWindow>0){
       const groupIdSet=new Set(group.map(p=>p.id));
       Object.entries(S.session.cfGroupHx||{}).forEach(([k,v])=>{
-        if((S.session.cfMatchCount||0)-v>2)return; // only last 2 matches
+        if((S.session.cfMatchCount||0)-v>overlapWindow)return;
         const prevIds=k.split(',');
         const overlap=prevIds.filter(id=>groupIdSet.has(id)).length;
-        if(overlap>=3)overlapPen+=150; // 3/4 same people: very strong redirect
-        else if(overlap>=2)overlapPen+=20; // 2/4 same: mild
+        if(overlap>=3)overlapPen+=150;
+        else if(overlap>=2)overlapPen+=20;
       });
     }
     const mKey=this.matchupKey(t1.map(p=>p.id),t2.map(p=>p.id));
@@ -3653,13 +3676,18 @@ const CF={
     // 4. Session form     → handled in cfRating() — baked into .sr values used above
     // 5. ELO anchor       → baked into cfRating() baseline — never drives score directly
     // Weights reflect priority: balance terms largest, playtime as bonus (negative = good)
-    const total=
-      // P1: Match balance (largest weight — must win)
-      crossImb*1.0 + (t1gap+t2gap) + spreadPen +
-      // P2: Avoid repeats
-      partRpt*3 + oppRpt*5 + matchRpt + groupRpt + overlapPen + splitPen + consecPen +
-      // P3: Fair playtime (negative = bonus for waiting players)
-      waitBonus + gapBonus;
+    // P1: Match balance — ×1.5 multiplier ensures balance always dominates fairness pressure
+    const p1=crossImb*1.5 + (t1gap+t2gap)*1.5 + spreadPen*1.5;
+
+    // P2: Avoid repeats — capped at 200 with proportional scaling.
+    // Without cap, accumulated repeat penalties can exceed P1 and defeat the priority order.
+    const p2Raw=partRpt*3 + oppRpt*5 + matchRpt + groupRpt + overlapPen + splitPen + consecPen;
+    const p2=p2Raw>200?Math.round(200*p2Raw/Math.max(p2Raw,1)):p2Raw; // scale proportionally
+
+    // P3: Fair playtime — negative bonus, can never override P1 balance
+    const p3=waitBonus + gapBonus;
+
+    const total=p1+p2+p3;
     const meta={splitOverride:splitPen>0&&splitPen<200,repeatMatchup:gamesSince!==null&&gamesSince<=5,
       rawT1gap,rawT2gap};
     // NR protection:
@@ -3740,7 +3768,30 @@ const CF={
       const hasHotOpp=oppTeam.some(o=>spFn(o.id)?._hotFlag);
       if(hasHotOpp)hotColdPen+=isCold&&isPlayingUp?70:isPlayingUp?50:40;
     });
-    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen,meta,t1,t2,group};
+    // ── Skill-band guardrail (Step 5) ──────────────────────────────────
+    // Uses active queue cfRating quartiles — recalculated per group, not session-wide.
+    // Q1+Q4 on same team = strong penalty (+300). Q1+Q3 on same team = soft penalty (+80).
+    // Active queue only: paused/left players do not influence band boundaries.
+    let bandPen=0;
+    try{
+      const activeQueue=(S.session.cfQueue||[]).map(q=>q.id);
+      const onCourt=Object.values(S.session.cfCourts||{})
+        .filter(ct=>ct&&ct.status==='playing'&&ct.match)
+        .flatMap(ct=>[...ct.match.t1,...ct.match.t2]);
+      const poolIds=[...new Set([...activeQueue,...onCourt,...group.map(p=>p.id)])];
+      if(poolIds.length>=8){
+        const sorted=[...poolIds].map(pid=>({pid,r:CF.cfRating(pid)})).sort((a,b)=>b.r-a.r);
+        const q=Math.floor(sorted.length/4);
+        const q1ids=new Set(sorted.slice(0,q).map(x=>x.pid));
+        const q4ids=new Set(sorted.slice(-q).map(x=>x.pid));
+        const q3ids=new Set(sorted.slice(q*2,q*3).map(x=>x.pid));
+        [[t1[0].id,t1[1].id],[t2[0].id,t2[1].id]].forEach(([a,b])=>{
+          if((q1ids.has(a)&&q4ids.has(b))||(q1ids.has(b)&&q4ids.has(a)))bandPen+=300;
+          else if((q1ids.has(a)&&q3ids.has(b))||(q1ids.has(b)&&q3ids.has(a)))bandPen+=80;
+        });
+      }
+    }catch(e){}
+    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+bandPen,meta,t1,t2,group};
   },
 
   /* Generate a suggestion for a court */
@@ -4027,15 +4078,16 @@ const CF={
     const isBackToBack=(res)=>!!lastMatchupKey&&
       this.matchupKey(res.t1.map(p=>p.id),res.t2.map(p=>p.id))===lastMatchupKey;
     // Pass 1: strict — 300pt gap + pair cooldown + back-to-back block
+    let _blockedByCooldown=false,_blockedByBTB=false,_candidateCount=n;
     for(let i=0;i<n-3;i++)for(let j=i+1;j<n-2;j++)for(let k=j+1;k<n-1;k++)for(let l=k+1;l<n;l++){
       const group=[candidates[i],candidates[j],candidates[k],candidates[l]];
       const res=this._scoreGroup(group,mustSplit);
       if(!this._withinTeamGapOk(res.t1,res.t2,300))continue;
-      if(hasCooldownPair(res))continue;
-      if(isBackToBack(res))continue;
+      if(hasCooldownPair(res)){_blockedByCooldown=true;continue;}
+      if(isBackToBack(res)){_blockedByBTB=true;continue;}
       if(res.score<bestScore){bestScore=res.score;best=res;}
     }
-    if(best)return best;
+    if(best)return{...best,fallbackPass:1};
     // Pass 2: relax gap to 400pt — back-to-back still blocked, cooldown still enforced
     for(let i=0;i<n-3;i++)for(let j=i+1;j<n-2;j++)for(let k=j+1;k<n-1;k++)for(let l=k+1;l<n;l++){
       const group=[candidates[i],candidates[j],candidates[k],candidates[l]];
@@ -4045,15 +4097,17 @@ const CF={
       if(isBackToBack(res))continue;
       if(res.score<bestScore){bestScore=res.score;best=res;}
     }
-    if(best)return best;
-    // Pass 3: all hard rules relaxed — pool too constrained. Accept anything including back-to-back.
+    if(best)return{...best,fallbackPass:2};
+    // Pass 3: all hard rules relaxed — pool too constrained.
+    // Determine reason for logging and UI chip.
+    const fallbackReason=_candidateCount<8?'thin':_blockedByBTB?'rematch':_blockedByCooldown?'cooldown':'thin';
     for(let i=0;i<n-3;i++)for(let j=i+1;j<n-2;j++)for(let k=j+1;k<n-1;k++)for(let l=k+1;l<n;l++){
       const group=[candidates[i],candidates[j],candidates[k],candidates[l]];
       const res=this._scoreGroup(group,mustSplit);
       if(res.score<bestScore){bestScore=res.score;best=res;}
     }
     if(!best&&candidates.length>=4){best=this._scoreGroup(candidates.slice(0,4),mustSplit);}
-    return best;
+    return best?{...best,fallbackPass:3,fallbackReason}:null;
   },
   _storeSuggestion(courtNum,best,finishedMatch){
     if(!best){S.session.cfSuggestions[courtNum]=null;return;}
@@ -4065,12 +4119,19 @@ const CF={
       courtNum,t1:best.t1.map(p=>p.id),t2:best.t2.map(p=>p.id),
       allIds:best.group.map(p=>p.id),
       meta:{...best.meta,gap:Math.round(gap),gapWarn:gap>80,maxWait:Math.round(maxWait),
-            urgentWait:maxWait>=20,shortGameBoost:shortGame||false},
-      ts:Date.now()  // staleness timestamp
+            urgentWait:maxWait>=20,shortGameBoost:shortGame||false,
+            fallbackPass:best.fallbackPass||1,
+            fallbackReason:best.fallbackReason||null},
+      ts:Date.now()
     };
   },
 
   _generateSingleSuggestion(courtNum,pool,mustSplit,nrIds,finishedMatch){
+    // Step 0: Refresh .sr for every pool player from cfRating() right now.
+    // Pool was built at batchGenerateSuggestions() time; if another court submitted
+    // a score since then, session form has changed. Stale .sr = stale scoring.
+    pool.forEach(p=>{p.sr=this.cfRating(p.id);});
+
     // Apply same tier ordering as multi-court: first-timers → MGL-waiters → normal
     // This ensures the single-court path also respects the first-game guarantee
     const pinnedSg=new Set(S.session.cfPinnedIds||[]);
@@ -4744,6 +4805,11 @@ const CF={
       meta.splitOverride?`<span class="cf-chip cf-chip-warn">⚠ Win pair kept</span>`:'',
       meta.shortGameBoost?`<span class="cf-chip cf-chip-info">⚡ Short game</span>`:'',
       staleWarn?`<span class="cf-chip cf-chip-warn">🕐 ${staleMin}min old</span>`:'',
+      meta.fallbackPass===3?(
+        meta.fallbackReason==='rematch'?`<span class="cf-chip cf-chip-warn" title="All other options would repeat the previous matchup">⚠️ Back-to-back forced</span>`
+        :meta.fallbackReason==='cooldown'?`<span class="cf-chip cf-chip-warn" title="All other combinations have pair cooldowns active">⚠️ Cooldown override</span>`
+        :`<span class="cf-chip cf-chip-warn" title="Queue too small to apply normal constraints">⚠️ Thin queue</span>`
+      ):'',
     ].filter(Boolean).join('');
     // Team tile: show avg only publicly. Partner gap in tooltip — not broadcast to bystanders.
     const pTeam=(ids,avg,pgap)=>`<div style="background:var(--s2);border:1px solid ${pgap>=220?'rgba(248,113,113,.5)':pgap>=180?'rgba(251,147,60,.4)':pgap>=150?'rgba(251,191,36,.3)':'var(--bd)'};border-radius:var(--ra);padding:9px;text-align:center" title="Partner gap: ${pgap}pts${pgap>=220?' 🔴 carry risk — reshuffle':pgap>=180?' 🟠 high carry risk':pgap>=150?' 🟡 noticeable':' ✓ ok'}">
@@ -5117,7 +5183,10 @@ function _autoRestoreFromLocal(){
   // Render immediately with local data — loading overlay stays up while Firebase syncs
   try{
     renderDB();renderRoster();renderHistory();renderArchive();renderStandings();
-    updateHeader();updatePinStatus();
+    updateHeader();
+    // Do NOT call updatePinStatus() or checkAdminAccess() here.
+    // PIN (S.adminPin) is authoritative from Firebase — local backup may have stale or no PIN.
+    // checkAdminAccess() fires after _applyRemote confirms remote state.
     if(S.session?.status==='active') renderLive();
   }catch(e){
     // Corrupt backup — clear it and fall through to normal Firebase load
