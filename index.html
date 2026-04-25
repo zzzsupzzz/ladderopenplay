@@ -675,6 +675,7 @@ const DEVICE_ID=Math.random().toString(36).slice(2,10); // Runtime only — no l
 const SYNC={
   ready:false, ref:null, roomId:null, _ignoreNext:false, _unsubscribe:null,
   _conflictActive:false, // prevents stacking multiple conflict toasts
+  _pendingConflict:null, // queues latest dropped conflict for re-run after resolve
   // Connection state: 'idle' | 'connecting' | 'connected' | 'error'
   state:'idle',
 
@@ -794,7 +795,7 @@ const SYNC={
     }
   },
 
-  push(segment='all'){
+  push(segment='all', onConfirmed=null){
     if(!this.ready||!this.ref)return;
     S._lastSaveTs=Date.now();
     // Monotonic version counter: increments on every write.
@@ -809,7 +810,7 @@ const SYNC={
       updates.db=S.db;
     if(segment==='all'||segment==='archive')
       updates.archive=S.archive;
-    _pushWithRetry(updates);
+    _pushWithRetry(updates, 0, onConfirmed);
   },
 
   _applyRemote(data, isFirstLoad=false){
@@ -889,25 +890,47 @@ const SYNC={
         if(badge){badge.style.background='rgba(248,113,113,.2)';badge.title=`⚠ Sync conflict at v${remoteV}`;}
         // Sticky action toast — organiser can choose to keep local state or accept incoming
         // "Keep mine" re-pushes local state; "Load theirs" applies the incoming remote data
-        // Guard: don't stack conflict toasts — one at a time
-        if(SYNC._conflictActive){console.warn('[sync] Conflict already pending — ignoring new conflict');return;}
+        // Guard: one conflict at a time. Queue the latest dropped conflict — re-run after resolve.
+        if(SYNC._conflictActive){
+          SYNC._pendingConflict=remote; // store latest — not first — so we always have newest data
+          console.warn('[sync] Conflict queued (one active)');
+          return;
+        }
         SYNC._conflictActive=true;
+        SYNC._pendingConflict=null;
         const remoteSnapshot=JSON.parse(JSON.stringify(remote));
         const snapshotV=remoteV;
         const _resolveConflict=(keepLocal)=>{
           SYNC._conflictActive=false;
           const badge2=document.getElementById('sync-badge');
           if(badge2&&badge2.style.background)badge2.style.background='';
+
+          // Capture and clear pending conflict NOW, before any async work.
+          // Processing happens in afterCurrent() — always AFTER the current resolution completes.
+          const queued=SYNC._pendingConflict;
+          SYNC._pendingConflict=null;
+
+          const afterCurrent=()=>{
+            if(queued)setTimeout(()=>SYNC._applyRemote(queued,false),150);
+          };
+
           if(keepLocal){
-            setTimeout(()=>STORE.save('all'),100);
+            // afterCurrent fires AFTER Firebase confirms the write — not before.
+            // This ensures the queued conflict is processed against the committed state,
+            // not against in-flight local state.
+            _backupToLocal();
+            SYNC.push('all', afterCurrent);
           } else {
-            // Staleness guard: check current version before applying snapshot
+            // Staleness guard: reject if version changed while organiser was deciding
+            // Note: !==  catches version drift (changed or regressed), NOT same-version-different-data.
+            // Same-version divergence would require a state hash — not implemented, not needed here.
             const currentV=S._version||0;
-            if(currentV>snapshotV){
-              toast(`Snapshot is stale (v${snapshotV} < current v${currentV}) — keeping local`,'warn');
+            if(currentV!==snapshotV){
+              toast(`Snapshot is stale (v${snapshotV} vs current v${currentV}) — keeping local`,'warn');
             } else {
               SYNC._applyRemote(remoteSnapshot,false,true);
             }
+            afterCurrent();
           }
         };
         const el=toastAction(`⚠ Sync conflict v${remoteV} — two devices updated simultaneously.`,'warn',[
@@ -923,7 +946,11 @@ const SYNC={
           }
           // Timeout: default to KEEP LOCAL — organiser's active device is authoritative
           el._conflictTimer=setTimeout(()=>{
-            if(el.parentNode){el.remove();_resolveConflict(true);}
+            if(el.parentNode){
+              el.remove();
+              _resolveConflict(true);
+              toast('Sync conflict auto-resolved — kept your version (no action taken)','ok',4000);
+            }
           },30000);
         },50);
         if(remoteV>0)S._version=remoteV;
@@ -5639,18 +5666,20 @@ function _trackConnection(db){
   });
 }
 
-function _pushWithRetry(updates,attempt=0){
+function _pushWithRetry(updates,attempt=0,onConfirmed=null){
   if(!SYNC.ready||!SYNC.ref)return;
   SYNC.ref.update(updates)
     .then(()=>{
       _setSaveStatus('saved');
       _backupToLocal(); // mirror confirmed write to local storage
+      if(onConfirmed)onConfirmed(); // fire after confirmed write, not before
     })
     .catch(e=>{
       if(attempt<2){
         const delay=4000*(attempt+1);
         clearTimeout(_pendingRetryTimer);
-        _pendingRetryTimer=setTimeout(()=>_pushWithRetry(updates,attempt+1),delay);
+        // Pass onConfirmed through retries — fires only when a retry succeeds
+        _pendingRetryTimer=setTimeout(()=>_pushWithRetry(updates,attempt+1,onConfirmed),delay);
         _setSaveStatus('retrying');
         console.warn(`[sync] Write failed (attempt ${attempt+1}), retrying in ${delay/1000}s:`,e.message);
       }else{
@@ -5658,6 +5687,9 @@ function _pushWithRetry(updates,attempt=0){
         console.error('[sync] Write failed after 3 attempts:',e);
         toast('⚠️ Data not saved after retries — check WiFi','err');
         _backupToLocal(); // always preserve locally even on server failure
+        // Fire onConfirmed even on failure — caller (conflict resolution) must still proceed
+        // so pending conflicts don't stay stuck in the queue indefinitely
+        if(onConfirmed)onConfirmed();
       }
     });
 }
