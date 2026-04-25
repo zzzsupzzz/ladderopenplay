@@ -674,6 +674,7 @@ const DEVICE_ID=Math.random().toString(36).slice(2,10); // Runtime only — no l
 /* ── FIREBASE REAL-TIME SYNC ──────────────────────── */
 const SYNC={
   ready:false, ref:null, roomId:null, _ignoreNext:false, _unsubscribe:null,
+  _conflictActive:false, // prevents stacking multiple conflict toasts
   // Connection state: 'idle' | 'connecting' | 'connected' | 'error'
   state:'idle',
 
@@ -872,7 +873,8 @@ const SYNC={
       // 3. Timestamp stale — soft: remote ts >2s behind local (fallback for pre-version data).
       const remoteV=remote.meta?._v||0;
       const localV=S._version||0;
-      if(!isFirstLoad&&remoteV>0&&localV>0&&remoteV<localV){
+      const _vValid=v=>Number.isInteger(v)&&v>0; // strict version validation
+      if(!isFirstLoad&&_vValid(remoteV)&&_vValid(localV)&&remoteV<localV){
         console.warn(`[sync] Rejected version regression: incoming v${remoteV} < local v${localV}`);
         return;
       }
@@ -881,18 +883,49 @@ const SYNC={
       if(isStale){console.warn(`[sync] Rejected stale remote (${remoteTs}<${localTs})`);return;}
 
       // Version conflict: same version from different device = simultaneous write
-      if(!isFirstLoad&&remoteV>0&&localV>0&&remoteV===localV&&(remote.meta?._by||'')!==DEVICE_ID){
+      if(!isFirstLoad&&_vValid(remoteV)&&_vValid(localV)&&remoteV===localV&&(remote.meta?._by||'')!==DEVICE_ID){
         console.warn(`[sync] Version conflict: both devices at v${remoteV}`);
         const badge=document.getElementById('sync-badge');
         if(badge){badge.style.background='rgba(248,113,113,.2)';badge.title=`⚠ Sync conflict at v${remoteV}`;}
         // Sticky action toast — organiser can choose to keep local state or accept incoming
         // "Keep mine" re-pushes local state; "Load theirs" applies the incoming remote data
+        // Guard: don't stack conflict toasts — one at a time
+        if(SYNC._conflictActive){console.warn('[sync] Conflict already pending — ignoring new conflict');return;}
+        SYNC._conflictActive=true;
         const remoteSnapshot=JSON.parse(JSON.stringify(remote));
-        toastAction(`⚠ Sync conflict v${remoteV} — another device updated at the same time.`,'warn',[
-          {label:'Keep mine', fn:`function(){setTimeout(()=>STORE.save('all'),100);}`},
-          {label:'Load theirs', fn:`function(){SYNC._applyRemote(${JSON.stringify(remoteSnapshot)},false,true);}`},
+        const snapshotV=remoteV;
+        const _resolveConflict=(keepLocal)=>{
+          SYNC._conflictActive=false;
+          const badge2=document.getElementById('sync-badge');
+          if(badge2&&badge2.style.background)badge2.style.background='';
+          if(keepLocal){
+            setTimeout(()=>STORE.save('all'),100);
+          } else {
+            // Staleness guard: check current version before applying snapshot
+            const currentV=S._version||0;
+            if(currentV>snapshotV){
+              toast(`Snapshot is stale (v${snapshotV} < current v${currentV}) — keeping local`,'warn');
+            } else {
+              SYNC._applyRemote(remoteSnapshot,false,true);
+            }
+          }
+        };
+        const el=toastAction(`⚠ Sync conflict v${remoteV} — two devices updated simultaneously.`,'warn',[
+          {label:'Keep mine', fn:`function(){}`},
+          {label:'Load theirs', fn:`function(){}`},
         ]);
-        // Don't apply remote data yet — wait for organiser choice
+        // Wire up buttons after DOM insertion (can't use closures in fn strings)
+        setTimeout(()=>{
+          const btns=el?.querySelectorAll('button');
+          if(btns&&btns.length>=2){
+            btns[0].onclick=()=>{el.remove();_resolveConflict(true);};
+            btns[1].onclick=()=>{el.remove();_resolveConflict(false);};
+          }
+          // Timeout: default to KEEP LOCAL — organiser's active device is authoritative
+          el._conflictTimer=setTimeout(()=>{
+            if(el.parentNode){el.remove();_resolveConflict(true);}
+          },30000);
+        },50);
         if(remoteV>0)S._version=remoteV;
         return;
       }
