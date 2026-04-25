@@ -490,7 +490,9 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <div class="card">
       <div class="ct">⏳ Queue <span id="cf-queue-badge" style="font-size:.66rem;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(34,211,238,.1);color:var(--cy)">0</span>
         <button onclick="openQueueRulesModal()" style="background:none;border:none;cursor:pointer;font-size:.75rem;color:var(--mu);padding:1px 5px;margin-left:4px;font-family:'DM Sans',sans-serif" title="How the queue works">ℹ️</button>
+        <button onclick="openLockPairModal()" style="background:none;border:none;cursor:pointer;font-size:.75rem;color:var(--mu);padding:1px 5px;font-family:'DM Sans',sans-serif" title="Lock two players as permanent partners this session">🔒</button>
       </div>
+      <div id="cf-locked-pairs-display"></div>
       <div id="cf-queue-list"></div>
       <div id="cf-paused-wrap" style="display:none">
         <div style="font-size:.65rem;font-weight:700;color:var(--mu);letter-spacing:.05em;margin:8px 0 4px">⏸ PAUSED</div>
@@ -651,8 +653,10 @@ function _updateRoomBadge(){
   const el=document.getElementById('room-code-badge');
   if(!el)return;
   const id=SYNC.roomId||localStorage.getItem('pb_room_id')||'—';
+  const ver=S._lastSaveTs?`v${Math.floor(S._lastSaveTs/1000)%100000}`:'—';
+  const lastSave=S._lastSaveTs?new Date(S._lastSaveTs).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'never';
   el.textContent=`📡 ${id}`;
-  el.title=`Room: ${id} — click to manage`;
+  el.title=`Room: ${id} | Version: ${ver} | Last sync: ${lastSave} — click to manage`;
 }
 
 /* ── CF simultaneous-finish batch debounce ─────────────── */
@@ -1651,7 +1655,7 @@ function startSession(){
     }),
     partnerHx:{},oppHx:{},oppHxTime:{},
     nrPairingHx:{},
-    cfQueue:[],cfPinnedIds:[],cfPauseAfterGame:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,
+    cfQueue:[],cfPinnedIds:[],cfPauseAfterGame:[],cfLockedPairs:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,
     cfMatchupHx:{},cfGroupHx:{},cfPairConsec:{},cfPairWins:{},cfMustSplitPair:null,cfPaused:[],
     cfPairSessionCount:{},cfPairLastAt:{},cfPairLastLost:{},
     neverPair:{},ratingOverrides:{},
@@ -1908,6 +1912,36 @@ function cfUnpinPlayer(id){
 // Clear all pins (e.g. after a court is confirmed)
 function cfClearPins(){
   if(S.session)S.session.cfPinnedIds=[];
+}
+
+// Partner lock — persistent same-team preference across the session.
+// Locked pairs are always assigned to the same team when both are in the same match.
+// They are NOT forced into a match together; they still compete for queue position normally.
+// Use pin to force them into the NEXT match; use lock to keep them teamed if they're selected.
+function cfLockPair(idA, idB){
+  if(!S.session)return;
+  if(!Array.isArray(S.session.cfLockedPairs))S.session.cfLockedPairs=[];
+  const pk=(a,b)=>([a,b].sort().join('|'));
+  const key=pk(idA,idB);
+  if(S.session.cfLockedPairs.some(p=>pk(p[0],p[1])===key)){toast('Already locked together','warn');return;}
+  if(S.session.cfLockedPairs.length>=3){toast('Max 3 locked pairs per session','warn');return;}
+  S.session.cfLockedPairs.push([idA,idB]);
+  STORE.save('session');renderLive();
+  toast(`${gp(idA)?.name||'?'} & ${gp(idB)?.name||'?'} — locked as partners 🔒`,'ok');
+}
+function cfUnlockPair(idA, idB){
+  if(!S.session)return;
+  const pk=(a,b)=>([a,b].sort().join('|'));
+  const key=pk(idA,idB);
+  S.session.cfLockedPairs=(S.session.cfLockedPairs||[]).filter(p=>pk(p[0],p[1])!==key);
+  STORE.save('session');renderLive();
+  toast(`${gp(idA)?.name||'?'} & ${gp(idB)?.name||'?'} — unlocked`,'ok');
+}
+function cfClearLockedPairs(){
+  if(!S.session)return;
+  S.session.cfLockedPairs=[];
+  STORE.save('session');renderLive();
+  toast('All partner locks cleared','ok');
 }
 
 // Change 8: schedule pause after current game finishes
@@ -3542,16 +3576,19 @@ const CF={
   hungerBoost(id){
     const sp=gsp(id);if(!sp)return 0;
     const myGames=sp.matchesPlayed||0;
-    const allGames=S.session.players.filter(p=>p.status!=='left').map(p=>p.matchesPlayed||0);
+    const activePlayers=S.session.players.filter(p=>p.status!=='left');
+    const allGames=activePlayers.map(p=>p.matchesPlayed||0);
     if(!allGames.length)return 0;
     const avgGames=allGames.reduce((a,b)=>a+b,0)/allGames.length;
     const deficit=avgGames-myGames;
-    // Change 5: stronger fairness — scale steeply with imbalance.
-    // deficit=1 → +16, deficit=2 → +40, deficit=3 → +72 (quadratic ramp).
-    // deficit=0 games but avg=5+ → 200pt anchor so brand-new arrivals are guaranteed in.
-    if(myGames===0&&avgGames>0)return Math.min(200,avgGames*20);
+    if(myGames===0&&avgGames>0)return Math.min(200,avgGames*25);
     if(deficit<=0)return 0;
-    return Math.min(150,deficit*deficit*8+deficit*8); // quadratic for strong imbalance signal
+    // Quadratic ramp: deficit=1→16, deficit=2→40, deficit=3→72, deficit=4→120
+    const base=Math.min(150,deficit*deficit*8+deficit*8);
+    // Small group boost: in sessions <16 players, quality guardrails give low-rated
+    // players fewer match options, causing them to wait more. Amplify hunger to compensate.
+    const smallBoost=activePlayers.length<16?1.5:1.0;
+    return Math.min(200,Math.round(base*smallBoost));
   },
 
   queuePriority(qEntry,courtAvg){
@@ -3574,7 +3611,17 @@ const CF={
       gap>=nc*2 ?  50 :          // mild boost
       gap>=nc   ?  15 : 0;       // minor — just sat once
     const hunger=this.hungerBoost(qEntry.id);
-    return waitMin*2+skillFit+gapBonus+hunger;
+    // Play-count gap bonus in pool ordering: players behind in TOTAL games
+    // get additional priority boost on top of matchGap (which only covers recent sitting).
+    let pcgBonus=0;
+    if(S.session?.players){
+      const activeCounts=S.session.players.filter(sp2=>sp2.status!=='left').map(sp2=>sp2.matchesPlayed||0);
+      const maxG=activeCounts.length?Math.max(...activeCounts):0;
+      const myG=gsp(qEntry.id)?.matchesPlayed||0;
+      const pcg=maxG-myG;
+      pcgBonus=pcg>=4?100:pcg>=3?60:pcg>=2?25:0;
+    }
+    return waitMin*2+skillFit+gapBonus+hunger+pcgBonus;
   },
 
   /* Init queue at session start */
@@ -3613,7 +3660,30 @@ const CF={
 
   /* Score a candidate group of 4 — lower is better */
   _scoreGroup(group,mustSplitPair){
-    const{t1,t2}=MM.bestPair(group);
+    let{t1,t2}=MM.bestPair(group);
+    // Apply locked pair constraint: if a locked pair is in this group, ensure they're on same team.
+    // Overrides the optimal split if necessary — social preference > marginal quality difference.
+    const lockedPairs=S.session?.cfLockedPairs||[];
+    if(lockedPairs.length){
+      const ids=group.map(p=>p.id);
+      for(const[a,b]of lockedPairs){
+        if(!ids.includes(a)||!ids.includes(b))continue;
+        const aInT1=t1.some(p=>p.id===a); const bInT1=t1.some(p=>p.id===b);
+        if(aInT1!==bInT1){
+          // They're on opposite teams — find the split that puts them together with best balance
+          const pa=group.find(p=>p.id===a), pb=group.find(p=>p.id===b);
+          const others=group.filter(p=>p.id!==a&&p.id!==b);
+          // Try both splits: [a,b]+[c,d] and [a,b]+[d,c]
+          const optA={t1:[pa,pb],t2:others};
+          const optB={t1:others,t2:[pa,pb]};
+          const gapA=Math.abs(optA.t1.reduce((s,p)=>s+p.sr,0)/2-optA.t2.reduce((s,p)=>s+p.sr,0)/2);
+          const gapB=Math.abs(optB.t1.reduce((s,p)=>s+p.sr,0)/2-optB.t2.reduce((s,p)=>s+p.sr,0)/2);
+          const chosen=gapA<=gapB?optA:optB;
+          t1=chosen.t1; t2=chosen.t2;
+        }
+        break; // only apply first matching lock
+      }
+    }
     const avg=arr=>arr.reduce((s,p)=>s+p.sr,0)/arr.length;
     const crossImb=Math.abs(avg(t1)-avg(t2));
     const rawT1gap=Math.abs(t1[0].sr-t1[1].sr);
@@ -3641,7 +3711,7 @@ const CF={
     // <16 active players: last 1 match only.
     // 16+: last 2 matches (original behaviour).
     const activePlCount=(S.session.activePlayers||[]).filter(ap=>ap.status!=='left').length;
-    const overlapWindow=activePlCount<14?0:activePlCount<16?1:2;
+    const overlapWindow=this._phaseOverlapWindow(activePlCount);
     let overlapPen=0;
     if(overlapWindow>0){
       const groupIdSet=new Set(group.map(p=>p.id));
@@ -3684,12 +3754,42 @@ const CF={
     const p2Raw=partRpt*3 + oppRpt*5 + matchRpt + groupRpt + overlapPen + splitPen + consecPen;
     const p2=p2Raw>200?Math.round(200*p2Raw/Math.max(p2Raw,1)):p2Raw; // scale proportionally
 
-    // P3: Fair playtime — negative bonus, can never override P1 balance
-    const p3=waitBonus + gapBonus;
+    // P3: Fair playtime — negative bonus, capped so it cannot fully override meaningful P1 balance.
+    // Uncapped P3 could negate a 133pt team gap (P1=200) with just 4 must-play players + long waits.
+    // Cap at -120: strong enough to matter for close calls, not enough to produce bad matches.
+    const p3Raw=waitBonus + gapBonus;
+    const p3=Math.max(-120, p3Raw);
 
-    const total=p1+p2+p3;
+    // Starvation bonus: when a player in this group has been sitting 2+ full waves (NC*2),
+    // add a strong scoring bonus so they win the combination search, not just the pool ordering.
+    // Without this, hungerBoost gets them to the top of the pool but _scoreGroup still
+    // prefers 4 mid-range players over including the underplayed outlier.
+    // Uses cached p.mg (matchGap) and p.pcg (playCountGap) stamped per generation — O(1) reads.
+    const nc4=S.session?.courts||1;
+    let starvationBonus=0;
+    group.forEach(p=>{
+      const gap=p.mg!=null?p.mg:(S.session?CF.matchGap(p.id):0);
+      if(gap>=nc4*3)starvationBonus-=300;
+      else if(gap>=nc4*2)starvationBonus-=150;
+    });
+    const starvationCapped=Math.max(-400,starvationBonus);
+
+    // Play-count gap — uses cached p.pcg (no array scan per combination)
+    let playCountBonus=0;
+    group.forEach(p=>{
+      const pcGap=p.pcg!=null?p.pcg:0;
+      if(pcGap>=4)playCountBonus-=200;
+      else if(pcGap>=3)playCountBonus-=120;
+      else if(pcGap>=2)playCountBonus-=50;
+    });
+    playCountBonus=Math.max(-300,playCountBonus);
+
+    const total=p1+p2+p3+starvationCapped+playCountBonus;
     const meta={splitOverride:splitPen>0&&splitPen<200,repeatMatchup:gamesSince!==null&&gamesSince<=5,
-      rawT1gap,rawT2gap};
+      rawT1gap,rawT2gap,
+      _dbg:{p1:Math.round(p1),p2:Math.round(p2),p3:Math.round(p3),
+            starv:Math.round(starvationCapped),pcg:Math.round(playCountBonus),
+            total:Math.round(total)}};
     // NR protection:
     // a) Soft penalty for 2+ NR in same group when rated alternatives exist.
     //    Gentle enough that NR pairs are chosen when queue is mostly NR.
@@ -3769,28 +3869,15 @@ const CF={
       if(hasHotOpp)hotColdPen+=isCold&&isPlayingUp?70:isPlayingUp?50:40;
     });
     // ── Skill-band guardrail (Step 5) ──────────────────────────────────
-    // Uses active queue cfRating quartiles — recalculated per group, not session-wide.
-    // Q1+Q4 on same team = strong penalty (+300). Q1+Q3 on same team = soft penalty (+80).
-    // Active queue only: paused/left players do not influence band boundaries.
+    // Band tags (q1/q3/q4) are stamped on each player object ONCE per generation
+    // in _generateSingleSuggestion — not recomputed here per scoring call.
     let bandPen=0;
-    try{
-      const activeQueue=(S.session.cfQueue||[]).map(q=>q.id);
-      const onCourt=Object.values(S.session.cfCourts||{})
-        .filter(ct=>ct&&ct.status==='playing'&&ct.match)
-        .flatMap(ct=>[...ct.match.t1,...ct.match.t2]);
-      const poolIds=[...new Set([...activeQueue,...onCourt,...group.map(p=>p.id)])];
-      if(poolIds.length>=8){
-        const sorted=[...poolIds].map(pid=>({pid,r:CF.cfRating(pid)})).sort((a,b)=>b.r-a.r);
-        const q=Math.floor(sorted.length/4);
-        const q1ids=new Set(sorted.slice(0,q).map(x=>x.pid));
-        const q4ids=new Set(sorted.slice(-q).map(x=>x.pid));
-        const q3ids=new Set(sorted.slice(q*2,q*3).map(x=>x.pid));
-        [[t1[0].id,t1[1].id],[t2[0].id,t2[1].id]].forEach(([a,b])=>{
-          if((q1ids.has(a)&&q4ids.has(b))||(q1ids.has(b)&&q4ids.has(a)))bandPen+=300;
-          else if((q1ids.has(a)&&q3ids.has(b))||(q1ids.has(b)&&q3ids.has(a)))bandPen+=80;
-        });
-      }
-    }catch(e){}
+    [[t1[0],t1[1]],[t2[0],t2[1]]].forEach(([a,b])=>{
+      const aq=a.band, bq=b.band;
+      if(!aq||!bq)return;
+      if((aq===1&&bq===4)||(aq===4&&bq===1))bandPen+=300;
+      else if((aq===1&&bq===3)||(aq===3&&bq===1))bandPen+=80;
+    });
     return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+bandPen,meta,t1,t2,group};
   },
 
@@ -4067,6 +4154,30 @@ const CF={
     return Math.abs(t1[0].sr-t1[1].sr)<=cap && Math.abs(t2[0].sr-t2[1].sr)<=cap;
   },
 
+  // Session phase: adjusts quality vs flexibility tradeoff based on elapsed time.
+  //   Phase A (0–45 min):   strict quality — pool is fresh, no excuse for bad matches
+  //   Phase B (45–120 min): balanced — current default thresholds
+  //   Phase C (120+ min):   relaxed — late session, repeats/mild mismatches acceptable
+  _sessionPhase(){
+    const started=S.session?.startTime||Date.now();
+    const elapsed=(Date.now()-started)/60000; // minutes
+    return elapsed<45?'A':elapsed<120?'B':'C';
+  },
+
+  // Phase-aware gap cap for _withinTeamGapOk
+  _phaseGapCap(){
+    const phase=this._sessionPhase();
+    return phase==='A'?250:phase==='B'?300:380; // Phase C loosens partner gap
+  },
+
+  // Phase-aware overlap window
+  _phaseOverlapWindow(activePlCount){
+    if(activePlCount<14)return 0;
+    if(activePlCount<16)return 1;
+    const phase=this._sessionPhase();
+    return phase==='C'?1:2; // Phase C: always last-1 regardless of count
+  },
+
   _findBestGroup(candidates,mustSplit,nrIds,totalQueue,lastMatchupKey=null){
     let best=null,bestScore=Infinity;
     const n=candidates.length;
@@ -4077,12 +4188,13 @@ const CF={
     // Relaxed only in pass 3 when pool is too constrained to form any other valid match.
     const isBackToBack=(res)=>!!lastMatchupKey&&
       this.matchupKey(res.t1.map(p=>p.id),res.t2.map(p=>p.id))===lastMatchupKey;
-    // Pass 1: strict — 300pt gap + pair cooldown + back-to-back block
+    // Pass 1: phase-aware gap cap + pair cooldown + back-to-back block
+    const _phaseCap=this._phaseGapCap();
     let _blockedByCooldown=false,_blockedByBTB=false,_candidateCount=n;
     for(let i=0;i<n-3;i++)for(let j=i+1;j<n-2;j++)for(let k=j+1;k<n-1;k++)for(let l=k+1;l<n;l++){
       const group=[candidates[i],candidates[j],candidates[k],candidates[l]];
       const res=this._scoreGroup(group,mustSplit);
-      if(!this._withinTeamGapOk(res.t1,res.t2,300))continue;
+      if(!this._withinTeamGapOk(res.t1,res.t2,_phaseCap))continue;
       if(hasCooldownPair(res)){_blockedByCooldown=true;continue;}
       if(isBackToBack(res)){_blockedByBTB=true;continue;}
       if(res.score<bestScore){bestScore=res.score;best=res;}
@@ -4121,7 +4233,8 @@ const CF={
       meta:{...best.meta,gap:Math.round(gap),gapWarn:gap>80,maxWait:Math.round(maxWait),
             urgentWait:maxWait>=20,shortGameBoost:shortGame||false,
             fallbackPass:best.fallbackPass||1,
-            fallbackReason:best.fallbackReason||null},
+            fallbackReason:best.fallbackReason||null,
+            constraintReason:best.constraintReason||null},
       ts:Date.now()
     };
   },
@@ -4131,6 +4244,37 @@ const CF={
     // Pool was built at batchGenerateSuggestions() time; if another court submitted
     // a score since then, session form has changed. Stale .sr = stale scoring.
     pool.forEach(p=>{p.sr=this.cfRating(p.id);});
+
+    // Cache per-generation values on pool objects so _scoreGroup never recomputes them.
+    // _scoreGroup is called ~3000 times per C(14,4) generation — these would be expensive.
+    const _activePlayerCounts=S.session.players
+      .filter(sp2=>sp2.status!=='left').map(sp2=>sp2.matchesPlayed||0);
+    const _maxPlayed=_activePlayerCounts.length?Math.max(..._activePlayerCounts):0;
+    const _mc=S.session.cfMatchCount||0;
+    pool.forEach(p=>{
+      const sp2=gsp(p.id);
+      p.mg=sp2?.lastPlayedAtMatch!=null&&sp2.matchesPlayed>0?_mc-(sp2.lastPlayedAtMatch||0):_mc+1;
+      p.pcg=_maxPlayed-(sp2?.matchesPlayed||0); // play-count gap vs leader
+    });
+
+    // Stamp skill-band quartile (1–4) on each player once per generation.
+    // _scoreGroup reads p.band instead of recomputing cfRating() per combination.
+    // Active queue + on-court players define the band boundaries (not full session list).
+    try{
+      const _queueIds=(S.session.cfQueue||[]).map(q=>q.id);
+      const _courtIds=Object.values(S.session.cfCourts||{})
+        .filter(ct=>ct&&ct.status==='playing'&&ct.match)
+        .flatMap(ct=>[...ct.match.t1,...ct.match.t2]);
+      const _poolIdSet=new Set([..._queueIds,..._courtIds]);
+      const _poolForBands=[...pool.filter(p=>_poolIdSet.has(p.id))];
+      if(_poolForBands.length>=8){
+        const _sorted=[..._poolForBands].sort((a,b)=>b.sr-a.sr);
+        const _q=Math.floor(_sorted.length/4);
+        _sorted.forEach((p,i)=>{p.band=i<_q?1:i<_q*2?2:i<_q*3?3:4;});
+      }else{
+        pool.forEach(p=>{p.band=0;}); // not enough players to band — guardrail inactive
+      }
+    }catch(e){pool.forEach(p=>{p.band=0;});}
 
     // Apply same tier ordering as multi-court: first-timers → MGL-waiters → normal
     // This ensures the single-court path also respects the first-game guarantee
@@ -4231,6 +4375,41 @@ const CF={
     const top=orderedPool.slice(0,Math.min(Math.max(16,orderedPool.length),orderedPool.length));
     const _lastKey=S.session?.cfCourts?.[courtNum]?.lastMatchupKey||null;
     const best=this._findBestGroup(top,mustSplit,nrIds,orderedPool.length,_lastKey);
+
+    // ── Match quality floor ──────────────────────────────────────────────
+    // Skip if team avg gap >180pts AND no must-play pressure.
+    // Must-play threshold is NC*2 (2 full waves = ~24min).
+    // Quality-floor bypass at NC*3 (3 full waves = ~36min) — prevents outlier
+    // players (e.g. only top-rated in room) from sitting 20+ min between games
+    // because every group they're in fails the quality check.
+    const nc=S.session?.courts||1;
+    const hasMustPlay=top.some(p=>this.matchGap(p.id)>=nc*2);
+    const hasOutlierWait=top.some(p=>this.matchGap(p.id)>=nc*3); // bypass quality floor
+    if(best&&best.fallbackPass!==3){
+      const bestP1=Math.abs((best.t1[0].sr+best.t1[1].sr)/2-(best.t2[0].sr+best.t2[1].sr)/2)*1.5
+                  +Math.abs(best.t1[0].sr-best.t1[1].sr)/50+Math.abs(best.t2[0].sr-best.t2[1].sr)/50;
+      if(bestP1>270&&!hasMustPlay&&!hasOutlierWait){
+        console.log(`[CF] Court ${courtNum}: skipping bad match (P1=${Math.round(bestP1)}) — waiting for better pool`);
+        return;
+      }
+    }
+
+    // Determine constraint reason for transparency chip
+    let constraintReason=null;
+    if(best){
+      if(hasOutlierWait)constraintReason='outlier-wait';
+      else if(hasMustPlay)constraintReason='wait-override';
+      else if(best.fallbackPass===3)constraintReason=best.fallbackReason||'thin';
+      // Check if playCountGap or starvation dominated this selection
+      else if(top.some(p=>{
+        const sp=gsp(p.id);
+        const maxG=Math.max(...(S.session.players.filter(x=>x.status!=='left').map(x=>x.matchesPlayed||0)||[0]));
+        return maxG-(sp?.matchesPlayed||0)>=3;
+      }))constraintReason='playtime-catch-up';
+      if(!constraintReason&&best.fallbackPass===2)constraintReason='skill-stretch';
+    }
+    if(best&&constraintReason)best={...best,constraintReason};
+
     this._storeSuggestion(courtNum,best,finishedMatch);
   },
 
@@ -4559,6 +4738,31 @@ const CF={
     toast(`Court ${courtNum} reshuffled — swapped in ${log}`,'ok');
   },
 
+  // Regenerate ignoring wait/fairness pressure — organiser override when constraint chip fires.
+  // Temporarily zeroes matchGap and playCountGap influence so the engine optimises
+  // purely for match quality. Gives organiser a "show me the best match, not the fairest" view.
+  reshuffleQualityFirst(courtNum){
+    if(!S.session)return;
+    cancelAutoConfirm(courtNum);
+    // Snapshot and temporarily suppress starvation by setting all lastPlayedAtMatch to current
+    // This makes matchGap=0 for all players → starvation/fairness bonuses don't fire
+    const savedLastPlayed={};
+    const mc=S.session.cfMatchCount||0;
+    S.session.players.forEach(sp=>{
+      savedLastPlayed[sp.id]=sp.lastPlayedAtMatch;
+      sp.lastPlayedAtMatch=mc; // fake: everyone "just played" → matchGap=0
+    });
+    delete S.session.cfSuggestions[courtNum];
+    this.batchGenerateSuggestions([courtNum],null);
+    // Restore real lastPlayedAtMatch values
+    S.session.players.forEach(sp=>{sp.lastPlayedAtMatch=savedLastPlayed[sp.id];});
+    const next=S.session.cfSuggestions[courtNum];
+    if(next)next.meta={...next.meta,constraintReason:'quality-first',
+      qualityFirstNote:'Fairness pressure suppressed — quality-first pick'};
+    STORE.save('session');renderLive();
+    toast(`Court ${courtNum} — quality-first match generated`,'ok');
+  },
+
   // Change 3: Swap one player in a suggestion without rebuilding the whole match
   openSwapPlayer(courtNum){
     const sug=S.session?.cfSuggestions[courtNum];
@@ -4747,13 +4951,42 @@ const CF={
     const t1CoolChip=cooldownChip(sug.t1,'P1');
     const t2CoolChip=cooldownChip(sug.t2,'P2');
 
-    // ── Win probability (ELO expected score) ───────────────────────────
+    // ── Match quality indicator (primary) ──────────────────────────────
+    // Derived from within-team and team-average gaps — not from ELO probability.
+    // Probability answers "who will win"; quality answers "is this a good game experience".
+    // A 1200+800 vs 1000+1000 match shows 50% probability but is a 🔴 experience.
+    const maxPartnerGap=Math.max(t1pgap,t2pgap);
+    const teamGap=meta.gap;
+    let qualityLabel,qualityColor,qualityTitle;
+    // Build form context string for tooltip — shows today's effectiveElo adjustments
+    // so organiser knows whether a large gap is raw skill or being narrowed by session form
+    const _formCtx=[...sug.t1,...sug.t2].map(id=>{
+      const f=gsp(id)?._sessForm;const nm=gp(id)?.name?.split(' ')[0]||'?';
+      return f&&f!==0?`${nm}${f>0?'+':''}${f}`:null;
+    }).filter(Boolean).join(', ');
+    const _formNote=_formCtx?` · Forms today: ${_formCtx}. Ratings shown are session-adjusted.`:'';
+    if(maxPartnerGap>=220||teamGap>=180){
+      qualityLabel='🔴 Avoid';qualityColor='var(--re)';
+      qualityTitle=`Poor match — partner gap ${maxPartnerGap}pts, team gap ${teamGap}pts. Consider reshuffling.${_formNote}`;
+    }else if(maxPartnerGap>=150||teamGap>=100){
+      qualityLabel='🟡 Slight mismatch';qualityColor='var(--go)';
+      qualityTitle=`Mild imbalance — partner gap ${maxPartnerGap}pts, team gap ${teamGap}pts.${_formNote}`;
+    }else{
+      qualityLabel='🟢 Clean';qualityColor='var(--gr)';
+      qualityTitle=`Good match — partner gap ${maxPartnerGap}pts, team gap ${teamGap}pts.${_formNote}`;
+    }
+    // Debug breakdown appended to quality chip tooltip — visible on hover, not cluttering UI
+    const _dbg=meta?._dbg;
+    const _dbgNote=_dbg?` | Score: P1=${_dbg.p1} P2=${_dbg.p2} P3=${_dbg.p3} Starv=${_dbg.starv} PCG=${_dbg.pcg} Total=${_dbg.total}`:'';
+    const qualityTag=`<span class="cf-chip" style="background:rgba(0,0,0,.08);color:${qualityColor};font-weight:700;border-color:${qualityColor}" title="${qualityTitle}${_dbgNote}">${qualityLabel}</span>`;
+
+    // Win probability demoted to secondary chip (helpful but not primary signal)
     const t1WinProb=Math.round(100/(1+Math.pow(10,(t2Avg-t1Avg)/400)));
     const maxWinProb=Math.max(t1WinProb,100-t1WinProb);
     const winProbTag=maxWinProb>=75
-      ?`<span class="cf-chip cf-chip-warn" title="One team has ${maxWinProb}% win probability — likely blowout">🎯 ${maxWinProb}% favoured</span>`
+      ?`<span class="cf-chip cf-chip-warn" title="One team has ${maxWinProb}% win probability (ELO expected). Note: probability ≠ match quality.">🎯 ${maxWinProb}%</span>`
       :maxWinProb>=65
-      ?`<span class="cf-chip cf-chip-info" title="One team ${maxWinProb}% favoured">~${maxWinProb}% favoured</span>`
+      ?`<span class="cf-chip cf-chip-info" title="One team ${maxWinProb}% favoured (ELO expected)">~${maxWinProb}%</span>`
       :``;
 
     // ── Team average gap (graduated, not binary) ────────────────────────
@@ -4797,7 +5030,7 @@ const CF={
       ?`<span class="cf-chip cf-chip-info" title="Includes overdue player">⏳ Fairness</span>`:``;
 
     const chips=[
-      balanceTag, winProbTag, waitTag,
+      qualityTag, balanceTag, winProbTag, waitTag,
       t1CoolChip, t2CoolChip,
       pgapTag(t1pgap,'P1'), pgapTag(t2pgap,'P2'),
       sug.allIds.map(id=>formTag(id)).filter(Boolean).join(''),
@@ -4810,6 +5043,13 @@ const CF={
         :meta.fallbackReason==='cooldown'?`<span class="cf-chip cf-chip-warn" title="All other combinations have pair cooldowns active">⚠️ Cooldown override</span>`
         :`<span class="cf-chip cf-chip-warn" title="Queue too small to apply normal constraints">⚠️ Thin queue</span>`
       ):'',
+      // Constraint transparency: why was THIS match generated?
+      // Organiser sees the reason, not just the result.
+      meta.constraintReason==='skill-stretch'?`<span class="cf-chip cf-chip-info" title="Gap cap relaxed slightly (Phase B/C). Match is within acceptable range but not ideal.">↕ Skill stretch</span>`
+      :meta.constraintReason==='wait-override'?`<span class="cf-chip cf-chip-warn" title="One or more players waited 2+ full waves — fairness override applied.">⏰ Wait override</span>`
+      :meta.constraintReason==='outlier-wait'?`<span class="cf-chip cf-chip-warn" title="Player waited 3+ full waves — quality floor bypassed to prevent excessive sitting.">🔴 Outlier wait</span>`
+      :meta.constraintReason==='playtime-catch-up'?`<span class="cf-chip cf-chip-info" title="Includes player(s) behind in total games played this session.">⚖️ Catch-up</span>`
+      :'',
     ].filter(Boolean).join('');
     // Team tile: show avg only publicly. Partner gap in tooltip — not broadcast to bystanders.
     const pTeam=(ids,avg,pgap)=>`<div style="background:var(--s2);border:1px solid ${pgap>=220?'rgba(248,113,113,.5)':pgap>=180?'rgba(251,147,60,.4)':pgap>=150?'rgba(251,191,36,.3)':'var(--bd)'};border-radius:var(--ra);padding:9px;text-align:center" title="Partner gap: ${pgap}pts${pgap>=220?' 🔴 carry risk — reshuffle':pgap>=180?' 🟠 high carry risk':pgap>=150?' 🟡 noticeable':' ✓ ok'}">
@@ -4829,6 +5069,7 @@ const CF={
         <button class="btn bs sm" title="Full reshuffle" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleSuggestion(${courtNum})">↺ Reshuffle</button>
         <button class="btn bs sm" title="Partial reshuffle — lock some players" onclick="cancelAutoConfirm(${courtNum});CF.openPartialReshuffle(${courtNum})">🔒 Lock+Shuffle</button>
         <button class="btn bs sm" title="Swap one player" onclick="cancelAutoConfirm(${courtNum});CF.openSwapPlayer(${courtNum})">⇄ Swap</button>
+        ${sug.meta?.constraintReason&&['wait-override','outlier-wait','playtime-catch-up'].includes(sug.meta.constraintReason)?`<button class="btn bs sm" style="color:var(--cy)" title="Regenerate prioritising match quality — ignores wait/fairness pressure this once" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleQualityFirst(${courtNum})">⚖ Quality</button>`:``}
         <button class="btn bg2 sm" title="Manual pick" onclick="cancelAutoConfirm(${courtNum});CF.openManual(${courtNum})">✏ Manual</button>
       </div></div>`;
   },
@@ -4944,6 +5185,14 @@ const CF={
     const queue=S.session?.cfQueue||[];
     const paused=S.session?.cfPaused||[];
     const badge=document.getElementById('cf-queue-badge');if(badge)badge.textContent=queue.length;
+    // Locked pairs display
+    const lpEl=document.getElementById('cf-locked-pairs-display');
+    if(lpEl){
+      const lp=S.session.cfLockedPairs||[];
+      lpEl.innerHTML=lp.length?`<div style="display:flex;flex-wrap:wrap;gap:4px;padding:2px 0 6px">`
+        +lp.map(([a,b])=>`<span style="font-size:.62rem;background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.3);border-radius:20px;padding:2px 8px;color:var(--cy);cursor:pointer" onclick="openLockPairModal()" title="Click 🔒 to manage partner locks">🔒 ${esc(gp(a)?.name?.split(' ')[0]||'?')} & ${esc(gp(b)?.name?.split(' ')[0]||'?')}</span>`).join('')+'</div>'
+        :'';
+    }
     const el=document.getElementById('cf-queue-list');
     if(el){
       if(!queue.length){el.innerHTML=`<div class="empty" style="padding:10px">All players on court 🏓</div>`;}
@@ -4960,6 +5209,12 @@ const CF={
           const _formLabel=sp?._hotFlag?'🔥':sp?._playingUpFlag?'📈':sp?._coldFlag?'🧊':'';
           const _formTitle=sp?._hotFlag?'Hot streak':sp?._playingUpFlag?'Playing up vs stronger opponents':sp?._coldFlag?'Struggling':'';
           const _formVal=sp?._sessForm!=null&&sp._sessForm!==0?`<span style="font-size:.58rem;color:${sp._sessForm>0?'var(--or)':'var(--cy)'}" title="${_formTitle}">${sp._sessForm>0?'+':''}${sp._sessForm}</span>`:'';
+          // Playtime imbalance indicator
+          const _maxG=Math.max(...(S.session.players.filter(x=>x.status!=='left').map(x=>x.matchesPlayed||0)||[0]));
+          const _myG=sp?.matchesPlayed||0;
+          const _pcGap=_maxG-_myG;
+          const _pcColor=_pcGap>=4?'var(--re)':_pcGap>=3?'var(--or)':'var(--go)';
+          const _pcVal=_pcGap>=2?`<span style="font-size:.58rem;color:${_pcColor};font-weight:700" title="${_myG}/${_maxG} games — ${_pcGap} behind the leader">${_pcGap>=4?'⚠️ Far':'⚠️ '}behind (${_myG}g)</span>`:`<span style="font-size:.58rem;color:var(--mu)" title="${_myG} games">${_myG}g</span>`;
           const upNext=idx<2;
           const isPinned=(S.session.cfPinnedIds||[]).includes(q.id);
           // Transparency reason — why is this player at this position?
@@ -4980,9 +5235,20 @@ const CF={
             <div style="display:flex;align-items:center;gap:7px">
               <div style="font-size:.72rem;color:var(--m2);min-width:18px">${idx+1}</div>
               <div style="flex:1;font-weight:600;font-size:.82rem">${esc(p?.name||'?')}${tagHtml(p)}</div>
-              <div style="font-size:.7rem;color:var(--mu)" title="${_formTitle}">${_formLabel} ${_formVal}</div>
+              <div style="font-size:.7rem;color:var(--mu)" title="${_formTitle}">${_formLabel} ${_formVal} ${_pcVal}</div>
               <div style="font-size:.72rem;color:var(--mu)">${rDisp}</div>
-              <span class="cf-wait ${wcls}">${waitMin}m</span>
+              <span class="cf-wait ${wcls}" title="${waitMin>=20?'Long wait — high priority':waitMin>=10?'Moderate wait':'Recently played'}">${waitMin}m</span>
+              ${(()=>{
+                // Show quality indicator for this player's best current match if suggestion exists
+                const courtSugs=Object.values(S.session.cfSuggestions||{}).filter(sg=>sg&&sg.allIds?.includes(q.id));
+                if(!courtSugs.length)return '';
+                const sg=courtSugs[0];
+                const pgs=sg.meta?.rawT1gap!=null?Math.max(sg.meta.rawT1gap||0,sg.meta.rawT2gap||0):0;
+                const tg=sg.meta?.gap||0;
+                const ql=pgs>=220||tg>=180?'🔴':pgs>=150||tg>=100?'🟡':'🟢';
+                const qtip=`Current suggestion: partner gap ${pgs}pts, team gap ${tg}pts`;
+                return `<span style="font-size:.65rem" title="${qtip}">${ql}</span>`;
+              })()}
               <button class="btn bg2 sm" style="padding:2px 7px;font-size:.65rem" onclick="cfPausePlayer('${q.id}')" title="Take a break now">⏸ Now</button>
               ${isPinned?
                 `<button class="btn" style="padding:2px 7px;font-size:.65rem;background:rgba(168,85,247,.15);border-color:var(--pu);color:var(--pu)" onclick="cfUnpinPlayer('${q.id}')" title="Remove pin">📌</button>`:
@@ -5275,6 +5541,37 @@ function _setSaveStatus(state){
 }
 
 /* ── Item 4: Queue rules modal ──────────────────────────────────── */
+function openLockPairModal(){
+  if(!S.session){toast('No active session','err');return;}
+  const queueIds=(S.session.cfQueue||[]).map(q=>q.id);
+  const opts=queueIds.map(id=>`<option value="${id}">${esc(gp(id)?.name||'?')} (${Math.round(CF.cfRating(id))})</option>`).join('');
+  const locked=S.session.cfLockedPairs||[];
+  const lockedHtml=locked.length?`<div style="margin-top:10px"><div style="font-size:.68rem;font-weight:700;color:var(--mu);margin-bottom:4px">ACTIVE LOCKS</div>`
+    +locked.map(([a,b])=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:.77rem">
+      <span>🔒 ${esc(gp(a)?.name||'?')} & ${esc(gp(b)?.name||'?')}</span>
+      <button class="btn bd2 sm" style="padding:1px 8px" onclick="cfUnlockPair('${a}','${b}');closeModal();openLockPairModal()">✕</button></div>`).join('')
+    +`</div>`:'';
+  openModal(`<div class="modal-title">🔒 Partner Lock</div>
+    <p style="font-size:.74rem;color:var(--mu);margin-bottom:10px;line-height:1.55">Lock two players as permanent partners. When both are in the same suggested match, they'll always be on the same team.</p>
+    <label>PLAYER 1</label>
+    <select id="lp-a" class="inp" style="margin-bottom:8px"><option value="">— select —</option>${opts}</select>
+    <label>PLAYER 2</label>
+    <select id="lp-b" class="inp" style="margin-bottom:12px"><option value="">— select —</option>${opts}</select>
+    <div style="display:flex;gap:7px">
+      <button class="btn bp" style="flex:1" onclick="_confirmLockPair()">Lock Together</button>
+      <button class="btn bg2" onclick="closeModal()">Cancel</button>
+    </div>
+    ${locked.length?`<button class="btn bd2 sm" style="width:100%;margin-top:8px" onclick="cfClearLockedPairs();closeModal()">Clear All Locks</button>`:''}
+    ${lockedHtml}`);
+}
+function _confirmLockPair(){
+  const a=document.getElementById('lp-a')?.value;
+  const b=document.getElementById('lp-b')?.value;
+  if(!a||!b){toast('Select two players','err');return;}
+  if(a===b){toast('Select two different players','err');return;}
+  cfLockPair(a,b);closeModal();
+}
+
 function openQueueRulesModal(){
   openModal(`<div class="modal-title">⚖️ Queue &amp; Fairness Rules</div>
     <div style="font-size:.76rem;color:var(--mu);line-height:1.9;margin-bottom:8px">
