@@ -351,6 +351,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <span id="room-code-badge" onclick="openSyncModal()" title="Room code — click to manage" style="font-size:.65rem;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--s2);border:1px solid var(--bd);color:var(--mu);cursor:pointer;white-space:nowrap">📡 —</span>
     <span id="save-status" style="font-size:.63rem;color:var(--mu);white-space:nowrap">—</span>
     <span id="sync-badge" onclick="openSyncModal()" title="Live sync settings">⚪ Sync Off</span>
+    <span id="admin-mode-badge" style="font-size:.6rem;color:var(--or);display:none" title="No PIN set — admin access is open to anyone on this device">🔓</span>
     <span id="hbadge">SETUP</span>
     <button id="lock-btn" onclick="lockAdmin()" title="Lock admin" style="display:none;background:none;border:none;cursor:pointer;font-size:1rem;color:var(--mu);padding:2px 4px">🔒</button>
   </div>
@@ -838,35 +839,63 @@ const SYNC={
       if(isFirstLoad&&remoteTs>0){
         const localBackupTs=_getLocalBackup()?.savedAt||0;
         if(localBackupTs>remoteTs+5000){
-          console.log(`[sync] Local (${localBackupTs}) newer than Firebase (${remoteTs}) — pushing local up`);
-          setTimeout(()=>STORE.save('all'),200);
-          const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
-          if(_pageFirstLoad&&S.session?.status==='active'&&!PLAYER_MODE){
-            switchTab('live');startElapsed();updateProgress();
+          // Local backup is newer than remote — but only push if local state is substantively non-empty.
+          // Guard: if local has no players AND remote has session/db data, remote wins unconditionally.
+          // This prevents a stale backup from a wiped session overwriting a fresh room start.
+          const localHasData=(S.db?.length>0)&&((S.session?.status==='active'&&(S.session?.cfMatchCount||0)>0)||(S.archive?.length>0));
+          const remoteHasData=(remote.db?.length>0)&&((remote.session?.status==='active'&&(remote.session?.cfMatchCount||0)>0)||(remote.archive||[]).length>0);
+          if(!localHasData&&remoteHasData){
+            console.warn('[sync] Local backup has no data but remote does — remote wins, skipping local push');
+            const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
+            _pageFirstLoad=false;
+            checkAdminAccess();
+            _renderActiveTab();
+            // Fall through to apply remote below
+          } else {
+            console.log(`[sync] Local (${localBackupTs}) newer than Firebase (${remoteTs}) — pushing local up`);
+            setTimeout(()=>STORE.save('all'),200);
+            const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
+            if(_pageFirstLoad&&S.session?.status==='active'&&!PLAYER_MODE){
+              switchTab('live');startElapsed();updateProgress();
+            }
+            _pageFirstLoad=false;
+            checkAdminAccess();
+            _renderActiveTab();
+            return;
           }
-          _pageFirstLoad=false;
-          checkAdminAccess();
-          _renderActiveTab();
-          return;
         }
+      }
+
+      // Guard precedence (explicit, non-negotiable order):
+      // 1. Version regression — HARD BLOCK. Remote version < local = stale write, always reject.
+      // 2. Data integrity — empty local cannot overwrite populated remote (handled in first-load above).
+      // 3. Timestamp stale — soft: remote ts >2s behind local (fallback for pre-version data).
+      const remoteV=remote.meta?._v||0;
+      const localV=S._version||0;
+      if(!isFirstLoad&&remoteV>0&&localV>0&&remoteV<localV){
+        console.warn(`[sync] Rejected version regression: incoming v${remoteV} < local v${localV}`);
+        return;
       }
 
       const isStale=!isFirstLoad&&remoteTs>0&&remoteTs<localTs-2000;
       if(isStale){console.warn(`[sync] Rejected stale remote (${remoteTs}<${localTs})`);return;}
 
-      // Version conflict detection: if remote version equals our last written version,
-      // two devices wrote at almost the same time. Last write won — show a visible warning
-      // so the organiser knows state may have diverged.
-      const remoteV=remote.meta?._v||0;
-      const localV=S._version||0;
+      // Version conflict: same version from different device = simultaneous write
       if(!isFirstLoad&&remoteV>0&&localV>0&&remoteV===localV&&(remote.meta?._by||'')!==DEVICE_ID){
         console.warn(`[sync] Version conflict: both devices at v${remoteV}`);
         const badge=document.getElementById('sync-badge');
-        if(badge){badge.style.background='rgba(248,113,113,.2)';badge.title=`⚠ Sync conflict at v${remoteV} — another device wrote simultaneously. Last write won.`;}
-        toast('⚠ Sync conflict — another device updated at the same time','warn');
+        if(badge){badge.style.background='rgba(248,113,113,.2)';badge.title=`⚠ Sync conflict at v${remoteV}`;}
+        // Sticky action toast — organiser can choose to keep local state or accept incoming
+        // "Keep mine" re-pushes local state; "Load theirs" applies the incoming remote data
+        const remoteSnapshot=JSON.parse(JSON.stringify(remote));
+        toastAction(`⚠ Sync conflict v${remoteV} — another device updated at the same time.`,'warn',[
+          {label:'Keep mine', fn:`function(){setTimeout(()=>STORE.save('all'),100);}`},
+          {label:'Load theirs', fn:`function(){SYNC._applyRemote(${JSON.stringify(remoteSnapshot)},false,true);}`},
+        ]);
+        // Don't apply remote data yet — wait for organiser choice
+        if(remoteV>0)S._version=remoteV;
+        return;
       }
-      // Always update our local version tracking to match remote
-      if(remoteV>0)S._version=remoteV;
 
       // cfLog shrink guard
       const localCfLogLen=S.session?.cfLog?.length||0;
@@ -1147,6 +1176,22 @@ function toast(msg,type='',dur=3200){
   el.className='toast '+(type==='ok'?'tok':type==='err'?'terr':type==='warn'?'twarn':'');
   el.innerHTML=msg;document.getElementById('toasts').appendChild(el);
   setTimeout(()=>el.remove(),dur);
+}
+
+// Sticky action toast — stays until dismissed or action taken.
+// Used for conflicts where the organiser needs to make a choice.
+// actions = [{label, cls, fn}]
+function toastAction(msg,type='warn',actions=[]){
+  const el=document.createElement('div');
+  el.className='toast '+(type==='ok'?'tok':type==='err'?'terr':type==='warn'?'twarn':'');
+  el.style.cssText+='max-width:320px;cursor:default';
+  const btns=actions.map(a=>`<button style="margin-left:6px;padding:2px 8px;font-size:.7rem;border-radius:4px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.15);color:inherit;cursor:pointer" onclick="this.closest('.toast').remove();(${a.fn})()">${a.label}</button>`).join('');
+  const dismiss=`<button style="margin-left:8px;opacity:.6;background:none;border:none;color:inherit;cursor:pointer;font-size:.8rem" onclick="this.closest('.toast').remove()">✕</button>`;
+  el.innerHTML=`<span>${msg}</span>${btns}${dismiss}`;
+  document.getElementById('toasts').appendChild(el);
+  // Auto-remove after 30s as safety fallback
+  setTimeout(()=>el?.remove(),30000);
+  return el;
 }
 
 /* ── CONFIRM (callback, no Promise race) ─────────── */
@@ -3227,17 +3272,18 @@ function lockAdmin(){
 function checkAdminAccess(){
   if(PLAYER_MODE)return;
   const pin=getAdminPin();
-  const sub=document.getElementById('lock-sub');
 
   if(!pin){
-    // No PIN — open access, show set-PIN prompt
-    if(sub)sub.textContent='Set a 4-digit PIN to protect admin access.';
-    _showAdminLockOverlay();
+    // No PIN set — open access mode. Grant access silently.
+    // Never force the organiser to set up a PIN just to use the app.
+    // PIN setup is opt-in from Settings, not a gate on first load.
+    _doUnlock();
     return;
   }
 
   // PIN is set: check persistent device lock state
   if(_isDeviceLocked()){
+    const sub=document.getElementById('lock-sub');
     if(sub){sub.textContent='Enter your admin PIN to continue.';sub.style.color='';}
     _showAdminLockOverlay();
     return;
@@ -3252,6 +3298,9 @@ function updatePinStatus(){
   const pin=getAdminPin();
   el.textContent=pin?'✓ PIN is set — admin access protected':'No PIN set — admin is open to anyone';
   el.style.color=pin?'var(--gr)':'var(--or)';
+  // Show 🔓 badge in header when no PIN — visible reminder that room is unprotected
+  const badge=document.getElementById('admin-mode-badge');
+  if(badge)badge.style.display=pin?'none':'inline';
 }
 
 // ── PIN setup modal ──────────────────────────────────────────────
@@ -3786,7 +3835,10 @@ const CF={
     // Capped at 400: anything above that is already blocked by _withinTeamGapOk(300/400) in
     // passes 1 and 2. Cap keeps P1 in the same [0-400] scale as starvation/playCount bonuses.
     const p1Raw=crossImb*1.5 + (t1gap+t2gap)*1.5 + spreadPen*1.5;
-    const p1=Math.min(400,p1Raw);
+    // Cap at 350: creates controlled tension between match quality and rotation fairness.
+    // P1=350 means a NC*3 starvation player (-300) can just override a near-borderline match.
+    // At 400, extreme imbalance always wins unconditionally — wrong for social open play.
+    const p1=Math.min(350,p1Raw);
 
     // P2: Avoid repeats — capped at 200 with proportional scaling.
     // Without cap, accumulated repeat penalties can exceed P1 and defeat the priority order.
@@ -3832,7 +3884,13 @@ const CF={
     if(softPairs.length){
       const ids=new Set(group.map(p=>p.id));
       softPairs.forEach(([a,b])=>{
-        if(ids.has(a)&&ids.has(b))softPairBonus-=60; // prefer co-grouping, not forcing
+        if(!ids.has(a)||!ids.has(b))return;
+        // Adaptive bonus: stronger when both players have been waiting, weaker if one just played.
+        // Base -60, +10 per combined "sit pressure" (capped at -90 so it stays a preference not a force).
+        const pA=group.find(p=>p.id===a), pB=group.find(p=>p.id===b);
+        const waitA=(pA?.mg||0)+(pA?.pcg||0), waitB=(pB?.mg||0)+(pB?.pcg||0);
+        const waitFactor=Math.min(3,Math.floor((waitA+waitB)/4)); // 0-3 scale
+        softPairBonus-=Math.min(90,60+waitFactor*10);
       });
     }
 
