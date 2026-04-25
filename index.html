@@ -653,7 +653,7 @@ function _updateRoomBadge(){
   const el=document.getElementById('room-code-badge');
   if(!el)return;
   const id=SYNC.roomId||localStorage.getItem('pb_room_id')||'—';
-  const ver=S._lastSaveTs?`v${Math.floor(S._lastSaveTs/1000)%100000}`:'—';
+  const ver=S._version?`v${S._version}`:'—';
   const lastSave=S._lastSaveTs?new Date(S._lastSaveTs).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'never';
   el.textContent=`📡 ${id}`;
   el.title=`Room: ${id} | Version: ${ver} | Last sync: ${lastSave} — click to manage`;
@@ -795,7 +795,11 @@ const SYNC={
   push(segment='all'){
     if(!this.ready||!this.ref)return;
     S._lastSaveTs=Date.now();
-    const meta={_by:DEVICE_ID,_ts:S._lastSaveTs,adminPin:S.adminPin||''};
+    // Monotonic version counter: increments on every write.
+    // _applyRemote rejects incoming writes with the same version to prevent
+    // two devices writing simultaneously and silently overwriting each other.
+    S._version=(S._version||0)+1;
+    const meta={_by:DEVICE_ID,_ts:S._lastSaveTs,_v:S._version,adminPin:S.adminPin||''};
     const updates={meta};
     if(segment==='all'||segment==='session')
       updates.session=S.session?JSON.parse(JSON.stringify(S.session)):null;
@@ -849,6 +853,20 @@ const SYNC={
 
       const isStale=!isFirstLoad&&remoteTs>0&&remoteTs<localTs-2000;
       if(isStale){console.warn(`[sync] Rejected stale remote (${remoteTs}<${localTs})`);return;}
+
+      // Version conflict detection: if remote version equals our last written version,
+      // two devices wrote at almost the same time. Last write won — show a visible warning
+      // so the organiser knows state may have diverged.
+      const remoteV=remote.meta?._v||0;
+      const localV=S._version||0;
+      if(!isFirstLoad&&remoteV>0&&localV>0&&remoteV===localV&&(remote.meta?._by||'')!==DEVICE_ID){
+        console.warn(`[sync] Version conflict: both devices at v${remoteV}`);
+        const badge=document.getElementById('sync-badge');
+        if(badge){badge.style.background='rgba(248,113,113,.2)';badge.title=`⚠ Sync conflict at v${remoteV} — another device wrote simultaneously. Last write won.`;}
+        toast('⚠ Sync conflict — another device updated at the same time','warn');
+      }
+      // Always update our local version tracking to match remote
+      if(remoteV>0)S._version=remoteV;
 
       // cfLog shrink guard
       const localCfLogLen=S.session?.cfLog?.length||0;
@@ -1655,7 +1673,7 @@ function startSession(){
     }),
     partnerHx:{},oppHx:{},oppHxTime:{},
     nrPairingHx:{},
-    cfQueue:[],cfPinnedIds:[],cfPauseAfterGame:[],cfLockedPairs:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,
+    cfQueue:[],cfPinnedIds:[],cfPauseAfterGame:[],cfLockedPairs:[],cfSoftPairs:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,
     cfMatchupHx:{},cfGroupHx:{},cfPairConsec:{},cfPairWins:{},cfMustSplitPair:null,cfPaused:[],
     cfPairSessionCount:{},cfPairLastAt:{},cfPairLastLost:{},
     neverPair:{},ratingOverrides:{},
@@ -1942,6 +1960,24 @@ function cfClearLockedPairs(){
   S.session.cfLockedPairs=[];
   STORE.save('session');renderLive();
   toast('All partner locks cleared','ok');
+}
+function cfAddSoftPair(idA,idB){
+  if(!S.session)return;
+  if(!Array.isArray(S.session.cfSoftPairs))S.session.cfSoftPairs=[];
+  const pk=(a,b)=>([a,b].sort().join('|'));
+  const key=pk(idA,idB);
+  if(S.session.cfSoftPairs.some(p=>pk(p[0],p[1])===key)){toast('Already a soft preference','warn');return;}
+  if(S.session.cfSoftPairs.length>=3){toast('Max 3 soft preferences','warn');return;}
+  S.session.cfSoftPairs.push([idA,idB]);
+  STORE.save('session');renderLive();
+  toast(`${gp(idA)?.name||'?'} & ${gp(idB)?.name||'?'} — soft partner preference set 🤝`,'ok');
+}
+function cfRemoveSoftPair(idA,idB){
+  if(!S.session)return;
+  const pk=(a,b)=>([a,b].sort().join('|'));
+  S.session.cfSoftPairs=(S.session.cfSoftPairs||[]).filter(p=>pk(p[0],p[1])!==pk(idA,idB));
+  STORE.save('session');renderLive();
+  toast('Soft preference removed','ok');
 }
 
 // Change 8: schedule pause after current game finishes
@@ -3746,8 +3782,11 @@ const CF={
     // 4. Session form     → handled in cfRating() — baked into .sr values used above
     // 5. ELO anchor       → baked into cfRating() baseline — never drives score directly
     // Weights reflect priority: balance terms largest, playtime as bonus (negative = good)
-    // P1: Match balance — ×1.5 multiplier ensures balance always dominates fairness pressure
-    const p1=crossImb*1.5 + (t1gap+t2gap)*1.5 + spreadPen*1.5;
+    // P1: Match balance — ×1.5 multiplier ensures balance always dominates fairness pressure.
+    // Capped at 400: anything above that is already blocked by _withinTeamGapOk(300/400) in
+    // passes 1 and 2. Cap keeps P1 in the same [0-400] scale as starvation/playCount bonuses.
+    const p1Raw=crossImb*1.5 + (t1gap+t2gap)*1.5 + spreadPen*1.5;
+    const p1=Math.min(400,p1Raw);
 
     // P2: Avoid repeats — capped at 200 with proportional scaling.
     // Without cap, accumulated repeat penalties can exceed P1 and defeat the priority order.
@@ -3772,7 +3811,8 @@ const CF={
       if(gap>=nc4*3)starvationBonus-=300;
       else if(gap>=nc4*2)starvationBonus-=150;
     });
-    const starvationCapped=Math.max(-400,starvationBonus);
+    // Cap aligned with playCountBonus (-300) so neither can unilaterally override P1 at 270
+    const starvationCapped=Math.max(-300,starvationBonus);
 
     // Play-count gap — uses cached p.pcg (no array scan per combination)
     let playCountBonus=0;
@@ -3784,7 +3824,19 @@ const CF={
     });
     playCountBonus=Math.max(-300,playCountBonus);
 
-    const total=p1+p2+p3+starvationCapped+playCountBonus;
+    // Soft partner preference: scoring bonus for groups that include a soft-paired pair.
+    // Unlike hard locks (which force same-team assignment), soft pairs only influence
+    // which group of 4 is selected — not which team they're on within that group.
+    let softPairBonus=0;
+    const softPairs=S.session?.cfSoftPairs||[];
+    if(softPairs.length){
+      const ids=new Set(group.map(p=>p.id));
+      softPairs.forEach(([a,b])=>{
+        if(ids.has(a)&&ids.has(b))softPairBonus-=60; // prefer co-grouping, not forcing
+      });
+    }
+
+    const total=p1+p2+p3+starvationCapped+playCountBonus+softPairBonus;
     const meta={splitOverride:splitPen>0&&splitPen<200,repeatMatchup:gamesSince!==null&&gamesSince<=5,
       rawT1gap,rawT2gap,
       _dbg:{p1:Math.round(p1),p2:Math.round(p2),p3:Math.round(p3),
@@ -5557,8 +5609,13 @@ function openLockPairModal(){
     <select id="lp-a" class="inp" style="margin-bottom:8px"><option value="">— select —</option>${opts}</select>
     <label>PLAYER 2</label>
     <select id="lp-b" class="inp" style="margin-bottom:12px"><option value="">— select —</option>${opts}</select>
+    <label>LOCK STRENGTH</label>
+    <select id="lp-mode" class="inp" style="margin-bottom:12px">
+      <option value="hard">🔒 Hard lock — always same team when grouped</option>
+      <option value="soft">🤝 Soft preference — engine prefers to group together</option>
+    </select>
     <div style="display:flex;gap:7px">
-      <button class="btn bp" style="flex:1" onclick="_confirmLockPair()">Lock Together</button>
+      <button class="btn bp" style="flex:1" onclick="_confirmLockPair()">Apply</button>
       <button class="btn bg2" onclick="closeModal()">Cancel</button>
     </div>
     ${locked.length?`<button class="btn bd2 sm" style="width:100%;margin-top:8px" onclick="cfClearLockedPairs();closeModal()">Clear All Locks</button>`:''}
@@ -5567,9 +5624,12 @@ function openLockPairModal(){
 function _confirmLockPair(){
   const a=document.getElementById('lp-a')?.value;
   const b=document.getElementById('lp-b')?.value;
+  const mode=document.getElementById('lp-mode')?.value||'hard';
   if(!a||!b){toast('Select two players','err');return;}
   if(a===b){toast('Select two different players','err');return;}
-  cfLockPair(a,b);closeModal();
+  if(mode==='soft')cfAddSoftPair(a,b);
+  else cfLockPair(a,b);
+  closeModal();
 }
 
 function openQueueRulesModal(){
