@@ -4040,6 +4040,11 @@ const CF={
   /* Init queue at session start */
   initQueue(){
     if(!S.session)return;
+    // Always reset the Confirm All guard here — this covers all boot paths:
+    // fresh start, session restore after crash/reload, and remote device joining.
+    // The session-start/end resets are belt; this is the suspenders.
+    this._confirmAllBusy=false;
+    this._confirmAllLastTs=0;
     S.session.cfQueue=S.session.activePlayers
       .filter(id=>{const sp=gsp(id);return sp&&sp.status!=='left';})
       .map(id=>({id,since:Date.now(),consec:0}));
