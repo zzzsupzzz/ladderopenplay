@@ -308,6 +308,16 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <div id="fb-loading-sub" style="font-size:.72rem;color:var(--mu)">Connecting to Firebase</div>
     <button id="fb-retry-btn" class="btn bs sm" style="display:none;margin-top:4px" onclick="SYNC.ready=false;SYNC.autoConnect()">🔄 Retry</button>
     <button id="fb-restore-btn" class="btn bc sm" style="display:none;margin-top:4px" onclick="_restoreFromLocal()">📦 Restore last local backup</button>
+    <div id="fb-room-recovery" style="display:none;margin-top:16px;max-width:280px;text-align:center">
+      <div style="font-size:.7rem;color:var(--mu);margin-bottom:8px;line-height:1.5">
+        No local data found. If you have a room code<br/>from a previous session, enter it below.
+      </div>
+      <div style="display:flex;gap:6px">
+        <input id="fb-room-inp" class="inp" placeholder="Room code (e.g. ABC1234)" style="flex:1;font-size:.8rem;text-transform:uppercase;letter-spacing:.05em" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')_recoverRoom()"/>
+        <button class="btn bp sm" onclick="_recoverRoom()">↩ Rejoin</button>
+      </div>
+      <div style="font-size:.64rem;color:var(--mu);margin-top:6px">Find your code in Firebase console → Realtime Database → rooms/</div>
+    </div>
   </div>
 </div>
 
@@ -1102,7 +1112,11 @@ const SYNC={
           const lobbyEscape=S.session?.status==='lobby'
             ?` &nbsp;·&nbsp; <a href="#" onclick="discardLobby();document.getElementById('sync-error-banner')?.remove();return false" style="color:var(--mu);text-decoration:underline">Discard check-in</a>`
             :'';
-          b.innerHTML=`⚠️ Sync error — showing last local data. <a href="#" onclick="location.href=location.href.split('?')[0]+'?r='+Date.now()+(location.hash||'');return false" style="color:var(--or);text-decoration:underline">Reload to retry</a>${lobbyEscape} &nbsp;·&nbsp; <a href="#" onclick="document.getElementById('sync-error-banner').remove();return false" style="color:var(--mu);text-decoration:underline">Dismiss</a>`;
+          const noData=!S.db?.length&&!S.archive?.length;
+          const roomRecover=noData
+            ?` &nbsp;·&nbsp; <span style="color:var(--mu)">Have a room code? </span><input id="banner-room-inp" placeholder="ABC1234" style="width:80px;background:var(--s2);border:1px solid var(--bd);border-radius:4px;color:var(--tx);font-size:.7rem;padding:2px 5px;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')_recoverRoom()"/> <a href="#" onclick="_recoverRoomFromBanner();return false" style="color:var(--cy);text-decoration:underline">Rejoin</a>`
+            :'';
+          b.innerHTML=`⚠️ Sync error — showing last local data. <a href="#" onclick="location.href=location.href.split('?')[0]+'?r='+Date.now()+(location.hash||'');return false" style="color:var(--or);text-decoration:underline">Reload to retry</a>${lobbyEscape}${roomRecover} &nbsp;·&nbsp; <a href="#" onclick="document.getElementById('sync-error-banner').remove();return false" style="color:var(--mu);text-decoration:underline">Dismiss</a>`;
           document.body.prepend(b);
         }
       }
@@ -2350,7 +2364,7 @@ function stopTimer(){
   const btn=document.getElementById('timer-btn');if(btn)btn.textContent='⏱ Timer';
 }
 
-/* § RENDER:SETUP
+/* § RENDER:SETUP */
 let _dbAbsentOnly=false;
 function toggleDbAbsent(){
   _dbAbsentOnly=!_dbAbsentOnly;
@@ -2555,7 +2569,7 @@ function discardLobby(){
   });
 }
 
-/* § RENDER:STANDINGS
+/* § RENDER:STANDINGS */
 /* ── RENDER: STANDINGS ───────────────────────────── */
 function renderSessStd(){
   const el=document.getElementById('sess-std');
@@ -2781,7 +2795,7 @@ function _updateLiveSavedBadge(){
   el.style.display='inline-block';
 }
 
-/* § RENDER:HISTORY
+/* § RENDER:HISTORY */
 /* ── RENDER: HISTORY ─────────────────────────────── */
 function renderArchive(){
   const el=document.getElementById('archive-wrap');if(!el)return;
@@ -2840,7 +2854,7 @@ function renderArchive(){
   }).join('');
 }
 
-/* § RENDER:PLAYER
+/* § RENDER:PLAYER */
 /* ── RENDER: PLAYER VIEW ─────────────────────────── */
 function updatePvSelect(){
   const sel=document.getElementById('pv-select');if(!sel)return;
@@ -6249,6 +6263,29 @@ function _getLocalBackup(){
   catch(e){return null;}
 }
 
+function _recoverRoom(){
+  const inp=document.getElementById('fb-room-inp')||document.getElementById('banner-room-inp');
+  const roomId=(inp?.value||'').trim().toUpperCase();
+  if(!roomId||roomId.length<4){toast('Enter a valid room code','err');return;}
+  localStorage.setItem('pb_room_id',roomId);
+  localStorage.removeItem('pb_local_backup');
+  const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
+  SYNC.clearConfig();
+  SYNC.autoConnect();
+  toast(`Reconnecting to room ${roomId}…`,'ok');
+}
+function _recoverRoomFromBanner(){
+  const inp=document.getElementById('banner-room-inp');
+  const roomId=(inp?.value||'').trim().toUpperCase();
+  if(!roomId||roomId.length<4){toast('Enter a valid room code','err');return;}
+  localStorage.setItem('pb_room_id',roomId);
+  localStorage.removeItem('pb_local_backup');
+  document.getElementById('sync-error-banner')?.remove();
+  SYNC.clearConfig();
+  SYNC.autoConnect();
+  toast(`Reconnecting to room ${roomId}…`,'ok');
+}
+
 function _showRestoreButtonIfAvailable(){
   const b=_getLocalBackup();
   const btn=document.getElementById('fb-restore-btn');
@@ -6291,6 +6328,10 @@ function _startLoadingProgressTimer(){
     if(!fl||fl.classList.contains('hidden'))return;
     if(sub)sub.textContent='Still connecting… (slow WiFi?)';
     _showRestoreButtonIfAvailable();
+    // If no local backup at all, show the room recovery input
+    const backup=_getLocalBackup();
+    const rrec=document.getElementById('fb-room-recovery');
+    if(rrec&&(!backup||!backup.db||backup.db.length===0))rrec.style.display='block';
 
     // 6s: if backup exists, dismiss overlay and use cached data
     _loadingProgressTimer=setTimeout(()=>{
