@@ -448,10 +448,15 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     </div>
     <div id="np-nr-level" style="display:none;margin-bottom:8px">
       <label>NR LEVEL — BASED ON TONIGHT'S SESSION</label>
-      <div style="display:flex;gap:5px">
+      <div style="display:flex;gap:5px;margin-bottom:8px">
         <button class="pn-pill sel" id="nrl-beg" onclick="setNRLevel('beginner')">🌱 Bottom<br/><span id="nrl-beg-sub" style="font-size:.6rem;font-weight:400">~700</span></button>
         <button class="pn-pill" id="nrl-mid" onclick="setNRLevel('intermediate')">⚡ Middle<br/><span id="nrl-mid-sub" style="font-size:.6rem;font-weight:400">~avg</span></button>
         <button class="pn-pill" id="nrl-adv" onclick="setNRLevel('advanced')">🔥 Top<br/><span id="nrl-adv-sub" style="font-size:.6rem;font-weight:400">~1300</span></button>
+      </div>
+      <label style="font-size:.65rem;color:var(--mu);letter-spacing:.06em">DUPR OR ESTIMATED RATING <span style="font-weight:400;text-transform:none">(optional — overrides level above)</span></label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input id="np-dupr" class="inp" type="number" min="2" max="8" step="0.1" placeholder="e.g. 3.5" style="width:90px" oninput="updateDuprPreview()" title="DUPR rating (2.0–8.0) or your estimated skill level"/>
+        <span id="np-dupr-preview" style="font-size:.72rem;color:var(--mu)"></span>
       </div>
     </div>
     <p style="font-size:.68rem;color:var(--mu);margin-bottom:8px">Same name? Use Tag — "Alex #7" vs "Alex Jr."</p>
@@ -1835,13 +1840,21 @@ function addPlayer(){
   // NR initial rating: use tonight's session percentile positions
   // bottom=p25, middle=p50, top=p75 of checked-in rated players
   const nrLevels=calcNRLevelRatings();
-  const nrLevelRating=isNR?({beginner:nrLevels.bottom,intermediate:nrLevels.middle,advanced:nrLevels.top}[_nrLevel||'beginner']??null):null;
+  const _levelHint=({beginner:nrLevels.bottom,intermediate:nrLevels.middle,advanced:nrLevels.top}[_nrLevel||'beginner']??null);
+  // DUPR/estimated rating overrides the level buttons if provided
+  const _duprVal=parseFloat(document.getElementById('np-dupr')?.value||'');
+  const nrLevelRating=isNR?(!isNaN(_duprVal)&&_duprVal>=2&&_duprVal<=8?duprToElo(_duprVal):_levelHint):null;
   const rating=isNR?1000:Math.max(400,Math.min(2000,parseInt(document.getElementById('np-rating')?.value)||1000));
   if(!name){toast('Enter a name','err');return;}
   if(S.db.some(p=>p.name.toLowerCase()===name.toLowerCase()&&(p.tag||'').toLowerCase()===tag.toLowerCase())){toast('Name+Tag already exists','err');return;}
-  S.db.push({id:uid(),name,tag,rating,baseRating:rating,isNR:isNR||false,nrLevelHint:nrLevelRating,isSeeding:false,gamesPlayed:0,wins:0,losses:0,ties:0,createdAt:new Date().toISOString()});
+  S.db.push({id:uid(),name,tag,rating,baseRating:rating,isNR:isNR||false,
+    nrLevelHint:nrLevelRating,
+    dupr:(!isNaN(_duprVal)&&_duprVal>=2&&_duprVal<=8)?_duprVal:null,
+    isSeeding:false,gamesPlayed:0,wins:0,losses:0,ties:0,createdAt:new Date().toISOString()});
   STORE.save('db');renderDB();renderRoster();updatePvSelect();
   document.getElementById('np-name').value='';document.getElementById('np-tag').value='';
+  const _duprEl=document.getElementById('np-dupr');if(_duprEl)_duprEl.value='';
+  const _duprPrev=document.getElementById('np-dupr-preview');if(_duprPrev)_duprPrev.textContent='';
   const nrCb=document.getElementById('np-nr');if(nrCb){nrCb.checked=false;toggleNRInput(false);}
   const rInp=document.getElementById('np-rating');if(rInp)rInp.value='1000';
   document.getElementById('np-name').focus();
@@ -2395,9 +2408,10 @@ function renderDB(){
       if(!p.isNR)return'';
       if(!p.nrLevelHint)return'<span class="nr-badge" style="background:rgba(34,211,238,.15);color:var(--cy);border-color:rgba(34,211,238,.3)" title="Unrated — will be rated after 5 games">NR-B</span>';
       const lvls=calcNRLevelRatings();
-      if(p.nrLevelHint>=lvls.top-30)return'<span class="nr-badge" style="background:rgba(52,217,116,.2);color:var(--gr);border-color:rgba(52,217,116,.4)" title="NR Advanced — starting near top 25% of tonight">NR-A</span>';
-      if(p.nrLevelHint>=(lvls.middle||950)-30)return'<span class="nr-badge" style="background:rgba(251,191,36,.2);color:var(--go);border-color:rgba(251,191,36,.4)" title="NR Intermediate — starting near median of tonight">NR-M</span>';
-      return'<span class="nr-badge" style="background:rgba(34,211,238,.15);color:var(--cy);border-color:rgba(34,211,238,.3)" title="NR Beginner — starting near bottom 25% of tonight">NR-B</span>';
+      const _duprStr=p.dupr?` · DUPR ${p.dupr}`:'';
+      if(p.nrLevelHint>=lvls.top-30)return`<span class="nr-badge" style="background:rgba(52,217,116,.2);color:var(--gr);border-color:rgba(52,217,116,.4)" title="NR Advanced — starting near top 25% of tonight${_duprStr}">NR-A</span>`;
+      if(p.nrLevelHint>=(lvls.middle||950)-30)return`<span class="nr-badge" style="background:rgba(251,191,36,.2);color:var(--go);border-color:rgba(251,191,36,.4)" title="NR Intermediate — starting near median of tonight${_duprStr}">NR-M</span>`;
+      return`<span class="nr-badge" style="background:rgba(34,211,238,.15);color:var(--cy);border-color:rgba(34,211,238,.3)" title="NR Beginner — starting near bottom 25% of tonight${_duprStr}">NR-B</span>`;
     })();
     const rtgDisplay=p.isNR?nrLvl:p.isSeeding?`<span class="nr-seed">~${Math.round(p.rating)}</span>`:`${Math.round(p.rating)}`;
     const staleWeeks=p.gamesPlayed>0?sessionsSinceLastPlayed(p.id):0;
@@ -2500,23 +2514,29 @@ function _renderLobby(){
   const sw=document.getElementById('cf-suggestions-wrap');
   const cw=document.getElementById('cf-courts-wrap');
   const hp=document.getElementById('cf-health-panel');
-  const queueCard=document.querySelector('#cf-live-wrap > .card:last-child');
   if(hp)hp.style.display='none';
-
-  // Hide queue card, courts, suggestions — lobby doesn't use them
   if(cw)cw.innerHTML='';
-  if(sw)sw.innerHTML='';
 
-  // Show lobby roster in the suggestions area
   if(sw){
     const sess=S.session;
+    const courts=S.courts;
     const players=[...sess.activePlayers].map(gp).filter(Boolean).sort((a,b)=>b.rating-a.rating);
     const notIn=S.db.filter(p=>!sess.activePlayers.includes(p.id)).sort((a,b)=>a.name.localeCompare(b.name));
     const canBegin=sess.activePlayers.length>=4;
+    // Queue/overflow summary
+    const need=courts*4;
+    const total=players.length;
+    const queuing=Math.max(0,total-need);
+    const starting=Math.min(need,total);
+    const avg=Math.round(players.filter(p=>!p.isNR).reduce((s,p)=>s+(p.rating||0),0)/Math.max(1,players.filter(p=>!p.isNR).length));
+    const summaryColor=canBegin?'var(--gr)':'var(--mu)';
+    const summaryText=canBegin
+      ?`${courts} court${courts!==1?'s':''} · ${starting} starting · ${queuing>0?queuing+' queuing first':'everyone plays first!'} · avg ${avg}`
+      :`Need at least 4 players to begin`;
 
     sw.innerHTML=`
     <div style="background:rgba(52,217,116,.07);border:1px solid rgba(52,217,116,.25);border-radius:var(--rl);padding:16px;margin-bottom:11px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
         <div>
           <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;color:var(--gr);letter-spacing:.5px">📋 CHECK-IN LOBBY</div>
           <div style="font-size:.72rem;color:var(--mu)">${esc(sess.name)} · ${players.length} player${players.length!==1?'s':''} ready</div>
@@ -2529,6 +2549,14 @@ function _renderLobby(){
         </div>
       </div>
 
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <span style="font-size:.67rem;font-weight:700;color:var(--mu);letter-spacing:.06em">COURTS</span>
+        <div class="cpills" id="cpills-lobby">
+          ${[1,2,3,4,5,6].map(n=>`<button class="cpill${n===courts?' sel':''}" data-c="${n}">${n}</button>`).join('')}
+        </div>
+        <span style="font-size:.7rem;color:${summaryColor};margin-left:4px">${summaryText}</span>
+      </div>
+
       ${players.length?`
       <div style="font-size:.67rem;font-weight:700;color:var(--mu);letter-spacing:.06em;margin-bottom:6px">CHECKED IN (${players.length})</div>
       <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px">
@@ -2537,8 +2565,7 @@ function _renderLobby(){
           <span style="font-size:.65rem;color:var(--mu)">${p.isNR?'NR':Math.round(p.rating)}</span>
           <button onclick="toggleCheckIn('${p.id}')" style="background:none;border:none;cursor:pointer;color:var(--re);font-size:.75rem;padding:0 2px;line-height:1" title="Remove">✕</button>
         </div>`).join('')}
-      </div>`:
-      `<div style="color:var(--mu);font-size:.78rem;margin-bottom:12px;padding:4px 0">No players checked in yet — add below.</div>`}
+      </div>`:`<div style="color:var(--mu);font-size:.78rem;margin-bottom:12px;padding:4px 0">No players checked in yet — add below.</div>`}
 
       ${notIn.length?`
       <div style="font-size:.67rem;font-weight:700;color:var(--mu);letter-spacing:.06em;margin-bottom:6px">ADD PLAYERS</div>
@@ -2547,6 +2574,16 @@ function _renderLobby(){
       </div>`:''
       }
     </div>`;
+
+    // Wire lobby court pills — updates S.courts and session.courts live
+    initCourtPills('cpills-lobby', n=>{
+      S.courts=n;
+      if(S.session)S.session.courts=n;
+      syncCourtPills('cpills-setup',n);
+      syncCourtPills('cpills-live',n);
+      STORE.save('session');
+      _renderLobby(); // re-render to update summary line
+    });
   }
 
   // Hide queue section
@@ -2557,6 +2594,8 @@ function _renderLobby(){
   const ppEl=document.getElementById('cf-pinned-display');if(ppEl)ppEl.innerHTML='';
   const npEl=document.getElementById('cf-neverpair-display');if(npEl)npEl.innerHTML='';
 }
+
+
 
 function discardLobby(){
   if(!S.session||S.session.status!=='lobby')return;
@@ -3941,6 +3980,23 @@ function toggleNRInput(checked){
 }
 
 // Compute session-position percentile ratings from tonight's checked-in rated players
+function duprToElo(dupr){
+  // Linear mapping: DUPR 2.0 → ELO 700, 4.0 → 1000, 6.0 → 1300
+  // Each DUPR point = 150 ELO points
+  return Math.round(700+(dupr-2.0)*150);
+}
+
+function updateDuprPreview(){
+  const inp=document.getElementById('np-dupr');
+  const prev=document.getElementById('np-dupr-preview');
+  if(!inp||!prev)return;
+  const val=parseFloat(inp.value);
+  if(isNaN(val)||val<2||val>8){prev.textContent='';return;}
+  const elo=duprToElo(val);
+  prev.textContent=`→ starts at ~${elo} ELO`;
+  prev.style.color=val>=4.5?'var(--gr)':val>=3.5?'var(--go)':'var(--mu)';
+}
+
 function calcNRLevelRatings(){
   const ratedIds=[...S.checkedIn].filter(id=>{const p=gp(id);return p&&!p.isNR&&(p.gamesPlayed||0)>0;});
   if(ratedIds.length<4){
@@ -4816,24 +4872,46 @@ const CF={
   //   Phase A (0–45 min):   strict quality — pool is fresh, no excuse for bad matches
   //   Phase B (45–120 min): balanced — current default thresholds
   //   Phase C (120+ min):   relaxed — late session, repeats/mild mismatches acceptable
-  _sessionPhase(){
-    const started=S.session?.startTime||Date.now();
-    const elapsed=(Date.now()-started)/60000; // minutes
-    return elapsed<45?'A':elapsed<120?'B':'C';
+  // Per-player phase based on matches played this session.
+  // A = first 2 matches (warm-up): gap cap 280, slightly relaxed.
+  // B = matches 3–5 (settling): gap cap 320, current balanced behavior.
+  // C = match 6+ (competitive): gap cap 360, tighter than current 380.
+  // Using match count (not clock) means late arrivals still get their warm-up,
+  // and competitive tightening only happens when the player is actually warmed up.
+  _playerPhase(id){
+    const mp=gsp(id)?.matchesPlayed||0;
+    return mp<2?'A':mp<6?'B':'C';
+  },
+
+  // Group phase = median phase of the 4 players (2nd of 4 sorted A→C).
+  // Prevents one new player forcing 3 warmed-up players into lax mode.
+  // Also prevents one veteran dragging a newcomer straight into tight Phase C.
+  _sessionPhase(groupIds){
+    if(!groupIds||!groupIds.length){
+      const mc=S.session?.cfMatchCount||0;
+      const np=S.session?.activePlayers?.length||8;
+      return mc<np?'A':mc<np*2.5?'B':'C';
+    }
+    const order={A:0,B:1,C:2};
+    const phases=groupIds.map(id=>this._playerPhase(id)).sort((a,b)=>order[a]-order[b]);
+    return phases[1]||'B';
   },
 
   // Phase-aware gap cap for _withinTeamGapOk
-  _phaseGapCap(){
-    const phase=this._sessionPhase();
-    return phase==='A'?250:phase==='B'?300:380; // Phase C loosens partner gap
+  // A(warm-up)=280, B(settling)=320, C(competitive)=360
+  // Tighter than the old time-based 250/300/380 in warm-up and competitive phases.
+  // Max extra wait from relaxed Phase A: ~1 queue skip (~3-5 min). Never 10-15 min.
+  _phaseGapCap(groupIds){
+    const phase=this._sessionPhase(groupIds);
+    return phase==='A'?280:phase==='B'?320:360;
   },
 
   // Phase-aware overlap window
   _phaseOverlapWindow(activePlCount){
     if(activePlCount<14)return 0;
     if(activePlCount<16)return 1;
-    const phase=this._sessionPhase();
-    return phase==='C'?1:2; // Phase C: always last-1 regardless of count
+    const phase=this._sessionPhase(); // overall session proxy — no group IDs needed here
+    return phase==='C'?1:2;
   },
 
   _findBestGroup(candidates,mustSplit,nrIds,totalQueue,lastMatchupKey=null){
@@ -4847,7 +4925,7 @@ const CF={
     const isBackToBack=(res)=>!!lastMatchupKey&&
       this.matchupKey(res.t1.map(p=>p.id),res.t2.map(p=>p.id))===lastMatchupKey;
     // Pass 1: phase-aware gap cap + pair cooldown + back-to-back block
-    const _phaseCap=this._phaseGapCap();
+    const _phaseCap=this._phaseGapCap(candidates.map(p=>p.id));
     let _blockedByCooldown=false,_blockedByBTB=false,_candidateCount=n;
     for(let i=0;i<n-3;i++)for(let j=i+1;j<n-2;j++)for(let k=j+1;k<n-1;k++)for(let l=k+1;l<n;l++){
       const group=[candidates[i],candidates[j],candidates[k],candidates[l]];
@@ -6774,7 +6852,7 @@ function renderPlayerView(){
       <div style="display:flex;gap:10px;justify-content:center;margin-top:6px">
         <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--gr)">${sp.wins}</div><div style="font-size:.62rem;color:var(--mu)">WINS</div></div>
         <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--re)">${sp.losses}</div><div style="font-size:.62rem;color:var(--mu)">LOSSES</div></div>
-        <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:${d>=0?'var(--gr)':'var(--re)'}">${d>=0?'+':''}${d}</div><div style="font-size:.62rem;color:var(--mu)">RTG Δ</div></div>
+        <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:${d>=0?'var(--gr)':'var(--re)'}">${d>=0?'+':''}${d}</div><div style="font-size:.62rem;color:var(--mu)">Rating Δ</div></div>
         <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--mu)">${pd>=0?'+':''}${pd}</div><div style="font-size:.62rem;color:var(--mu)">PTS DIFF</div></div>
       </div>
     </div>`;
