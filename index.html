@@ -1089,6 +1089,24 @@ const SYNC={
         }
         _pageFirstLoad=false;
         checkAdminAccess();
+        // First-launch PIN prompt: fires once when a brand-new empty room is created.
+        // Condition: no PIN set, no players in DB, not player mode, not already prompted.
+        const isNewEmptyRoom=!getAdminPin()&&!S.db?.length&&!S.archive?.length&&!PLAYER_MODE;
+        const alreadyPrompted=sessionStorage.getItem('pb_pin_prompted');
+        if(isNewEmptyRoom&&!alreadyPrompted){
+          sessionStorage.setItem('pb_pin_prompted','1');
+          setTimeout(()=>{
+            openModal(`<div class="modal-title">🔐 Set an Admin PIN?</div>
+              <p style="font-size:.76rem;color:var(--mu);line-height:1.6;margin-bottom:14px">
+                Your room is ready. We recommend setting a 4-digit PIN so players can't accidentally access organiser controls.<br/>
+                <span style="color:var(--go)">Players use the Player Link — they never need the PIN.</span>
+              </p>
+              <div style="display:flex;gap:7px">
+                <button class="btn bp" style="flex:2" onclick="closeModal();openPinSetupModal()">🔐 Set PIN now</button>
+                <button class="btn bg2" onclick="closeModal()">Skip for now</button>
+              </div>`);
+          },800); // slight delay so the UI settles first
+        }
       }else{
         _renderActiveTab();
         const rb=data?.meta?._by||data?._by||'';
@@ -2406,12 +2424,15 @@ function renderDB(){
     const pd=p.gamesPlayed>0?(p.wins-p.losses>=0?'+':'')+(p.wins-p.losses):'';
     const nrLvl=(()=>{
       if(!p.isNR)return'';
-      if(!p.nrLevelHint)return'<span class="nr-badge" style="background:rgba(34,211,238,.15);color:var(--cy);border-color:rgba(34,211,238,.3)" title="Unrated — will be rated after 5 games">NR-B</span>';
+      // If DUPR is provided, show it as the badge instead of NR-A/M/B
+      if(p.dupr){
+        return`<span class="nr-badge" style="background:rgba(168,85,247,.12);color:var(--pu);border-color:rgba(168,85,247,.3)" title="NR — DUPR ${p.dupr} → starts at ~${duprToElo(p.dupr)} ELO — will be rated after 5 games">DUPR ${p.dupr}</span>`;
+      }
+      if(!p.nrLevelHint)return'<span class="nr-badge" style="background:rgba(34,211,238,.15);color:var(--cy);border-color:rgba(34,211,238,.3)" title="Unrated — will be rated after 5 games">NR</span>';
       const lvls=calcNRLevelRatings();
-      const _duprStr=p.dupr?` · DUPR ${p.dupr}`:'';
-      if(p.nrLevelHint>=lvls.top-30)return`<span class="nr-badge" style="background:rgba(52,217,116,.2);color:var(--gr);border-color:rgba(52,217,116,.4)" title="NR Advanced — starting near top 25% of tonight${_duprStr}">NR-A</span>`;
-      if(p.nrLevelHint>=(lvls.middle||950)-30)return`<span class="nr-badge" style="background:rgba(251,191,36,.2);color:var(--go);border-color:rgba(251,191,36,.4)" title="NR Intermediate — starting near median of tonight${_duprStr}">NR-M</span>`;
-      return`<span class="nr-badge" style="background:rgba(34,211,238,.15);color:var(--cy);border-color:rgba(34,211,238,.3)" title="NR Beginner — starting near bottom 25% of tonight${_duprStr}">NR-B</span>`;
+      if(p.nrLevelHint>=lvls.top-30)return`<span class="nr-badge" style="background:rgba(52,217,116,.2);color:var(--gr);border-color:rgba(52,217,116,.4)" title="NR Advanced — starting near top 25% of tonight">NR-A</span>`;
+      if(p.nrLevelHint>=(lvls.middle||950)-30)return`<span class="nr-badge" style="background:rgba(251,191,36,.2);color:var(--go);border-color:rgba(251,191,36,.4)" title="NR Intermediate — starting near median of tonight">NR-M</span>`;
+      return`<span class="nr-badge" style="background:rgba(34,211,238,.15);color:var(--cy);border-color:rgba(34,211,238,.3)" title="NR Beginner — starting near bottom 25% of tonight">NR-B</span>`;
     })();
     const rtgDisplay=p.isNR?nrLvl:p.isSeeding?`<span class="nr-seed">~${Math.round(p.rating)}</span>`:`${Math.round(p.rating)}`;
     const staleWeeks=p.gamesPlayed>0?sessionsSinceLastPlayed(p.id):0;
@@ -3767,6 +3788,14 @@ function pinKey(k){
 }
 function pinDel(){if(_pinBuffer.length>0){_pinBuffer=_pinBuffer.slice(0,-1);_updatePinDots();}}
 
+// Keyboard support for PIN entry — essential for laptop/desktop users
+document.addEventListener('keydown',e=>{
+  const overlay=document.getElementById('admin-lock');
+  if(!overlay?.classList.contains('open'))return;
+  if(e.key>='0'&&e.key<='9'){e.preventDefault();pinKey(e.key);}
+  else if(e.key==='Backspace'){e.preventDefault();pinDel();}
+});
+
 // ── PIN entry flow ───────────────────────────────────────────────
 async function _checkPin(){
   const stored=getAdminPin();
@@ -3874,8 +3903,13 @@ function checkAdminAccess(){
 function updatePinStatus(){
   const el=document.getElementById('pin-status');if(!el)return;
   const pin=getAdminPin();
-  el.textContent=pin?'✓ PIN is set — admin access protected':'No PIN set — admin is open to anyone';
-  el.style.color=pin?'var(--gr)':'var(--or)';
+  if(pin){
+    el.innerHTML='✓ PIN is set — admin access protected';
+    el.style.color='var(--gr)';
+  }else{
+    el.innerHTML='No PIN set — admin is open to anyone &nbsp;<button class="btn bp sm" style="font-size:.65rem;padding:3px 10px" onclick="openPinSetupModal()">Set PIN now</button>';
+    el.style.color='var(--or)';
+  }
   // Show 🔓 badge in header when no PIN — visible reminder that room is unprotected
   const badge=document.getElementById('admin-mode-badge');
   if(badge)badge.style.display=pin?'none':'inline';
@@ -3889,11 +3923,11 @@ function openPinSetupModal(){
       ${pin?'Enter your current PIN, then set a new one.':'Set a 4-digit PIN. Required every time the app is opened on a new device.'}
     </p>
     ${pin?`<label>CURRENT PIN</label>
-    <input id="cur-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:8px;letter-spacing:6px;text-align:center;font-size:1.2rem"/>`:``}
+    <input id="cur-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:8px;letter-spacing:6px;text-align:center;font-size:1.2rem" onkeydown="if(event.key==='Enter')_savePinModal()"/>`:``}
     <label>NEW PIN (4 digits)</label>
-    <input id="new-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:8px;letter-spacing:6px;text-align:center;font-size:1.2rem"/>
+    <input id="new-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:8px;letter-spacing:6px;text-align:center;font-size:1.2rem" onkeydown="if(event.key==='Enter')_savePinModal()"/>
     <label>CONFIRM NEW PIN</label>
-    <input id="conf-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:12px;letter-spacing:6px;text-align:center;font-size:1.2rem"/>
+    <input id="conf-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:12px;letter-spacing:6px;text-align:center;font-size:1.2rem" onkeydown="if(event.key==='Enter')_savePinModal()"/>
     <div style="display:flex;gap:7px;flex-wrap:wrap">
       <button class="btn bp" style="flex:2" onclick="_savePinModal()">Save PIN</button>
       ${pin?`<button class="btn bd2 sm" onclick="_removePinModal()">Remove PIN</button>`:''}
