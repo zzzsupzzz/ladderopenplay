@@ -860,7 +860,9 @@ const SYNC={
       if(isFirstLoad&&remoteTs>0){
         const localBackupTs=_getLocalBackup()?.savedAt||0;
         const localBackupBy=_getLocalBackup()?._by||'';
-        const remoteHasActiveSession=remote.session?.status==='active'&&(remote.session?.cfMatchCount||0)>0;
+        const remoteHasActiveSession=
+          (remote.session?.status==='active'&&(remote.session?.cfMatchCount||0)>0)
+          ||remote.session?.status==='lobby'; // lobby is in-progress, never overwrite with stale local
         if(localBackupTs>remoteTs+5000){
           const localHasData=(S.db?.length>0)&&((S.session?.status==='active'&&(S.session?.cfMatchCount||0)>0)||(S.archive?.length>0));
           const remoteHasData=(remote.db?.length>0)&&((remote.session?.status==='active'&&(remote.session?.cfMatchCount||0)>0)||(remote.archive||[]).length>0);
@@ -1044,7 +1046,7 @@ const SYNC={
 
       _invalidateMatchmakingCaches();
       updateHeader();updatePinStatus();updatePvSelect();updatePvSessFilter();
-      if(S.session?.status==='active'){
+      if(S.session?.status==='active'||S.session?.status==='lobby'){
         S.courts=S.session.courts||1;
         S.extendedMin=S.session.extendedMin||16;
         syncCourtPills('cpills-setup',S.courts);
@@ -1084,14 +1086,23 @@ const SYNC={
       if(fl&&!fl.classList.contains('hidden')){
         fl.classList.add('hidden');
         _pageFirstLoad=false;
-        try{renderDB();renderRoster();renderHistory();renderArchive();renderStandings();}catch(e2){}
+        // Best-effort render of whatever state we have — each wrapped individually
+        try{renderDB();}catch(e2){}
+        try{renderRoster();}catch(e2){}
+        try{renderHistory();}catch(e2){}
+        try{renderArchive();}catch(e2){}
+        try{renderStandings();}catch(e2){}
+        try{renderLive();}catch(e2){console.warn('[sync] renderLive failed in error recovery',e2);}
         updateHeader();_setSaveStatus('error');checkAdminAccess();
-        // Persistent sync-error banner
+        // Persistent sync-error banner with cache-busting reload and lobby escape hatch
         if(!document.getElementById('sync-error-banner')){
           const b=document.createElement('div');
           b.id='sync-error-banner';
           b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:rgba(248,113,113,.15);border-bottom:2px solid rgba(248,113,113,.4);padding:8px 16px;font-size:.73rem;font-weight:600;color:var(--re);text-align:center;font-family:"DM Sans",sans-serif';
-          b.innerHTML='⚠️ Sync error — showing last local data. <a href="#" onclick="location.reload();return false" style="color:var(--or);text-decoration:underline">Reload to retry</a> &nbsp;·&nbsp; <a href="#" onclick="document.getElementById(\'sync-error-banner\').remove();return false" style="color:var(--mu);text-decoration:underline">Dismiss</a>';
+          const lobbyEscape=S.session?.status==='lobby'
+            ?` &nbsp;·&nbsp; <a href="#" onclick="discardLobby();document.getElementById('sync-error-banner')?.remove();return false" style="color:var(--mu);text-decoration:underline">Discard check-in</a>`
+            :'';
+          b.innerHTML=`⚠️ Sync error — showing last local data. <a href="#" onclick="location.href=location.href.split('?')[0]+'?r='+Date.now()+(location.hash||'');return false" style="color:var(--or);text-decoration:underline">Reload to retry</a>${lobbyEscape} &nbsp;·&nbsp; <a href="#" onclick="document.getElementById('sync-error-banner').remove();return false" style="color:var(--mu);text-decoration:underline">Dismiss</a>`;
           document.body.prepend(b);
         }
       }
@@ -6331,8 +6342,8 @@ function _autoRestoreFromLocal(){
   (b.checkedIn||[]).forEach(id=>S.checkedIn.add(id));
   if(S.session?.activePlayers)S.session.activePlayers.forEach(id=>S.checkedIn.add(id));
 
-  // Pre-fill courts/extendedMin from session if active
-  if(S.session?.status==='active'){
+  // Pre-fill courts/extendedMin from session if active or in lobby
+  if(S.session?.status==='active'||S.session?.status==='lobby'){
     S.courts=S.session.courts||1;
     S.extendedMin=S.session.extendedMin||16;
   }
@@ -6344,7 +6355,7 @@ function _autoRestoreFromLocal(){
     // Do NOT call updatePinStatus() or checkAdminAccess() here.
     // PIN (S.adminPin) is authoritative from Firebase — local backup may have stale or no PIN.
     // checkAdminAccess() fires after _applyRemote confirms remote state.
-    if(S.session?.status==='active') renderLive();
+    if(S.session?.status==='active'||S.session?.status==='lobby') renderLive();
   }catch(e){
     // Corrupt backup — clear it and fall through to normal Firebase load
     console.error('[backup] Corrupt local snapshot, clearing:',e);
