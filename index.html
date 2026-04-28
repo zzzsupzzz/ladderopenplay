@@ -425,7 +425,6 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
         <button class="btn bg2 sm" onclick="openImportModal()">📥 Import</button>
         <button class="btn bg2 sm" onclick="openExportModal()">📤 Export</button>
         <button class="btn bg2 sm" title="Reconstruct player records from archived sessions if database was wiped" onclick="rebuildDbFromArchive()">🔧 Rebuild</button>
-        <button class="btn bg2 sm" title="Import March 28 session from PDF data" onclick="importMarch28Session()">📥 Mar 28</button>
       </div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
@@ -448,6 +447,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <p style="font-size:.68rem;color:var(--mu);margin-bottom:8px">Same name? Use Tag — "Alex #7" vs "Alex Jr."</p>
     <div style="display:flex;gap:6px;margin-bottom:7px">
       <input id="db-search" class="inp" placeholder="🔍 Search players…" oninput="renderDB()" style="flex:1"/>
+      <button id="db-absent-btn" class="btn bg2 sm" onclick="toggleDbAbsent()" title="Show only players not yet checked in">⬜ Absent</button>
       <button class="btn bg2 sm" onclick="selectAll()">☑ All</button>
       <button class="btn bg2 sm" onclick="selectNone()">☐ None</button>
     </div>
@@ -460,7 +460,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     </div>
     <div id="roster-list" style="margin-bottom:9px"></div>
     <div id="roster-stats" style="margin-bottom:10px"></div>
-    <button class="btn bp xl" id="start-btn" onclick="startSession()" disabled>🚀 Start Session</button>
+    <button class="btn bp xl" id="start-btn" onclick="startSession()" disabled>📋 Open Check-in</button>
     <p id="start-hint" style="font-size:.69rem;color:var(--mu);text-align:center;margin-top:5px"></p>
   </div>
 </div>
@@ -478,12 +478,13 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
         <div style="display:flex;gap:5px;flex-wrap:wrap">
           <button class="btn bs sm" onclick="openRosterModal()">👤 Players ±</button>
           <button id="cf-ac-toggle" class="btn bg2 sm" onclick="toggleCFAutoConfirm()" title="Auto-confirm suggestions after timer">⚡ Auto</button>
-          <select id="cf-ac-dur" class="inp" style="width:58px;font-size:.72rem;padding:4px 6px" onchange="S.session&&(S.session.cfAutoConfirmDur=+this.value)" title="Auto-confirm delay">
+          <select id="cf-ac-dur" class="inp" style="width:70px;font-size:.72rem;padding:4px 6px;display:none" onchange="S.session&&(S.session.cfAutoConfirmDur=+this.value)" title="Auto-confirm delay">
             <option value="30">30s</option>
             <option value="60">60s</option>
             <option value="90">90s</option>
           </select>
-          <button class="btn bd2" onclick="doEndSession()">🏁 End</button>
+          <span style="width:1px;height:20px;background:var(--bd);display:inline-block;margin:0 2px"></span>
+          <button class="btn bd2" onclick="doEndSession()" style="opacity:.7" title="End this session and save all results">🏁 End</button>
         </div>
       </div>
     </div>
@@ -492,12 +493,14 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <div id="cf-health-panel" class="card" style="display:none;margin-bottom:11px"></div>
     <div class="card">
       <div class="ct">⏳ Queue <span id="cf-queue-badge" style="font-size:.66rem;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(34,211,238,.1);color:var(--cy)">0</span>
-        <button onclick="openQueueRulesModal()" style="background:none;border:none;cursor:pointer;font-size:.75rem;color:var(--mu);padding:1px 5px;margin-left:4px;font-family:'DM Sans',sans-serif" title="How the queue works">ℹ️</button>
-        <button onclick="openLockPairModal()" style="background:none;border:none;cursor:pointer;font-size:.75rem;color:var(--mu);padding:1px 5px;font-family:'DM Sans',sans-serif" title="Lock two players as permanent partners this session">🔒</button>
-        <button onclick="changeCourtsMidSession()" style="background:none;border:none;cursor:pointer;font-size:.75rem;color:var(--mu);padding:1px 5px;font-family:'DM Sans',sans-serif" title="Change court count or court start number">⚙</button>
-        <button onclick="AUDIT.open()" style="background:none;border:none;cursor:pointer;font-size:.75rem;color:var(--mu);padding:1px 5px;font-family:'DM Sans',sans-serif" title="Audit log — organiser actions this session">📋</button>
+        <button onclick="openQueueRulesModal()" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;align-items:center;gap:1px" title="How the queue works"><span style="font-size:.75rem">ℹ️</span><span>Rules</span></button>
+        <button onclick="openLockPairModal()" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;align-items:center;gap:1px" title="Lock two players as permanent partners this session"><span style="font-size:.75rem">🔒</span><span>Lock</span></button>
+        <button onclick="changeCourtsMidSession()" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;align-items:center;gap:1px" title="Change court count or court start number"><span style="font-size:.75rem">⚙</span><span>Courts</span></button>
+        <button onclick="AUDIT.open()" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;align-items:center;gap:1px" title="Audit log — organiser actions this session"><span style="font-size:.75rem">📋</span><span>Log</span></button>
       </div>
       <div id="cf-locked-pairs-display"></div>
+      <div id="cf-pinned-display"></div>
+      <div id="cf-neverpair-display"></div>
       <div id="cf-queue-list"></div>
       <div id="cf-paused-wrap" style="display:none">
         <div style="font-size:.65rem;font-weight:700;color:var(--mu);letter-spacing:.05em;margin:8px 0 4px">⏸ PAUSED</div>
@@ -1063,8 +1066,9 @@ const SYNC={
         if(!PLAYER_MODE)renderLive();
         _stopLoadingProgressTimer();
         const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
-        if(_pageFirstLoad&&S.session?.status==='active'&&!PLAYER_MODE){
-          switchTab('live');startElapsed();updateProgress();
+        if(_pageFirstLoad&&(S.session?.status==='active'||S.session?.status==='lobby')&&!PLAYER_MODE){
+          switchTab('live');
+          if(S.session?.status==='active'){startElapsed();updateProgress();}
         }
         _pageFirstLoad=false;
         checkAdminAccess();
@@ -1220,6 +1224,9 @@ const AUDIT={
       score_edit:'✏️',
       reshuffle:'↺',
       confirm_all:'✓✓',
+      player_leave:'🚶',
+      player_rejoin:'🏃',
+      nr_promotion:'🎯',
     }[action]||'•';
   },
 
@@ -1840,6 +1847,27 @@ function savePlayerEdit(id){
 
 function toggleCheckIn(id){
   if(S.session?.status==='active'){toast('Use "Players ±" during session','warn');return;}
+  if(S.session?.status==='lobby'){
+    // In lobby: sync checkedIn with session.activePlayers live
+    if(S.checkedIn.has(id)){
+      S.checkedIn.delete(id);
+      S.session.activePlayers=S.session.activePlayers.filter(x=>x!==id);
+      S.session.players=S.session.players.filter(x=>x.id!==id);
+    }else{
+      S.checkedIn.add(id);
+      if(!S.session.activePlayers.includes(id)){
+        S.session.activePlayers.push(id);
+        const p=gp(id);
+        if(p&&!S.session.players.find(x=>x.id===id)){
+          const startR=p.isNR?(p.nrLevelHint||1000):(p.rating||1000);
+          S.session.players.push({id,name:p.name,tag:p.tag||'',isNR:p.isNR||false,isSeeding:false,
+            sRating:startR,startRating:startR,wins:0,losses:0,ties:0,
+            matchesPlayed:0,ptsFor:0,ptsAgainst:0,timeOnCourtMs:0,timeInQueueMs:0,status:'active'});
+        }
+      }
+    }
+    STORE.save('session');renderDB();renderLive();renderRoster();return;
+  }
   S.checkedIn.has(id)?S.checkedIn.delete(id):S.checkedIn.add(id);renderDB();renderRoster();
 }
 
@@ -1850,27 +1878,30 @@ function selectNone(){S.checkedIn.clear();renderDB();renderRoster();}
 function startSession(){
   if(S.session?.status==='active'){
     toast('Session already running — go to Live tab','warn');
-    switchTab('live');
-    return;
+    switchTab('live');return;
+  }
+  if(S.session?.status==='lobby'){
+    toast('Check-in open — go to Live tab','warn');
+    switchTab('live');return;
   }
   _invalidateMatchmakingCaches();
-  _buildSessionTogetherCache(); // pre-warm before first match generation
-  const arr=[...S.checkedIn];if(arr.length<4){toast('Need at least 4 players','err');return;}
+  _buildSessionTogetherCache();
+  const arr=[...S.checkedIn];if(arr.length<1){toast('Add at least one player to open check-in','err');return;}
   S.extendedMin=parseInt(document.getElementById('extended-min')?.value)||16;
   const nameEl=document.getElementById('sess-name-flow');
-  const name=(nameEl?.value||'').trim()||`Open Play — ${fmtDate()}`;
-  // minPlayAfterSit removed (round mode only)
-  // NR start rating = session average of rated players
+  const savedName=localStorage.getItem('pb_last_sess_name')||'';
+  const name=(nameEl?.value||'').trim()||savedName||`Open Play — ${fmtDate()}`;
+  if(name)localStorage.setItem('pb_last_sess_name',name);
   const ratedRatings=arr.filter(id=>!gp(id)?.isNR).map(id=>gp(id)?.rating||1000);
-  const sessAvg=ratedRatings.length?Math.round(ratedRatings.reduce((a,b)=>a+b,0)/ratedRatings.length):1000;
   S.session={
     id:uid(),name,date:new Date().toISOString(),courts:S.courts,
     courtGroupSize:4,cfMode:true,extendedMin:S.extendedMin,
-    sessionStart:Date.now(),
+    sessionStart:null, // set on beginPlay
     activePlayers:[...arr],
     players:arr.map(id=>{
       const p=gp(id);
-      const startR=p.isNR?(p.nrLevelHint||(()=>{const rated=arr.filter(id2=>!gp(id2)?.isNR).map(id2=>gp(id2)?.rating||1000);return rated.length?Math.round(rated.reduce((a,b)=>a+b,0)/rated.length):1000;})()):(p.rating||1000);
+      const sessAvg=ratedRatings.length?Math.round(ratedRatings.reduce((a,b)=>a+b,0)/ratedRatings.length):1000;
+      const startR=p.isNR?(p.nrLevelHint||sessAvg):(p.rating||1000);
       return{id,name:p.name,tag:p.tag||'',isNR:p.isNR||false,isSeeding:false,
              sRating:startR,startRating:startR,wins:0,losses:0,ties:0,
              matchesPlayed:0,ptsFor:0,ptsAgainst:0,timeOnCourtMs:0,timeInQueueMs:0,status:'active'};
@@ -1883,11 +1914,34 @@ function startSession(){
     cfPairSessionCount:{},cfPairLastAt:{},cfPairLastLost:{},
     neverPair:{},ratingOverrides:{},
     auditLog:[],
-    status:'active'
+    status:'lobby'
   };
-  STORE.save('session');updateHeader();startElapsed();switchTab('live');
+  STORE.save('session');updateHeader();switchTab('live');
+  renderLive();renderRoster();
+  toast(`Check-in open — ${arr.length} player${arr.length!==1?'s':''} in lobby 📋`,'ok');
+}
+
+function beginPlay(){
+  if(!S.session||S.session.status!=='lobby')return;
+  if(S.session.activePlayers.length<4){toast('Need at least 4 players to begin','err');return;}
+  S.session.status='active';
+  S.session.sessionStart=Date.now();
+  // Recompute NR start ratings now that full roster is known
+  const ratedRatings=S.session.activePlayers
+    .filter(id=>!gp(id)?.isNR).map(id=>gp(id)?.rating||1000);
+  const sessAvg=ratedRatings.length?Math.round(ratedRatings.reduce((a,b)=>a+b,0)/ratedRatings.length):1000;
+  S.session.players.forEach(sp=>{
+    if(sp.isNR&&sp.startRating<400+1){
+      const hint=gp(sp.id)?.nrLevelHint||sessAvg;
+      sp.sRating=hint;sp.startRating=hint;
+    }
+  });
+  _invalidateMatchmakingCaches();
+  _buildSessionTogetherCache();
+  STORE.save('session');updateHeader();startElapsed();
   CF._confirmAllBusy=false;CF._confirmAllLastTs=0;
-  CF.initQueue();renderLive();renderStandings();renderHistory();toast('⚡ Continuous Flow started!','ok');
+  CF.initQueue();renderLive();renderStandings();renderHistory();
+  toast('⚡ Play started!','ok');
 }
 
 
@@ -2107,11 +2161,29 @@ function midAdd(id){
 
 function midRemove(id){
   if(!S.session)return;const p=gp(id),sp=gsp(id);if(!p||!sp)return;
+  // Guard: check if player is currently in an active match
+  const onCourtEntry=Object.entries(S.session.cfCourts||{})
+    .find(([,ct])=>ct?.status==='playing'&&ct.match&&[...ct.match.t1,...ct.match.t2].includes(id));
+  if(onCourtEntry){
+    const [cn]=onCourtEntry;
+    const offset=S.session.courtOffset||0;
+    openModal(`<div class="modal-title">⚠️ Player Mid-Match</div>
+      <p style="font-size:.76rem;color:var(--mu);line-height:1.55;margin-bottom:14px">
+        <strong style="color:var(--tx)">${esc(p.name)}</strong> is currently playing on <strong style="color:var(--cy)">Court ${offset+parseInt(cn)}</strong>.<br/>
+        Cancel the match first, then remove the player.
+      </p>
+      <div style="display:flex;gap:7px">
+        <button class="btn bd2" style="flex:1" onclick="closeModal();CF.cancelActiveMatch(${cn})">✕ Cancel Match First</button>
+        <button class="btn bg2" onclick="closeModal()">Never mind</button>
+      </div>`);
+    return;
+  }
   sp.status='left';S.session.activePlayers=S.session.activePlayers.filter(x=>x!==id);
   if(S.session.cfMode){
     S.session.cfQueue=(S.session.cfQueue||[]).filter(q=>q.id!==id);
     S.session.cfPaused=(S.session.cfPaused||[]).filter(q=>q.id!==id);
   }
+  AUDIT.log('player_leave',`${p.name} left the session`);
   STORE.save();toast(`${p.name} marked as left`,'warn');renderLive();renderRosterModal();
 }
 
@@ -2242,6 +2314,7 @@ function midRejoin(id){
       }
     }
   }
+  AUDIT.log('player_rejoin',`${p.name} rejoined the session`);
   STORE.save('session');toast(`${p.name} rejoined! 🏓`,'ok');renderLive();renderRosterModal();
 }
 
@@ -2267,6 +2340,18 @@ function stopTimer(){
 }
 
 /* § RENDER:SETUP
+let _dbAbsentOnly=false;
+function toggleDbAbsent(){
+  _dbAbsentOnly=!_dbAbsentOnly;
+  const btn=document.getElementById('db-absent-btn');
+  if(btn){
+    btn.textContent=_dbAbsentOnly?'☑ Absent':'⬜ Absent';
+    btn.classList.toggle('bc',_dbAbsentOnly);
+    btn.classList.toggle('bg2',!_dbAbsentOnly);
+  }
+  renderDB();
+}
+
 /* ── RENDER: DB ──────────────────────────────────── */
 function renderDB(){
   // Refresh NR level labels if NR panel is open (checked-in pool may have changed)
@@ -2274,6 +2359,7 @@ function renderDB(){
   const q=(document.getElementById('db-search')?.value||'').toLowerCase();
   let players=[...S.db].sort((a,b)=>{if(!!a.isNR!==!!b.isNR)return a.isNR?1:-1;return b.rating-a.rating;});
   if(q)players=players.filter(p=>plainName(p).toLowerCase().includes(q));
+  if(_dbAbsentOnly)players=players.filter(p=>!S.checkedIn.has(p.id));
   document.getElementById('db-badge').textContent=S.db.length;
   if(!players.length){document.getElementById('db-list').innerHTML=`<div class="empty">No players yet.</div>`;return;}
   document.getElementById('db-list').innerHTML=players.map(p=>{
@@ -2325,48 +2411,137 @@ function renderDB(){
 function renderRoster(){
   const arr=[...S.checkedIn];
   document.getElementById('roster-badge').textContent=arr.length;
+  const sessStatus=S.session?.status;
+  const isActive=sessStatus==='active', isLobby=sessStatus==='lobby';
   if(!arr.length){
-    const actE=S.session?.status==='active',btnE=document.getElementById('start-btn');
-    if(actE){
+    const btnE=document.getElementById('start-btn');
+    if(isActive||isLobby){
       btnE.style.display='none';
-      document.getElementById('start-hint').innerHTML=`<span style="font-size:.74rem;color:var(--mu)">Session in progress — <a href="#" style="color:var(--cy);text-decoration:none" onclick="switchTab('live');return false">Switch to Live tab ↗</a></span>`;
-    } else {
-      btnE.style.display='';
-      btnE.disabled=true;
-    }
+      document.getElementById('start-hint').innerHTML=`<span style="font-size:.74rem;color:var(--mu)">${isLobby?'Check-in open —':'Session in progress —'} <a href="#" style="color:var(--cy);text-decoration:none" onclick="switchTab('live');return false">Switch to Live tab ↗</a></span>`;
+    }else{btnE.style.display='';btnE.disabled=true;}
     document.getElementById('roster-list').innerHTML=`<div style="color:var(--mu);font-size:.78rem;padding:6px 0">Click players above to check in. Use ☑ All for everyone.</div>`;
     document.getElementById('roster-stats').innerHTML='';
-    if(!actE)document.getElementById('start-hint').textContent='Need at least 4 players.';
+    if(!isActive&&!isLobby)document.getElementById('start-hint').textContent='Need at least 1 player.';
     return;
   }
   const players=arr.map(gp).filter(Boolean).sort((a,b)=>b.rating-a.rating);
   document.getElementById('roster-list').innerHTML=players.map(p=>`<div class="prow click chk" onclick="toggleCheckIn('${p.id}')"><div class="pnc"><div class="pn">${p.name}${tagHtml(p)}</div></div><div class="pr" style="color:var(--gr)">${p.isNR?'<span class="nr-badge">NR</span>':Math.round(p.rating)}</div><div style="color:var(--gr)">✓</div></div>`).join('');
   const avg=Math.round(arr.filter(id=>!gp(id)?.isNR).reduce((s,id)=>s+(gp(id)?.rating||0),0)/Math.max(1,arr.filter(id=>!gp(id)?.isNR).length));
-  const need=S.courts*4;
-  const startingNow=Math.min(need,arr.length);
-  const so=Math.max(0,arr.length-need);
+  const need=S.courts*4;const startingNow=Math.min(need,arr.length);const so=Math.max(0,arr.length-need);
   const hintText=so?`${so} player${so>1?'s':''} will queue first`:'Everyone plays first match!';
   document.getElementById('roster-stats').innerHTML=`<span class="sc"><b>${arr.length}</b> Players</span><span class="sc"><b>${S.courts}</b> Court${S.courts>1?'s':''}</span><span class="sc"><b>${startingNow}</b> Starting</span><span class="sc"><b>${avg}</b> Avg RTG</span>`;
-  const act=S.session?.status==='active',btn=document.getElementById('start-btn');
-  if(act){
+  const btn=document.getElementById('start-btn');
+  if(isActive){
     btn.style.display='none';
     document.getElementById('start-hint').innerHTML=`<span style="font-size:.74rem;color:var(--mu)">Session in progress — <a href="#" style="color:var(--cy);text-decoration:none" onclick="switchTab('live');return false">Switch to Live tab ↗</a></span>`;
-  } else {
+  }else if(isLobby){
+    btn.style.display='none';
+    document.getElementById('start-hint').innerHTML=`<span style="font-size:.74rem;color:var(--cy)">✓ Check-in open — <a href="#" style="color:var(--cy);text-decoration:none" onclick="switchTab('live');return false">go to Live tab to begin play ↗</a></span>`;
+  }else{
     btn.style.display='';
-    if(arr.length<4){btn.disabled=true;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=`Need ${4-arr.length} more.`;}
-    else{btn.disabled=false;btn.textContent='🚀 Start Session';document.getElementById('start-hint').textContent=hintText;}
+    btn.disabled=false;btn.textContent='📋 Open Check-in';
+    document.getElementById('start-hint').textContent=hintText;
   }
   
 }
 
 /* ── RENDER: LIVE ────────────────────────────────── */
 function renderLive(){
-  const none=!S.session||S.session.status!=='active';
-  document.getElementById('live-empty').style.display=none?'block':'none';
+  const status=S.session?.status;
+  const none=!S.session;
+  document.getElementById('live-empty').style.display=(none&&!S.session)?'block':'none';
   const cfw=document.getElementById('cf-live-wrap');
-  if(none){if(cfw)cfw.style.display='none';return;}
+
+  if(!S.session){
+    document.getElementById('live-empty').style.display='block';
+    if(cfw)cfw.style.display='none';
+    return;
+  }
+
+  if(status==='lobby'){
+    document.getElementById('live-empty').style.display='none';
+    if(cfw)cfw.style.display='block';
+    _renderLobby();
+    return;
+  }
+
+  // Active session
+  document.getElementById('live-empty').style.display='none';
   if(cfw)cfw.style.display='block';
   CF.renderLive();startCFTick();
+}
+
+function _renderLobby(){
+  const sw=document.getElementById('cf-suggestions-wrap');
+  const cw=document.getElementById('cf-courts-wrap');
+  const hp=document.getElementById('cf-health-panel');
+  const queueCard=document.querySelector('#cf-live-wrap > .card:last-child');
+  if(hp)hp.style.display='none';
+
+  // Hide queue card, courts, suggestions — lobby doesn't use them
+  if(cw)cw.innerHTML='';
+  if(sw)sw.innerHTML='';
+
+  // Show lobby roster in the suggestions area
+  if(sw){
+    const sess=S.session;
+    const players=[...sess.activePlayers].map(gp).filter(Boolean).sort((a,b)=>b.rating-a.rating);
+    const notIn=S.db.filter(p=>!sess.activePlayers.includes(p.id)).sort((a,b)=>a.name.localeCompare(b.name));
+    const canBegin=sess.activePlayers.length>=4;
+
+    sw.innerHTML=`
+    <div style="background:rgba(52,217,116,.07);border:1px solid rgba(52,217,116,.25);border-radius:var(--rl);padding:16px;margin-bottom:11px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;color:var(--gr);letter-spacing:.5px">📋 CHECK-IN LOBBY</div>
+          <div style="font-size:.72rem;color:var(--mu)">${esc(sess.name)} · ${players.length} player${players.length!==1?'s':''} ready</div>
+        </div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap">
+          <button class="btn bd2 sm" onclick="discardLobby()">✕ Discard</button>
+          <button class="btn bp" style="${canBegin?'':'opacity:.5;pointer-events:none'}" onclick="beginPlay()" ${canBegin?'':'disabled'}>
+            ▶ Begin Play${canBegin?' ('+players.length+')':'  — need 4+'}
+          </button>
+        </div>
+      </div>
+
+      ${players.length?`
+      <div style="font-size:.67rem;font-weight:700;color:var(--mu);letter-spacing:.06em;margin-bottom:6px">CHECKED IN (${players.length})</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px">
+        ${players.map(p=>`<div style="display:flex;align-items:center;gap:5px;background:rgba(52,217,116,.1);border:1px solid rgba(52,217,116,.25);border-radius:var(--ra);padding:5px 9px">
+          <span style="font-size:.78rem;font-weight:600;color:var(--tx)">${esc(p.name)}${p.tag?`<span style="font-size:.62rem;color:var(--or);margin-left:3px">${esc(p.tag)}</span>`:''}</span>
+          <span style="font-size:.65rem;color:var(--mu)">${p.isNR?'NR':Math.round(p.rating)}</span>
+          <button onclick="toggleCheckIn('${p.id}')" style="background:none;border:none;cursor:pointer;color:var(--re);font-size:.75rem;padding:0 2px;line-height:1" title="Remove">✕</button>
+        </div>`).join('')}
+      </div>`:
+      `<div style="color:var(--mu);font-size:.78rem;margin-bottom:12px;padding:4px 0">No players checked in yet — add below.</div>`}
+
+      ${notIn.length?`
+      <div style="font-size:.67rem;font-weight:700;color:var(--mu);letter-spacing:.06em;margin-bottom:6px">ADD PLAYERS</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px">
+        ${notIn.map(p=>`<button onclick="toggleCheckIn('${p.id}')" style="font-size:.73rem;font-weight:600;padding:5px 10px;border-radius:20px;border:1px solid var(--bd);background:var(--s2);color:var(--tx);cursor:pointer">${esc(p.name)}${p.tag?` <span style="font-size:.6rem;color:var(--or)">${esc(p.tag)}</span>`:''} <span style="font-size:.62rem;color:var(--mu)">${p.isNR?'NR':Math.round(p.rating)}</span></button>`).join('')}
+      </div>`:''
+      }
+    </div>`;
+  }
+
+  // Hide queue section
+  const qEl=document.getElementById('cf-queue-list');if(qEl)qEl.innerHTML='';
+  const qBadge=document.getElementById('cf-queue-badge');if(qBadge)qBadge.textContent='0';
+  const pw=document.getElementById('cf-paused-wrap');if(pw)pw.style.display='none';
+  const lpEl=document.getElementById('cf-locked-pairs-display');if(lpEl)lpEl.innerHTML='';
+  const ppEl=document.getElementById('cf-pinned-display');if(ppEl)ppEl.innerHTML='';
+  const npEl=document.getElementById('cf-neverpair-display');if(npEl)npEl.innerHTML='';
+}
+
+function discardLobby(){
+  if(!S.session||S.session.status!=='lobby')return;
+  showCfm(`Discard check-in for <strong>${esc(S.session.name)}</strong>?<br/><span style="font-size:.74rem;color:var(--mu)">No matches have been played — nothing will be saved.</span>`,'Discard','bd2',()=>{
+    S.checkedIn.clear();S.session=null;
+    CF._confirmAllBusy=false;CF._confirmAllLastTs=0;
+    STORE.save();updateHeader();renderDB();renderRoster();renderLive();renderHistory();renderStandings();
+    toast('Check-in discarded','warn');
+    switchTab('setup');
+  });
 }
 
 /* § RENDER:STANDINGS
@@ -2665,6 +2840,8 @@ function updatePvSelect(){
   const filteredSorted=[...filtered].sort((a,b)=>a.name.localeCompare(b.name));
   sel.innerHTML='<option value="">— Choose player —</option>'+filteredSorted.map(p=>`<option value="${p.id}">${plainName(p)}</option>`).join('');
   if(cur&&filtered.find(p=>p.id===cur))sel.value=cur;
+  // Auto-select when filter narrows to exactly one result
+  else if(filteredSorted.length===1){sel.value=filteredSorted[0].id;renderPlayerView();}
   updatePvSessFilter();
 }
 
@@ -2672,13 +2849,17 @@ function updatePvSessFilter(){
   const sf=document.getElementById('pv-sess-filter');if(!sf)return;
   const cur=sf.value;
   let opts='<option value="">All sessions</option>';
-  if(S.session&&S.session.status==='active')opts+=`<option value="__current__">📍 Current: ${esc(S.session.name)}</option>`;
+  if(S.session&&(S.session.status==='active'||S.session.status==='lobby'))opts+=`<option value="__current__">📍 Current: ${esc(S.session.name)}</option>`;
   S.archive.forEach(sess=>{
     const d=new Date(sess.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
     opts+=`<option value="${sess.id}">${esc(sess.name)} — ${d}</option>`;
   });
   sf.innerHTML=opts;
-  if(cur&&(cur==='__current__'||S.archive.find(a=>a.id===cur)))sf.value=cur;
+  // Default: current session if active, else most recent archive
+  const preferred=cur&&(cur==='__current__'||S.archive.find(a=>a.id===cur))?cur
+    :(S.session?.status==='active'||S.session?.status==='lobby')?'__current__'
+    :S.archive.length?S.archive[0].id:'';
+  sf.value=preferred||'';
 }
 
 function filterPvSearch(){
@@ -2955,8 +3136,13 @@ async function doConnectSync(){
 function openShareModal(){
   const base=window.location.href.split('#')[0].split('?')[0];
   const shareUrl=base+'?view=player';
+  const noPinWarning=!S.adminPin?`
+    <div style="background:rgba(251,147,60,.08);border:1px solid rgba(251,147,60,.35);border-radius:var(--ra);padding:9px 12px;margin-bottom:10px;font-size:.73rem;color:var(--or);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span style="flex:1">⚠️ <strong>No PIN set</strong> — anyone who sees this URL can access organiser controls by removing <code style="font-size:.68rem;background:rgba(0,0,0,.3);padding:1px 4px;border-radius:3px">?view=player</code>.</span>
+      <button class="btn bg2 sm" style="white-space:nowrap;font-size:.68rem" onclick="closeModal();openPinSetupModal()">Set PIN →</button>
+    </div>`:'';
   openModal(`<div class="modal-title">📱 Share Player Link</div>
-
+    ${noPinWarning}
     <div style="background:rgba(52,217,116,.07);border:1px solid rgba(52,217,116,.2);border-radius:var(--ra);padding:10px;margin-bottom:12px;font-size:.74rem;color:var(--mu)">
       Players open the link on <strong style="color:var(--tx)">any device</strong> to see their match, rank &amp; stats — read-only. Live data via Firebase.
     </div>
@@ -3239,6 +3425,7 @@ function seedExampleData(){
 /* ── END SESSION WITH SUMMARY ──────────────────────── */
 function doEndSession(){
   if(!S.session){toast('No active session','err');return;}
+  if(S.session.status==='lobby'){discardLobby();return;}
   showCfm(`End <strong>${esc(S.session.name)}</strong>?<br/><span style="font-size:.74rem;color:var(--mu)">Ratings saved to database.</span>`,'🏁 End Session','bp',()=>{
     const arch={id:S.session.id,name:S.session.name,date:S.session.date,cfMode:true,
       players:S.session.players.map(sp=>{const p=gp(sp.id)||{};return{id:sp.id,name:sp.name||p.name||'?',tag:sp.tag||p.tag||'',sRating:sp.sRating,startRating:sp.startRating,wins:sp.wins,losses:sp.losses,ties:sp.ties,matchesPlayed:sp.matchesPlayed,ptsFor:sp.ptsFor,ptsAgainst:sp.ptsAgainst};}),
@@ -3282,9 +3469,9 @@ function openEditScoreCF(matchIdx){
     <p style="font-size:.72rem;color:var(--mu);margin-bottom:4px">Court ${m.courtNum} · ${t1n} vs ${t2n}</p>
     <p style="font-size:.7rem;color:var(--go);margin-bottom:9px">⚡ ELO will be recalculated from this match forward.</p>
     <div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-bottom:8px">
-      <input id="cfes1" class="inp sinp" type="number" min="0" value="${m.s1??''}"/>
+      <input id="cfes1" class="inp sinp" type="number" inputmode="numeric" pattern="[0-9]*" min="0" value="${m.s1??''}"/>
       <span class="sdash">–</span>
-      <input id="cfes2" class="inp sinp" type="number" min="0" value="${m.s2??''}"/>
+      <input id="cfes2" class="inp sinp" type="number" inputmode="numeric" pattern="[0-9]*" min="0" value="${m.s2??''}"/>
     </div>
     <div class="qs-row" id="cfeqs"></div>
     <div style="display:flex;gap:7px;margin-top:10px">
@@ -3342,9 +3529,9 @@ function openEditScoreArchiveCF(matchIdx,sessId){
     <p style="font-size:.7rem;color:var(--go);margin-bottom:9px">⚡ ELO will be fully recalculated for this session and all-time ratings updated.</p>
     <div style="text-align:center;margin-bottom:9px;font-weight:600">${t1n} <span style="color:var(--mu);font-weight:400">vs</span> ${t2n}</div>
     <div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-bottom:8px">
-      <input id="acfes1" class="inp sinp" type="number" min="0" value="${m.s1??''}"/>
+      <input id="acfes1" class="inp sinp" type="number" inputmode="numeric" pattern="[0-9]*" min="0" value="${m.s1??''}"/>
       <span class="sdash">–</span>
-      <input id="acfes2" class="inp sinp" type="number" min="0" value="${m.s2??''}"/>
+      <input id="acfes2" class="inp sinp" type="number" inputmode="numeric" pattern="[0-9]*" min="0" value="${m.s2??''}"/>
     </div>
     <div class="qs-row" id="acfeqs"></div>
     <div style="display:flex;gap:7px;margin-top:10px">
@@ -3382,14 +3569,16 @@ function _saveArchiveCFScore(matchIdx,sessId){
 /* ── HEADER + TABS ───────────────────────────────── */
 function updateHeader(){
   const b=document.getElementById('hbadge'),s=document.getElementById('hsub');
-  if(S.session?.status==='active'){
-    // CF mode: show match count. Round mode: show round number.
-    const label=S.session.cfMode
-      ?`CF ${S.session.cfMatchCount||0}`
-      :`R${S.session.round}`;
+  if(S.session?.status==='lobby'){
+    b.textContent='LOBBY';b.className='';b.style.color='var(--gr)';
+    s.textContent=S.session.name;
+  }else if(S.session?.status==='active'){
+    b.style.color='';
+    const label=S.session.cfMode?`CF ${S.session.cfMatchCount||0}`:`R${S.session.round}`;
     b.textContent=`${label} LIVE`;b.className='live';s.textContent=S.session.name;
+  }else{
+    b.style.color='';b.textContent='SETUP';b.className='';s.textContent='No active session';
   }
-  else{b.textContent='SETUP';b.className='';s.textContent='No active session';}
   const sb=document.getElementById('share-btn');
   if(sb&&!PLAYER_MODE)sb.style.display='inline-flex';
 }
@@ -3766,6 +3955,7 @@ function checkNRPromotion(id){
     p.isNR=false;p.isSeeding=false;
     p.rating=Math.max(400,Math.round(sp.sRating));
     sp.isNR=false;sp.isSeeding=false;
+    AUDIT.log('nr_promotion',`NR promotion: ${p.name} rated at ${p.rating} after ${games} calibration games`);
     STORE.save();
     toast(`🎯 ${esc(p.name)} rated at <strong>${p.rating}</strong>`,'ok',4500);
   }else if(games>=3){p.isSeeding=true;sp.isSeeding=true;}
@@ -5434,11 +5624,24 @@ const CF={
   /* ── Render CF live view ── */
   renderLive(){
     if(!S.session)return;
-    const el=document.getElementById('cf-sess-lbl');if(el)el.textContent=S.session.name||'CONTINUOUS FLOW';
+    const isLobby=S.session.status==='lobby';
+    const el=document.getElementById('cf-sess-lbl');
+    if(el)el.textContent=isLobby?'CHECK-IN LOBBY':(S.session.name||'CONTINUOUS FLOW');
     const sub=document.getElementById('cf-sess-sub');
-    if(sub)sub.textContent=`${(S.session.cfLog||[]).length} matches · ${S.session.activePlayers.length} players · ${(S.session.cfQueue||[]).length} queued`;
-    const acBtn=document.getElementById('cf-ac-toggle');
-    if(acBtn){acBtn.classList.toggle('bc',!!S.session.cfAutoConfirm);acBtn.classList.toggle('bg2',!S.session.cfAutoConfirm);}
+    if(sub)sub.textContent=isLobby
+      ?`${S.session.activePlayers.length} players checked in — press ▶ Begin Play when ready`
+      :`${(S.session.cfLog||[]).length} matches · ${S.session.activePlayers.length} players · ${(S.session.cfQueue||[]).length} queued`;
+    // Hide live-only controls in lobby
+    const lobbyHide=['cf-ac-toggle','cf-ac-dur'];
+    lobbyHide.forEach(id=>{const el2=document.getElementById(id);if(el2)el2.style.display=isLobby?'none':null;});
+    // Players ± button: show in both states. ⚡ Auto: active only.
+    if(!isLobby){
+      const acBtn=document.getElementById('cf-ac-toggle');
+      if(acBtn){acBtn.classList.toggle('bc',!!S.session.cfAutoConfirm);acBtn.classList.toggle('bg2',!S.session.cfAutoConfirm);acBtn.style.display='';}
+      const acDur=document.getElementById('cf-ac-dur');
+      if(acDur)acDur.style.display=S.session.cfAutoConfirm?'':'none';
+    }
+    if(isLobby){return;} // rest of renderLive is courts/queue — not relevant in lobby
 
     // Suggestions — show Confirm All banner if multiple courts ready
     const sw=document.getElementById('cf-suggestions-wrap');
@@ -5681,13 +5884,11 @@ const CF={
       <div class="cf-ac-wrap" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;min-height:22px">
         ${_cfAutoConfirmTimers[courtNum]?`<span id="cf-ac-${courtNum}" style="font-size:.7rem;color:var(--mu)">Auto-starting…</span><button class="btn bg2 sm" style="font-size:.65rem;padding:2px 8px" onclick="cancelAutoConfirm(${courtNum})">Cancel</button>`:''}
       </div>
-      <div style="display:flex;gap:7px">
-        <button class="btn bp" style="flex:2" onclick="cancelAutoConfirm(${courtNum});CF.confirmSuggestion(${courtNum})">✓ Confirm — Start Court ${(S.session?.courtOffset||0)+courtNum}</button>
+      <div style="display:flex;gap:7px;flex-wrap:wrap">
+        <button class="btn bp" style="flex:1 1 100%" onclick="cancelAutoConfirm(${courtNum});CF.confirmSuggestion(${courtNum})">✓ Confirm — Start Court ${(S.session?.courtOffset||0)+courtNum}</button>
         <button class="btn bs sm" title="Full reshuffle" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleSuggestion(${courtNum})">↺ Reshuffle</button>
         <button class="btn bs sm" title="Partial reshuffle — lock some players" onclick="cancelAutoConfirm(${courtNum});CF.openPartialReshuffle(${courtNum})">🔒 Lock+Shuffle</button>
-        <button class="btn bs sm" title="Swap one player" onclick="cancelAutoConfirm(${courtNum});CF.openSwapPlayer(${courtNum})">⇄ Swap</button>
         ${sug.meta?.constraintReason&&['wait-override','outlier-wait','playtime-catch-up'].includes(sug.meta.constraintReason)?`<button class="btn bs sm" style="color:var(--cy)" title="Regenerate prioritising match quality — ignores wait/fairness pressure this once" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleQualityFirst(${courtNum})">⚖ Quality</button>`:``}
-        <button class="btn bg2 sm" title="Manual pick" onclick="cancelAutoConfirm(${courtNum});CF.openManual(${courtNum})">✏ Manual</button>
       </div></div>`;
   },
 
@@ -5724,9 +5925,9 @@ const CF={
           <div class="team">${m.t2.map(id=>`<div style="display:flex;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:.82rem">${gn(id)} <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span>${pauseBtn(id)}</div>`).join('')}<div class="team-avg">Avg ${t2Avg}</div></div>
         </div>
         <div class="srow" style="margin-top:10px">
-          <input class="sinp inp" id="cf-s1-${courtNum}" type="number" min="0" max="99" placeholder="0"/>
+          <input class="sinp inp" id="cf-s1-${courtNum}" type="number" inputmode="numeric" pattern="[0-9]*" min="0" max="99" placeholder="0"/>
           <span class="sdash">–</span>
-          <input class="sinp inp" id="cf-s2-${courtNum}" type="number" min="0" max="99" placeholder="0"/>
+          <input class="sinp inp" id="cf-s2-${courtNum}" type="number" inputmode="numeric" pattern="[0-9]*" min="0" max="99" placeholder="0"/>
         </div>
         <div class="qs-row" id="cf-qs-${courtNum}"></div>
         <div id="sug-picker-${courtNum}" style="display:none;margin-top:6px;background:var(--s3);border:1px solid var(--bd);border-radius:var(--ra);padding:8px"></div>
@@ -5807,6 +6008,30 @@ const CF={
     const queue=S.session?.cfQueue||[];
     const paused=S.session?.cfPaused||[];
     const badge=document.getElementById('cf-queue-badge');if(badge)badge.textContent=queue.length;
+    // Never-pair active restrictions
+    const npEl=document.getElementById('cf-neverpair-display');
+    if(npEl){
+      const np=S.session?.neverPair||{};
+      const seen=new Set();
+      const pairs=[];
+      Object.entries(np).forEach(([aId,bIds])=>{
+        bIds.forEach(bId=>{
+          const k=[aId,bId].sort().join('|');
+          if(!seen.has(k)){seen.add(k);pairs.push([aId,bId]);}
+        });
+      });
+      npEl.innerHTML=pairs.length
+        ?`<div style="display:flex;flex-wrap:wrap;gap:4px;padding:2px 0 5px">`
+          +pairs.map(([a,b])=>`<span style="font-size:.62rem;background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.25);border-radius:20px;padding:2px 8px;color:var(--re)" title="Never-pair restriction active">🚫 ${esc(gp(a)?.name?.split(' ')[0]||'?')} & ${esc(gp(b)?.name?.split(' ')[0]||'?')}</span>`).join('')+'</div>'
+        :'';}
+    // Pinned players display
+    const ppEl=document.getElementById('cf-pinned-display');
+    if(ppEl){
+      const pins=S.session.cfPinnedIds||[];
+      ppEl.innerHTML=pins.length
+        ?`<div style="display:flex;flex-wrap:wrap;gap:4px;padding:2px 0 6px">`
+          +pins.map(id=>`<span style="font-size:.62rem;background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.3);border-radius:20px;padding:2px 8px;color:var(--pu);cursor:pointer" onclick="cfUnpinPlayer('${id}')" title="Tap to unpin">📌 ${esc(gp(id)?.name?.split(' ')[0]||'?')} ✕</span>`).join('')+'</div>'
+        :'';}
     // Locked pairs display
     const lpEl=document.getElementById('cf-locked-pairs-display');
     if(lpEl){
@@ -5824,7 +6049,7 @@ const CF={
         el.innerHTML=sorted.map((q,idx)=>{
           const p=gp(q.id),sp=gsp(q.id);
           const waitMin=Math.round((Date.now()-q.since)/60000);
-          const wcls=waitMin>=20?'cf-wait-hot':waitMin>=10?'cf-wait-warn':'cf-wait-ok';
+          const wcls=waitMin>=20?'cf-wait-hot':waitMin>=12?'cf-wait-warn':'cf-wait-ok';
           const er=this.cfRating(q.id);
           const rDisp=sp?.isNR?'<span class="nr-badge">NR</span>':Math.round(er);
           // Trigger cfRating to update hot/cold flags before reading them
@@ -5859,7 +6084,7 @@ const CF={
               <div style="flex:1;font-weight:600;font-size:.82rem">${esc(p?.name||'?')}${tagHtml(p)}</div>
               <div style="font-size:.7rem;color:var(--mu)" title="${_formTitle}">${_formLabel} ${_formVal} ${_pcVal}</div>
               <div style="font-size:.72rem;color:var(--mu)">${rDisp}</div>
-              <span class="cf-wait ${wcls}" title="${waitMin>=20?'Long wait — high priority':waitMin>=10?'Moderate wait':'Recently played'}">${waitMin}m</span>
+              <span class="cf-wait ${wcls}" title="${waitMin>=20?'Long wait — high priority':waitMin>=12?'Moderate wait':'Recently played'}">${waitMin}m</span>
               ${(()=>{
                 // Show quality indicator for this player's best current match if suggestion exists
                 const courtSugs=Object.values(S.session.cfSuggestions||{}).filter(sg=>sg&&sg.allIds?.includes(q.id));
@@ -5971,8 +6196,10 @@ function toggleCFAutoConfirm(){
   if(!S.session)return;
   S.session.cfAutoConfirm=!S.session.cfAutoConfirm;
   const btn=document.getElementById('cf-ac-toggle');
+  const dur=document.getElementById('cf-ac-dur');
   if(btn){btn.classList.toggle('bc',S.session.cfAutoConfirm);btn.classList.toggle('bg2',!S.session.cfAutoConfirm);}
-  toast(S.session.cfAutoConfirm?'Auto-confirm ON — 30s countdown per court ⚡':'Auto-confirm OFF',S.session.cfAutoConfirm?'ok':'warn');
+  if(dur)dur.style.display=S.session.cfAutoConfirm?'':'none';
+  toast(S.session.cfAutoConfirm?'Auto-confirm ON ⚡':'Auto-confirm OFF',S.session.cfAutoConfirm?'ok':'warn');
   STORE.save();
 }
 
@@ -6259,8 +6486,8 @@ function openQueueRulesModal(){
     </div>
     <div style="display:flex;flex-direction:column;gap:8px;font-size:.76rem">
       <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px">
-        <strong style="color:var(--tx)">1 · Waiting time first</strong><br/>
-        <span style="color:var(--mu)">Players who have waited longest get priority. Wait time is shown in the queue list.</span>
+        <strong style="color:var(--tx)">1 · Play equity first</strong><br/>
+        <span style="color:var(--mu)">No player plays twice while someone else hasn't played once. Players who've been sitting the longest move to the front automatically. Wait time is shown in the queue list.</span>
       </div>
       <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px">
         <strong style="color:var(--tx)">2 · Everyone plays once before anyone plays twice</strong><br/>
@@ -6436,30 +6663,49 @@ function renderPlayerView(){
       const inT1=m.t1.includes(id);
       const partner=gp((inT1?m.t1:m.t2).find(x=>x!==id));
       const opps=(inT1?m.t2:m.t1).map(x=>gp(x)?.name||'?').join(' & ');
+      const offset=S.session.courtOffset||0;
       statusHtml=`<div class="pv-match-now">
-        <div style="font-size:.68rem;font-weight:700;color:var(--cy);letter-spacing:.08em;margin-bottom:6px">▶ ON COURT ${cNum}</div>
+        <div style="font-size:.68rem;font-weight:700;color:var(--cy);letter-spacing:.08em;margin-bottom:6px">▶ ON COURT ${offset+parseInt(cNum)}</div>
         <div style="font-size:.82rem;color:var(--mu);margin-bottom:3px">Partner: <strong style="color:var(--tx)">${partner?esc(partner.name):'?'}</strong></div>
         <div style="font-size:.82rem;color:var(--mu)">vs <strong style="color:var(--re)">${esc(opps)}</strong></div>
       </div>`;
-    }else if(paused){
-      statusHtml=`<div class="pv-match-now" style="border-color:rgba(251,147,60,.3)">
-        <div style="font-size:.68rem;font-weight:700;color:var(--or);letter-spacing:.08em;margin-bottom:4px">⏸ PAUSED</div>
-        <div style="font-size:.74rem;color:var(--mu)">You're taking a break. Ask the organiser to resume you.</div>
-      </div>`;
-    }else if(inQueue){
-      const qi=(S.session.cfQueue||[]).findIndex(q=>q.id===id);
-      const totalQ=(S.session.cfQueue||[]).length;
-      const waitMin=Math.round((Date.now()-inQueue.since)/60000);
-      const upNext=qi<2;
-      statusHtml=`<div class="pv-match-now" style="border-color:${upNext?'var(--gr)':'rgba(34,211,238,.3)'}">
-        <div style="font-size:.68rem;font-weight:700;color:${upNext?'var(--gr)':'var(--cy)'};letter-spacing:.08em;margin-bottom:6px">${upNext?'🏓 UP NEXT!':'⏳ IN QUEUE'}</div>
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:2.2rem;color:${upNext?'var(--gr)':'var(--cy)'}">#${qi+1} <span style="font-size:1rem;color:var(--mu)">of ${totalQ}</span></div>
-        <div style="font-size:.74rem;color:var(--mu);margin-top:4px">Waited ${waitMin} min</div>
-      </div>`;
-    }else if(sp&&sp.status==='left'){
-      statusHtml=`<div class="pv-match-now" style="border-color:rgba(248,113,113,.3)">
-        <div style="font-size:.74rem;color:var(--re)">Marked as left this session.</div>
-      </div>`;
+    }else{
+      // Check if player is in a pending suggestion (waiting for organiser to confirm)
+      const inSug=Object.entries(S.session.cfSuggestions||{})
+        .find(([,sg])=>sg&&sg.allIds?.includes(id));
+      if(inSug){
+        const [sugCourt,sg]=inSug;
+        const offset=S.session.courtOffset||0;
+        const courtLabel=offset+parseInt(sugCourt);
+        const inT1=sg.t1.includes(id);
+        const partner=gp((inT1?sg.t1:sg.t2).find(x=>x!==id));
+        const opps=(inT1?sg.t2:sg.t1).map(x=>gp(x)?.name||'?').join(' & ');
+        statusHtml=`<div class="pv-match-now" style="border-color:rgba(52,217,116,.35)">
+          <div style="font-size:.68rem;font-weight:700;color:var(--gr);letter-spacing:.08em;margin-bottom:6px">🏓 SUGGESTED — COURT ${courtLabel}</div>
+          <div style="font-size:.82rem;color:var(--mu);margin-bottom:3px">Partner: <strong style="color:var(--tx)">${partner?esc(partner.name):'?'}</strong></div>
+          <div style="font-size:.82rem;color:var(--mu)">vs <strong style="color:var(--re)">${esc(opps)}</strong></div>
+          <div style="font-size:.7rem;color:var(--mu);margin-top:5px">Waiting for organiser to confirm ⏳</div>
+        </div>`;
+      }else if(paused){
+        statusHtml=`<div class="pv-match-now" style="border-color:rgba(251,147,60,.3)">
+          <div style="font-size:.68rem;font-weight:700;color:var(--or);letter-spacing:.08em;margin-bottom:4px">⏸ PAUSED</div>
+          <div style="font-size:.74rem;color:var(--mu)">You're taking a break. Ask the organiser to resume you.</div>
+        </div>`;
+      }else if(inQueue){
+        const qi=(S.session.cfQueue||[]).findIndex(q=>q.id===id);
+        const totalQ=(S.session.cfQueue||[]).length;
+        const waitMin=Math.round((Date.now()-inQueue.since)/60000);
+        const upNext=qi<2;
+        statusHtml=`<div class="pv-match-now" style="border-color:${upNext?'var(--gr)':'rgba(34,211,238,.3)'}">
+          <div style="font-size:.68rem;font-weight:700;color:${upNext?'var(--gr)':'var(--cy)'};letter-spacing:.08em;margin-bottom:6px">${upNext?'🏓 UP NEXT!':'⏳ IN QUEUE'}</div>
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:2.2rem;color:${upNext?'var(--gr)':'var(--cy)'}">#${qi+1} <span style="font-size:1rem;color:var(--mu)">of ${totalQ}</span></div>
+          <div style="font-size:.74rem;color:var(--mu);margin-top:4px">Waited ${waitMin} min</div>
+        </div>`;
+      }else if(sp&&sp.status==='left'){
+        statusHtml=`<div class="pv-match-now" style="border-color:rgba(248,113,113,.3)">
+          <div style="font-size:.74rem;color:var(--re)">Marked as left this session.</div>
+        </div>`;
+      }
     }
   }
 
@@ -6542,125 +6788,19 @@ function renderPlayerView(){
 
 
 // March 28 session data parsed from PDF
-function importMarch28Session(){
-  if(!confirm('Import March 28 session? This will add it to your archive and recalculate all ratings.'))return;
-  const BASE=1000;
-  // All players from the March 28 session
-  const names=['Vonn','An','David Liu','Quillon','Chantana','JayKtm','Matt','Konstantin',
-    'merbg','Martin Brown','Imm Pasara','Boss','Keziah','Magilian','KK','Huy','Jon',
-    'SayantanSen','Hwasaup','Aqwa','Hai long'];
-  // Ensure all players exist in db
-  names.forEach(name=>{
-    if(!S.db.find(p=>p.name===name)){
-      S.db.push({id:uid(),name,tag:'',rating:BASE,baseRating:BASE,
-        isNR:false,nrLevelHint:null,isSeeding:false,gamesPlayed:0,wins:0,losses:0,ties:0,
-        createdAt:'2025-03-28T15:00:00Z'});
-    }
-  });
-  const pid=n=>S.db.find(p=>p.name===n)?.id||null;
-  // 36 matches across 12 rounds, 3 courts
-  const matches=[
-    // Round 1
-    {t1:['Vonn','An'],t2:['David Liu','Quillon'],s1:11,s2:4,c:1},
-    {t1:['Chantana','JayKtm'],t2:['Matt','Konstantin'],s1:11,s2:3,c:2},
-    {t1:['merbg','Martin Brown'],t2:['Imm Pasara','Boss'],s1:8,s2:11,c:3},
-    // Round 2
-    {t1:['Martin Brown','Keziah'],t2:['merbg','Konstantin'],s1:11,s2:7,c:1},
-    {t1:['David Liu','Matt'],t2:['Aqwa','Quillon'],s1:7,s2:10,c:2},
-    {t1:['Magilian','KK'],t2:['Huy','Jon'],s1:11,s2:5,c:3},
-    // Round 3
-    {t1:['JayKtm','Hwasaup'],t2:['SayantanSen','Chantana'],s1:11,s2:0,c:1},
-    {t1:['Vonn','KK'],t2:['Magilian','An'],s1:6,s2:11,c:2},
-    {t1:['Boss','Keziah'],t2:['Aqwa','Imm Pasara'],s1:0,s2:11,c:3},
-    // Round 4
-    {t1:['Hwasaup','Jon'],t2:['SayantanSen','Huy'],s1:1,s2:11,c:1},
-    {t1:['Aqwa','JayKtm'],t2:['An','Imm Pasara'],s1:11,s2:2,c:2},
-    {t1:['Martin Brown','KK'],t2:['Vonn','Magilian'],s1:10,s2:11,c:3},
-    // Round 5
-    {t1:['SayantanSen','Hwasaup'],t2:['Chantana','Huy'],s1:10,s2:8,c:1},
-    {t1:['merbg','Keziah'],t2:['Quillon','Boss'],s1:11,s2:5,c:2},
-    {t1:['David Liu','Konstantin'],t2:['Matt','Jon'],s1:0,s2:11,c:3},
-    // Round 6
-    {t1:['Aqwa','Magilian'],t2:['Imm Pasara','JayKtm'],s1:11,s2:5,c:1},
-    {t1:['Vonn','Hwasaup'],t2:['SayantanSen','An'],s1:1,s2:11,c:2},
-    {t1:['Martin Brown','Huy'],t2:['KK','Keziah'],s1:11,s2:8,c:3},
-    // Round 7
-    {t1:['merbg','Jon'],t2:['Chantana','Matt'],s1:11,s2:5,c:1},
-    {t1:['David Liu','Boss'],t2:['Quillon','Konstantin'],s1:11,s2:9,c:2},
-    {t1:['Aqwa','An'],t2:['Magilian','JayKtm'],s1:11,s2:4,c:3},
-    // Round 8
-    {t1:['merbg','Huy'],t2:['Hai long','SayantanSen'],s1:11,s2:10,c:1},
-    {t1:['Martin Brown','Jon'],t2:['Imm Pasara','Keziah'],s1:10,s2:8,c:2},
-    {t1:['Vonn','Matt'],t2:['Hwasaup','Boss'],s1:11,s2:3,c:3},
-    // Round 9
-    {t1:['Hai long','Quillon'],t2:['Chantana','David Liu'],s1:4,s2:11,c:1},
-    {t1:['Aqwa','Konstantin'],t2:['Magilian','An'],s1:8,s2:6,c:2},
-    {t1:['merbg','SayantanSen'],t2:['Huy','JayKtm'],s1:4,s2:11,c:3},
-    // Round 10
-    {t1:['Martin Brown','Vonn'],t2:['Hai long','Jon'],s1:5,s2:11,c:1},
-    {t1:['Chantana','Keziah'],t2:['Imm Pasara','Matt'],s1:11,s2:9,c:2},
-    {t1:['Quillon','Boss'],t2:['Hwasaup','David Liu'],s1:0,s2:11,c:3},
-    // Round 11
-    {t1:['Hai long','Aqwa'],t2:['JayKtm','Konstantin'],s1:11,s2:3,c:1},
-    {t1:['Magilian','Jon'],t2:['An','Huy'],s1:11,s2:5,c:2},
-    {t1:['Martin Brown','SayantanSen'],t2:['merbg','David Liu'],s1:11,s2:8,c:3},
-    // Round 12
-    {t1:['Hai long','Keziah'],t2:['Chantana','Hwasaup'],s1:11,s2:6,c:1},
-    {t1:['Vonn','Imm Pasara'],t2:['Boss','Matt'],s1:11,s2:5,c:2},
-    {t1:['Aqwa','Jon'],t2:['Quillon','Konstantin'],s1:11,s2:0,c:3},
-  ];
-  // Build session players at startRating=1000
-  const sessPlayers=names.map(name=>({
-    id:pid(name),name,tag:'',isNR:false,isSeeding:false,
-    sRating:BASE,startRating:BASE,wins:0,losses:0,ties:0,matchesPlayed:0,
-    ptsFor:0,ptsAgainst:0,timeOnCourtMs:0,timeInQueueMs:0
-  })).filter(sp=>sp.id);
-  // Build cfLog (replay ELO in order)
-  const log=[];
-  let mc=0;
-  const tmpRatings={};
-  sessPlayers.forEach(sp=>{tmpRatings[sp.id]=BASE;});
-  matches.forEach(m=>{
-    const t1ids=m.t1.map(pid).filter(Boolean);
-    const t2ids=m.t2.map(pid).filter(Boolean);
-    if(t1ids.length<2||t2ids.length<2)return;
-    const deltas=ELO.calcIds(t1ids,t2ids,m.s1,m.s2);
-    log.push({courtNum:m.c,t1:t1ids,t2:t2ids,s1:m.s1,s2:m.s2,eloDeltas:deltas,
-      extended:false,startTime:0,endTime:720000,status:'done'});
-    // Update ratings for next match ELO calculation
-    [...t1ids,...t2ids].forEach((id,i)=>{
-      const sp=sessPlayers.find(p=>p.id===id);if(!sp)return;
-      sp.sRating=Math.max(400,sp.sRating+deltas[i]);
-      sp.matchesPlayed++;
-      const s1=i<2?m.s1:m.s2,s2=i<2?m.s2:m.s1;
-      sp.ptsFor+=s1;sp.ptsAgainst+=s2;
-      if(m.s1===m.s2)sp.ties++;else if((i<2&&m.s1>m.s2)||(i>=2&&m.s2>m.s1))sp.wins++;else sp.losses++;
-    });
-    mc++;
-  });
-  // Create the archived session
-  const sess={
-    id:'march28-2025',
-    name:'[SYR x APL] Weekend Pickles & Ladders',
-    date:'2025-03-28T15:00:00Z',
-    cfMode:true,courts:3,
-    players:sessPlayers,
-    cfLog:log,cfMatchCount:mc,
-    activePlayers:sessPlayers.map(sp=>sp.id)
-  };
-  // Remove if already exists
-  S.archive=S.archive.filter(a=>a.id!=='march28-2025');
-  S.archive.push(sess);
-  recalcAllTimeRatings();
-  STORE.save('db');renderDB();renderStandings();renderArchive();updatePvSessFilter();
-  toast('✅ March 28 session imported — '+mc+' matches, '+sessPlayers.length+' players, ratings recalculated','ok');
-}
 /* § BOOT */
 let PLAYER_MODE=false; // true when URL has ?view=player or #player
 
 function initPlayerMode(){
   PLAYER_MODE=isPlayerModeUrl();
   if(!PLAYER_MODE)return;
+  // Obfuscate URL — replace ?view=player with just #player in the address bar.
+  // Less obvious that removing the suffix gives organizer access.
+  // The PIN is the real security layer; this is a UX nicety on top.
+  try{
+    const cleanUrl=window.location.href.split('?')[0].split('#')[0]+'#player';
+    window.history.replaceState(null,'',cleanUrl);
+  }catch(e){/* replaceState blocked in some embedded contexts — non-fatal */}
   // Player-only view: show banner, hide all admin tabs, go straight to My Stats
   const banner=document.getElementById('player-mode-banner');
   if(banner)banner.style.display='block';
@@ -6670,10 +6810,19 @@ function initPlayerMode(){
   if(shareBtn)shareBtn.style.display='none';
   const lockBtn=document.getElementById('lock-btn');
   if(lockBtn)lockBtn.style.display='none';
+  // Also hide room code badge and sync badge — no need to expose room info to players
+  const roomBadge=document.getElementById('room-code-badge');
+  if(roomBadge)roomBadge.style.display='none';
+  const syncBadge=document.getElementById('sync-badge');
+  if(syncBadge)syncBadge.style.display='none';
   switchTab('player');
 }
 
 function init(){
+  // Pre-fill session name from last used value
+  const savedName=localStorage.getItem('pb_last_sess_name');
+  const nameEl=document.getElementById('sess-name-flow');
+  if(savedName&&nameEl&&!nameEl.value)nameEl.value=savedName;
   initCourtPills('cpills-setup',n=>{S.courts=n;renderRoster();});
   initCourtPills('cpills-live',n=>{
     S.courts=n;
