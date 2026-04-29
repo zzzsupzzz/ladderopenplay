@@ -740,12 +740,9 @@ const SYNC={
       this.ready=true;
       this.state='connected';
       this._updateBadge();
-      // Flush any write queued before this connection was established
-      if(this._pendingWrite&&(Date.now()-this._pendingWrite.ts<30000)){
-        console.log('[sync] Early-flush queued write on connect, segment:',this._pendingWrite.segment);
-        const pw=this._pendingWrite;this._pendingWrite=null;
-        setTimeout(()=>STORE.push(pw.segment,pw.onComplete),200);
-      }
+      // NOTE: pending write is flushed in _applyRemote after first load,
+      // NOT here — flushing here would race against the first Firebase response
+      // and could push stale local state over newer remote data.
       toast('🟢 Live — all devices connected','ok');
       return true;
     }catch(e){
@@ -860,7 +857,9 @@ const SYNC={
         return;
       }
 
-      const isStale=!isFirstLoad&&remoteTs>0&&remoteTs<localTs-2000;
+      // Stale guard: reject remote if it's more than 10s behind local last-save.
+      // 10s (not 2s) — mobile networks can have 3-5s delays between write and propagation.
+      const isStale=!isFirstLoad&&remoteTs>0&&remoteTs<localTs-10000;
       if(isStale){console.warn(`[sync] Rejected stale remote (${remoteTs}<${localTs})`);return;}
 
       // Version conflict: same version from different device = simultaneous write
@@ -7040,6 +7039,18 @@ function initPlayerMode(){
 
 function init(){
   _restoreAdvMode(); // must be first — sets data-adv before any render
+  // CRITICAL: Remove stale pb_room_id from localStorage.
+  // Old app versions stored a random room code here and connected to it.
+  // Current app uses only 'main'. Any leftover key causes devices to connect
+  // to the wrong room and silently show different data with a green 🟢 Live badge.
+  localStorage.removeItem('pb_room_id');
+  // Also clean up other old-version keys that no longer apply
+  localStorage.removeItem('pb16_sync_cfg'); // old: stored Firebase config in localStorage
+  // Remove admin tokens for rooms other than main (pb_adm_ROOMCODE format)
+  Object.keys(localStorage).forEach(k=>{
+    if(k.startsWith('pb_adm_')&&k!=='pb_adm_main')localStorage.removeItem(k);
+    if(k.startsWith('pb_dev_lock_')&&k!=='pb_dev_lock_main')localStorage.removeItem(k);
+  });
   // Set session name placeholder to current day and pre-fill from last used value
   const nameEl=document.getElementById('sess-name-flow');
   if(nameEl){
