@@ -3811,18 +3811,16 @@ function _doUnlock(){
   ADMIN_UNLOCKED=true;
   const inp=document.getElementById('admin-code-input');
   if(inp)inp.value='';
-  _setDeviceLocked(false);
   _hideAdminLockOverlay();
   const lb=document.getElementById('lock-btn');
   if(lb)lb.style.display=getAdminPin()?'inline-block':'none';
   updatePinStatus();
-  renderRoster(); // refresh start button state — now code is set
+  renderRoster();
 }
 
 function lockAdmin(){
   if(!getAdminPin()){toast('Set an Admin Code first (Setup tab → Admin Code)','warn');return;}
   ADMIN_UNLOCKED=false;
-  _setDeviceLocked(true);
   document.getElementById('lock-sub').textContent='Enter your admin code to continue.';
   document.getElementById('lock-sub').style.color='';
   const lb=document.getElementById('lock-btn');if(lb)lb.style.display='none';
@@ -3850,21 +3848,19 @@ function checkAdminAccess(){
   const pin=getAdminPin();
 
   if(!pin){
-    // No code set — open access mode. Grant access silently.
-    _doUnlock();
+    // No code set — open access. Grant silently but don't unlock if already showing overlay.
+    if(!ADMIN_UNLOCKED)_doUnlock();
     return;
   }
 
-  // Code is set: check persistent device lock state
-  if(_isDeviceLocked()){
+  // Code exists — always require entry if not already unlocked this session.
+  // ADMIN_UNLOCKED is in-memory only, resets to false on every page load.
+  // _isDeviceLocked() / _setDeviceLocked() are removed — lock is always required.
+  if(!ADMIN_UNLOCKED){
     const sub=document.getElementById('lock-sub');
     if(sub){sub.textContent='Enter your admin code to continue.';sub.style.color='';}
     _showAdminLockOverlay();
-    return;
   }
-
-  // Not locked (was previously unlocked on this device)
-  _doUnlock();
 }
 
 function updatePinStatus(){
@@ -3920,12 +3916,11 @@ async function _removePinModal(){
   showCfm('Remove admin code? Anyone will be able to access admin mode.','Remove Code','bd2',()=>{
     S.adminPin='';
     STORE.save();
-    _setDeviceLocked(false);
     ADMIN_UNLOCKED=true;
     _hideAdminLockOverlay();
     closeModal();
     updatePinStatus();
-    toast('Admin code removed','warn');
+    toast('Admin code removed — access is now open','warn');
   });
 }
 
@@ -3954,7 +3949,6 @@ function _resetPinAllDevices(){
     '🔑 Reset Code','bd2',()=>{
       S.adminPin='';
       STORE.save();                    // pushes null PIN to Firebase — affects all devices
-      _setDeviceLocked(false);         // this device: clear lock state (will show set-PIN prompt)
       ADMIN_UNLOCKED=false;
       closeModal();
       checkAdminAccess();              // show the lock overlay with set-PIN prompt
@@ -7013,8 +7007,8 @@ function init(){
   // Current app uses only 'main'. Any leftover key causes devices to connect
   // to the wrong room and silently show different data with a green 🟢 Live badge.
   localStorage.removeItem('pb_room_id');
-  // Also clean up other old-version keys that no longer apply
-  localStorage.removeItem('pb16_sync_cfg'); // old: stored Firebase config in localStorage
+  localStorage.removeItem('pb16_sync_cfg');
+  localStorage.removeItem('pb_dev_lock_main'); // no longer used — lock is session-only
   // Remove admin tokens for rooms other than main (pb_adm_ROOMCODE format)
   Object.keys(localStorage).forEach(k=>{
     if(k.startsWith('pb_adm_')&&k!=='pb_adm_main')localStorage.removeItem(k);
