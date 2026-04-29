@@ -904,6 +904,53 @@ const SYNC={
         // Fall through and apply remote — no dialog, no interruption
       }
 
+      // Anti-wipe guard: a newly-opened/incognito/empty device must never be able
+      // to replace a richer organiser state with a smaller database or no active game.
+      // This is the exact failure mode where incognito starts from empty Firebase and
+      // then all other devices suddenly mirror the incognito-only setup.
+      const localDbLen=S.db?.length||0;
+      const remoteDbLen=remote.db?.length||0;
+      const localHasLive=!!(S.session&&(S.session.status==='active'||S.session.status==='lobby'));
+      const remoteHasLive=!!(remote.session&&(remote.session.status==='active'||remote.session.status==='lobby'));
+      const incomingFromOther=remoteBy&&remoteBy!==DEVICE_ID;
+      const destructiveIncoming=!isFirstLoad&&incomingFromOther&&remoteTs>0&&(
+        (localDbLen>0&&remoteDbLen>0&&remoteDbLen<localDbLen) ||
+        (localHasLive&&!remoteHasLive) ||
+        ((S.session?.cfLog?.length||0)>0&&((remote.session?.cfLog||[]).length<(S.session?.cfLog?.length||0)))
+      );
+      if(destructiveIncoming){
+        console.warn('[sync] Blocked destructive remote update; restoring richer local state to Firebase',{
+          localDbLen,remoteDbLen,localHasLive,remoteHasLive,remoteBy
+        });
+        setTimeout(()=>STORE.save('all'),250);
+        toast('🛡️ Blocked empty/stale device from overwriting this game','warn',4500);
+        return;
+      }
+
+      // First-load completeness recovery: if this browser has a richer local backup
+      // than Firebase (common after Firebase was accidentally overwritten by incognito),
+      // restore the richer local snapshot even if the remote write is newer.
+      if(isFirstLoad&&remoteTs>0){
+        const richerLocal=(localDbLen>remoteDbLen&&localDbLen>=4)||
+          (localHasLive&&!remoteHasLive)||
+          ((S.session?.cfLog?.length||0)>((remote.session?.cfLog||[]).length||0));
+        const localLooksReal=localDbLen>0&&(S.session||S.archive?.length>0||S.adminPin);
+        if(richerLocal&&localLooksReal){
+          console.warn('[sync] First-load: local snapshot is richer than Firebase — restoring local to Firebase',{
+            localDbLen,remoteDbLen,localHasLive,remoteHasLive
+          });
+          setTimeout(()=>STORE.save('all'),250);
+          _stopLoadingProgressTimer();
+          const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
+          _pageFirstLoad=false;
+          HAS_REMOTE_HYDRATED=true;
+          checkAdminAccess();
+          _renderActiveTab();
+          toast('📦 Restored richer local database back to Firebase','ok',5000);
+          return;
+        }
+      }
+
       // cfLog shrink guard
       const localCfLogLen=S.session?.cfLog?.length||0;
       const remoteCfLogLen=remote.session?.cfLog?.length||0;
@@ -5351,10 +5398,10 @@ const CF={
       if(i<2){sp.ptsFor+=s1;sp.ptsAgainst+=s2;}else{sp.ptsFor+=s2;sp.ptsAgainst+=s1;}
       if(s1===s2)sp.ties=(sp.ties||0)+1;else if((i<2&&s1>s2)||(i>=2&&s2>s1))sp.wins++;else sp.losses++;
     });
-    [...m.t1,...m.t2].forEach(id=>checkNRPromotion(id));
+    const hasNR=[...m.t1,...m.t2].some(mid=>gp(mid)?.isNR||gsp(mid)?.isNR);
+    const _anyPromo=[...m.t1,...m.t2].map(id=>checkNRPromotion(id)).some(Boolean);
+    if(_anyPromo)STORE.save(); // one save for all promotions in this match
     // Track NR pairing distribution
-  const _anyPromo=[...m.t1,...m.t2].map(id=>checkNRPromotion(id)).some(Boolean);
-  if(_anyPromo)STORE.save(); // one save for all promotions in this match
     if(hasNR){
       if(!S.session.nrPairingHx)S.session.nrPairingHx={};
       [...m.t1,...m.t2].forEach(mid=>{
@@ -7041,7 +7088,7 @@ function initPlayerMode(){
 
 function init(){
   _restoreAdvMode();
-  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v1');
+  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v2 anti-wipe + score-submit fix');
   // One-time clear of old local backups that don't include adminPin.
   // Without this, the old backup (adminPin missing) gets restored first, briefly
   // showing "No admin code" until Firebase responds. New backups include adminPin.
