@@ -979,6 +979,10 @@ const SYNC={
 
       S.db=remote.db||[];
       S.session=remote.session||null;
+      // v7: if a stale/corrupt mobile snapshot ever produced CF suggestions/courts with
+      // player ids not present in the authoritative DB, remove only the suggestions.
+      // Active court matches are kept, but will render '?' only if Firebase session is truly corrupt.
+      const _validDbIds=new Set((S.db||[]).map(p=>p.id));
       S.archive=preservedArchive||(remote.archive||[]);
       if(preservedCfLog&&S.session)S.session.cfLog=preservedCfLog;
       if(adminPinVal){
@@ -999,6 +1003,10 @@ const SYNC={
           // players are no longer in the queue / are already on another court. This prevents
           // Device B from showing stale "ready to confirm" cards above already-started courts.
           S.session.cfSuggestions=S.session.cfSuggestions||{};
+          Object.entries(S.session.cfSuggestions||{}).forEach(([c,sug])=>{
+            const ids=sug?.allIds||[];
+            if(ids.length&&ids.some(id=>!_validDbIds.has(id)))delete S.session.cfSuggestions[c];
+          });
           Object.entries(localSugs).forEach(([c,sug])=>{
             const ct=S.session.cfCourts?.[c];
             const queueIds=new Set((S.session.cfQueue||[]).map(q=>q.id));
@@ -6649,8 +6657,8 @@ function _startLoadingProgressTimer(){
       const fl2=document.getElementById('fb-loading');
       if(!fl2||fl2.classList.contains('hidden'))return;
       const backup=_getLocalBackup();
-      if(backup&&backup.db&&backup.db.length>0){
-        // Auto-dismiss: show cached data, Firebase still syncing in background
+      if(false&&backup&&backup.db&&backup.db.length>0){
+        // v7 disabled: do not show cached data before Firebase. Firebase must win on first load.
         fl2.classList.add('hidden');
         _pageFirstLoad=false;
         if(sub)sub.textContent='Connecting…';
@@ -6741,8 +6749,9 @@ function _trackConnection(db){
       // Just came online
       SYNC._updateBadge();
       const el=document.getElementById('save-status');
-      if(el&&el.textContent==='⚡ offline'){
-        // Had pending save — attempt now
+      if(el&&el.textContent==='⚡ offline'&&HAS_REMOTE_HYDRATED){
+        // Had pending save after a confirmed Firebase hydration — attempt now.
+        // Never push an old mobile local backup before the first remote read.
         _setSaveStatus('saving');
         SYNC.push('all');
       }
@@ -7196,7 +7205,7 @@ function initPlayerMode(){
 
 function init(){
   _restoreAdvMode();
-  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v6 remote-wins mobile stale-cache lock');
+  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v7 remote-only first load + no mobile stale restore');
   // One-time clear of old local backups that don't include adminPin.
   // Without this, the old backup (adminPin missing) gets restored first, briefly
   // showing "No admin code" until Firebase responds. New backups include adminPin.
@@ -7237,8 +7246,10 @@ function init(){
   document.getElementById('cfm-bg').addEventListener('click',function(e){if(e.target===this)document.getElementById('cfm-no').click();});
   initPlayerMode();
 
-  // Auto-restore local snapshot immediately — app is usable before Firebase responds
-  const _didRestore=_autoRestoreFromLocal();
+  // v7: Do NOT auto-render/push local backup on startup when Firebase is the source of truth.
+  // Old mobile browsers can keep a stale snapshot even after a visible cache clear; showing it
+  // before Firebase responds creates ghost courts / '?' players and can re-push old sessions.
+  const _didRestore=false;
 
   SYNC._updateBadge('connecting');
   _startLoadingProgressTimer(); // progressive messages + auto-dismiss on slow WiFi
