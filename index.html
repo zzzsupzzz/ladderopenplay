@@ -6,11 +6,11 @@
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>🏓 Pickleball Ladder V20</title>
+<title>🏓 Pickleball Ladder</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
-/* V12 additions */
+/* ── Base styles ── */
 #prog-wrap{height:3px;background:var(--s2,#112236);position:sticky;top:87px;z-index:190}
 #prog-bar{height:100%;background:linear-gradient(90deg,#34d974,#22d3ee);width:0%;transition:width .5s ease}
 #elapsed{font-family:'Bebas Neue',sans-serif;font-size:.73rem;color:var(--m2,#3d5a77);letter-spacing:.5px;display:none;line-height:1;margin-top:1px;text-align:center}
@@ -40,21 +40,14 @@
 #fb-loading.hidden{display:none}
 .fb-spinner{width:36px;height:36px;border:3px solid var(--s3);border-top-color:var(--gr);border-radius:50%;animation:spin .9s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-/* V16 — Admin PIN overlay */
+/* ── Admin lock overlay ── */
 #admin-lock{position:fixed;inset:0;background:rgba(7,16,26,.97);z-index:9000;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:24px}
 #admin-lock.open{display:flex}
 .lock-box{background:var(--sf);border:1px solid var(--bd);border-radius:var(--rl);padding:28px 22px;max-width:340px;width:100%;text-align:center}
 .lock-title{font-family:'Bebas Neue',sans-serif;font-size:1.4rem;letter-spacing:1px;color:var(--gr);margin-bottom:8px}
 .lock-sub{font-size:.76rem;color:var(--mu);margin-bottom:14px;line-height:1.55}
-.pin-dots{display:flex;gap:10px;justify-content:center;margin-bottom:16px}
-.pin-dot{width:14px;height:14px;border-radius:50%;background:var(--s3);border:2px solid var(--bd);transition:all .15s}
-.pin-dot.filled{background:var(--gr);border-color:var(--gr)}
-.pin-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:220px;margin:0 auto}
-.pin-key{background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:14px 6px;font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--tx);cursor:pointer;transition:all .12s;user-select:none}
-.pin-key:hover{background:var(--s3);border-color:var(--m2)}
-.pin-key:active{transform:scale(.93)}
-.pin-key.del{font-size:.85rem;color:var(--mu)}
-/* V16 — delete buttons in history */
+/* pin-pad CSS removed — replaced by text input */
+/* ── Edit/delete buttons ── */
 .del-btn{background:none;border:none;cursor:pointer;font-size:.72rem;color:var(--re);opacity:.5;padding:2px 5px;border-radius:5px;font-family:'DM Sans',sans-serif;font-weight:600;transition:opacity .12s}
 .del-btn:hover{opacity:1;background:rgba(248,113,113,.1)}
 /* Court timers */
@@ -110,6 +103,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--tx);min-h
 #htimer{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--cy);letter-spacing:2px;min-width:52px;text-align:center;display:none}
 #htimer.urg{color:var(--or)!important;animation:blink .8s steps(1) infinite}
 @keyframes blink{50%{opacity:.3}}
+/* ── Advanced mode: .adv-only items hidden until "More" is toggled ── */
+.adv-only{display:none!important}
+[data-adv] .adv-only{display:revert!important}
+[data-adv] #adv-mode-btn{border-color:var(--cy)!important;color:var(--cy)!important}
 #hbadge{font-size:.7rem;font-weight:700;padding:3px 10px;border-radius:20px;background:var(--s2);border:1px solid var(--bd);color:var(--mu)}
 #hbadge.live{border-color:var(--gr);color:var(--gr)}
 
@@ -308,44 +305,21 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <div id="fb-loading-sub" style="font-size:.72rem;color:var(--mu)">Connecting to Firebase</div>
     <button id="fb-retry-btn" class="btn bs sm" style="display:none;margin-top:4px" onclick="SYNC.ready=false;SYNC.autoConnect()">🔄 Retry</button>
     <button id="fb-restore-btn" class="btn bc sm" style="display:none;margin-top:4px" onclick="_restoreFromLocal()">📦 Restore last local backup</button>
-    <div id="fb-room-recovery" style="display:none;margin-top:16px;max-width:280px;text-align:center">
-      <div style="font-size:.7rem;color:var(--mu);margin-bottom:8px;line-height:1.5">
-        No local data found. If you have a room code<br/>from a previous session, enter it below.
-      </div>
-      <div style="display:flex;gap:6px">
-        <input id="fb-room-inp" class="inp" placeholder="Room code (e.g. ABC1234)" style="flex:1;font-size:.8rem;text-transform:uppercase;letter-spacing:.05em" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')_recoverRoom()"/>
-        <button class="btn bp sm" onclick="_recoverRoom()">↩ Rejoin</button>
-      </div>
-      <div style="font-size:.64rem;color:var(--mu);margin-top:6px">Find your code in Firebase console → Realtime Database → rooms/</div>
-    </div>
   </div>
 </div>
 
-<!-- ADMIN PIN LOCK OVERLAY -->
+<!-- ADMIN CODE LOCK OVERLAY -->
 <div id="admin-lock">
   <div class="lock-box">
-    <div class="lock-title">🔒 Admin Access</div>
-    <div class="lock-sub" id="lock-sub">Enter your admin PIN to continue.</div>
-    <div class="pin-dots" id="pin-dots">
-      <div class="pin-dot" id="pd0"></div>
-      <div class="pin-dot" id="pd1"></div>
-      <div class="pin-dot" id="pd2"></div>
-      <div class="pin-dot" id="pd3"></div>
-    </div>
-    <div class="pin-pad">
-      <div class="pin-key" onclick="pinKey('1')">1</div>
-      <div class="pin-key" onclick="pinKey('2')">2</div>
-      <div class="pin-key" onclick="pinKey('3')">3</div>
-      <div class="pin-key" onclick="pinKey('4')">4</div>
-      <div class="pin-key" onclick="pinKey('5')">5</div>
-      <div class="pin-key" onclick="pinKey('6')">6</div>
-      <div class="pin-key" onclick="pinKey('7')">7</div>
-      <div class="pin-key" onclick="pinKey('8')">8</div>
-      <div class="pin-key" onclick="pinKey('9')">9</div>
-      <div class="pin-key" style="grid-column:1" onclick="pinKey('0')">0</div>
-      <div class="pin-key del" onclick="pinDel()">⌫</div>
-    </div>
-    <div style="margin-top:14px;font-size:.68rem;color:var(--m2)">Shared with co-admins · Players use the Player Link</div>
+    <div class="lock-title">🔐 Admin Access</div>
+    <div class="lock-sub" id="lock-sub">Enter your admin code to continue.</div>
+    <input id="admin-code-input" class="inp" type="password"
+      placeholder="Admin code"
+      style="text-align:center;font-size:1.1rem;letter-spacing:3px;margin:12px 0;width:100%;max-width:240px"
+      onkeydown="if(event.key==='Enter')_submitAdminCode()"
+      autocomplete="current-password"/>
+    <button class="btn bp" style="width:100%;max-width:240px;margin-bottom:8px" onclick="_submitAdminCode()">Unlock</button>
+    <div style="margin-top:8px;font-size:.68rem;color:var(--m2)">Co-admins use the same code · Players use the Player Link</div>
   </div>
 </div>
 
@@ -360,12 +334,12 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
       <div id="elapsed"></div>
     </div>
     <button id="share-btn" onclick="openShareModal()" style="font-size:.69rem;font-weight:600;padding:4px 9px;border-radius:20px;background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.3);color:var(--pu);cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">📱 Share</button>
-    <span id="room-code-badge" onclick="openSyncModal()" title="Room code — click to manage" style="font-size:.65rem;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--s2);border:1px solid var(--bd);color:var(--mu);cursor:pointer;white-space:nowrap">📡 —</span>
     <span id="save-status" style="font-size:.63rem;color:var(--mu);white-space:nowrap">—</span>
-    <span id="sync-badge" onclick="openSyncModal()" title="Live sync settings">⚪ Sync Off</span>
-    <span id="admin-mode-badge" style="font-size:.6rem;color:var(--or);display:none" title="No PIN set — admin access is open to anyone on this device">🔓</span>
+    <span id="sync-badge" onclick="openSyncModal()" title="Live sync status" style="cursor:pointer">⚪</span>
+    <span id="admin-mode-badge" style="font-size:.6rem;color:var(--or);display:none" title="No admin code — access is open">🔓</span>
+    <button id="adv-mode-btn" onclick="toggleAdvMode()" title="Show/hide advanced tools (Lock pair, audit log, auto-confirm, quality)" style="background:none;border:1px solid var(--bd);cursor:pointer;font-size:.64rem;color:var(--mu);padding:2px 8px;border-radius:12px;font-family:'DM Sans',sans-serif;white-space:nowrap">More</button>
     <span id="hbadge">SETUP</span>
-    <button id="lock-btn" onclick="lockAdmin()" title="Lock admin" style="display:none;background:none;border:none;cursor:pointer;font-size:1rem;color:var(--mu);padding:2px 4px">🔒</button>
+    <button id="lock-btn" onclick="lockAdmin()" title="Lock admin access" style="display:none;background:none;border:none;cursor:pointer;font-size:1rem;color:var(--mu);padding:2px 4px">🔒</button>
   </div>
 </header>
 
@@ -400,7 +374,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <div id="flow-mode-opts">
       <div style="margin-bottom:8px"><label>SESSION NAME</label><input id="sess-name-flow" class="inp" placeholder="Saturday Open Play…"/></div>
       <div class="g2" style="margin-bottom:8px">
-        <div><label>EXTENDED FLAG (MIN)</label><input id="extended-min" class="inp" type="number" value="16" min="8" max="60" title="Flag a court as ⏰ Extended after this many minutes — visual warning only"/></div>
+        <div><label>GAME DURATION WARNING (MIN)</label><input id="extended-min" class="inp" type="number" value="16" min="8" max="60" title="Flag a court as ⏰ Extended after this many minutes — visual warning only"/></div>
       </div>
       <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px;font-size:.74rem;color:var(--mu);line-height:1.7">
         <span style="color:var(--cy);font-weight:700">Skill-based queue</span> — best match pulled when a court opens.<br/>
@@ -419,11 +393,12 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
   </div>
 
   <div class="card" id="admin-pin-card">
-    <div class="ct">🔐 Admin PIN
-      <button class="btn bg2 sm" style="margin-left:auto" onclick="openPinSetupModal()">Change PIN</button>
+    <div class="ct">🔐 Admin Code
+      <span style="font-size:.63rem;font-weight:700;padding:2px 7px;border-radius:12px;background:rgba(248,113,113,.15);color:var(--re);margin-left:6px" id="pin-required-badge">Required</span>
+      <button class="btn bg2 sm" style="margin-left:auto" onclick="openPinSetupModal()">Change Admin Code</button>
     </div>
     <div style="font-size:.75rem;color:var(--mu);line-height:1.55">
-      Set a 4-digit PIN to protect admin access. Share with co-admins. Players use the 📱 Player Link — they never need the PIN.<br/>
+      Required before starting a session. Prevents players from accessing organiser controls. Share with co-admins only.<br/>
       <span id="pin-status" style="color:var(--go);font-weight:600"></span>
     </div>
   </div>
@@ -462,7 +437,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <p style="font-size:.68rem;color:var(--mu);margin-bottom:8px">Same name? Use Tag — "Alex #7" vs "Alex Jr."</p>
     <div style="display:flex;gap:6px;margin-bottom:7px">
       <input id="db-search" class="inp" placeholder="🔍 Search players…" oninput="renderDB()" style="flex:1"/>
-      <button id="db-absent-btn" class="btn bg2 sm" onclick="toggleDbAbsent()" title="Show only players not yet checked in">⬜ Absent</button>
+      <button id="db-absent-btn" class="btn bg2 sm" onclick="toggleDbAbsent()" title="Show only players not yet checked in">Absent</button>
       <button class="btn bg2 sm" onclick="selectAll()">☑ All</button>
       <button class="btn bg2 sm" onclick="selectNone()">☐ None</button>
     </div>
@@ -492,14 +467,14 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
         </div>
         <div style="display:flex;gap:5px;flex-wrap:wrap">
           <button class="btn bs sm" onclick="openRosterModal()">👤 Players ±</button>
-          <button id="cf-ac-toggle" class="btn bg2 sm" onclick="toggleCFAutoConfirm()" title="Auto-confirm suggestions after timer">⚡ Auto</button>
-          <select id="cf-ac-dur" class="inp" style="width:70px;font-size:.72rem;padding:4px 6px;display:none" onchange="S.session&&(S.session.cfAutoConfirmDur=+this.value)" title="Auto-confirm delay">
+          <button id="cf-ac-toggle" class="btn bg2 sm adv-only" onclick="toggleCFAutoConfirm()" title="Auto-confirm suggestions after timer">⚡ Auto</button>
+          <select id="cf-ac-dur" class="inp adv-only" style="width:70px;font-size:.72rem;padding:4px 6px;display:none" onchange="S.session&&(S.session.cfAutoConfirmDur=+this.value)" title="Auto-confirm delay">
             <option value="30">30s</option>
             <option value="60">60s</option>
             <option value="90">90s</option>
           </select>
           <span style="width:1px;height:20px;background:var(--bd);display:inline-block;margin:0 2px"></span>
-          <button class="btn bd2" onclick="doEndSession()" style="opacity:.7" title="End this session and save all results">🏁 End</button>
+          <button class="btn bd2" onclick="doEndSession()" title="End this session and save all results">🏁 End</button>
         </div>
       </div>
     </div>
@@ -509,9 +484,9 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
     <div class="card">
       <div class="ct">⏳ Queue <span id="cf-queue-badge" style="font-size:.66rem;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(34,211,238,.1);color:var(--cy)">0</span>
         <button onclick="openQueueRulesModal()" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;align-items:center;gap:1px" title="How the queue works"><span style="font-size:.75rem">ℹ️</span><span>Rules</span></button>
-        <button onclick="openLockPairModal()" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;align-items:center;gap:1px" title="Lock two players as permanent partners this session"><span style="font-size:.75rem">🔒</span><span>Lock</span></button>
-        <button onclick="changeCourtsMidSession()" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;align-items:center;gap:1px" title="Change court count or court start number"><span style="font-size:.75rem">⚙</span><span>Courts</span></button>
-        <button onclick="AUDIT.open()" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;align-items:center;gap:1px" title="Audit log — organiser actions this session"><span style="font-size:.75rem">📋</span><span>Log</span></button>
+        <button onclick="openLockPairModal()" class="adv-only" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;flex-direction:column;align-items:center;gap:1px" title="Lock two players as permanent partners this session"><span style="font-size:.75rem">🔒</span><span>Lock</span></button>
+        <button onclick="changeCourtsMidSession()" class="adv-only" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;flex-direction:column;align-items:center;gap:1px" title="Change court count or court start number"><span style="font-size:.75rem">⚙</span><span>Courts</span></button>
+        <button onclick="AUDIT.open()" class="adv-only" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;flex-direction:column;align-items:center;gap:1px" title="Audit log — organiser actions this session"><span style="font-size:.75rem">📋</span><span>Log</span></button>
       </div>
       <div id="cf-locked-pairs-display"></div>
       <div id="cf-pinned-display"></div>
@@ -610,8 +585,8 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 //  § CF TIMERS      — per-court timers, CFtick
 //  § BOOT           — DOMContentLoaded init
 // ================================================================
-//  🏓 PICKLEBALL LADDER V20
-//  ── V15 CHANGES ──────────────────────────────────────────────
+//  🏓 PICKLEBALL LADDER — single-file app
+
 //  • NEW: Real-time cross-device sync via Firebase Realtime DB
 //    — Multiple admins on laptop, phone, tablet all stay in sync
 //    — Every STORE.save() pushes to Firebase instantly
@@ -624,7 +599,6 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 //    — Dropdown still works normally for selection
 //    — Clear button to reset search
 //  ── CARRIED FROM V14 ─────────────────────────────────────────
-//  • Fresh pb15_* localStorage (no old-data migration)
 //  • MOV ELO: binary win/loss + margin-of-victory K-factor
 //  • Session-performance matchmaking boost
 //  • BroadcastChannel same-browser tab sync
@@ -647,40 +621,9 @@ function _generateRoomId(){
   const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no O/0/1/I (ambiguous)
   return Array.from({length:7},()=>chars[Math.floor(Math.random()*chars.length)]).join('');
 }
-function _getOrCreateRoomId(){
-  let id=localStorage.getItem('pb_room_id');
-  if(!id||id.length<4){id=_generateRoomId();localStorage.setItem('pb_room_id',id);}
-  return id;
-}
 // ACTION 2 — Join / Switch Room
 // Local only. No write to old room, no write to new room until Firebase first-load.
 // Other devices on the old room are unaffected.
-function generateNewRoom(){
-  showCfm(
-    `<strong>Switch to a new room?</strong><br/>
-    <span style="font-size:.74rem;color:var(--mu)">This device leaves the current room and connects to a fresh one. <strong>Other devices are not affected</strong> — the old room data stays intact.</span>`,
-    '🔀 New Room','bc',()=>{
-      const prevRoomId=SYNC.roomId||localStorage.getItem('pb_room_id')||'local';
-      const newId=_generateRoomId();
-      // Clear this device's local data for the old room — no Firebase write
-      localStorage.removeItem('pb_local_backup');
-      localStorage.removeItem(`pb_adm_${prevRoomId}`);
-      localStorage.setItem('pb_room_id',newId);
-      SYNC.clearConfig();
-      SYNC.autoConnect(); // connects to new room; reads whatever is there (probably empty)
-      closeModal();
-    }
-  );
-}
-function _updateRoomBadge(){
-  const el=document.getElementById('room-code-badge');
-  if(!el)return;
-  const id=SYNC.roomId||localStorage.getItem('pb_room_id')||'—';
-  const ver=S._version?`v${S._version}`:'—';
-  const lastSave=S._lastSaveTs?new Date(S._lastSaveTs).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'never';
-  el.textContent=`📡 ${id}`;
-  el.title=`Room: ${id} | Version: ${ver} | Last sync: ${lastSave} — click to manage`;
-}
 
 /* ── CF simultaneous-finish batch debounce ─────────────── */
 // scheduleCFBatch removed in V19: suggestions are now generated synchronously
@@ -710,40 +653,23 @@ const SYNC={
   // ACTION 1 — Leave Device Only
   // Local only. No Firebase write. Room data stays intact for other devices.
   // Clears this device's listener, localStorage keys, and in-memory state.
-  leaveRoom(){
-    const prevRoomId=this.roomId||localStorage.getItem('pb_room_id')||'local';
-    this.clearConfig();
-    localStorage.removeItem('pb_room_id');
-    localStorage.removeItem('pb_local_backup');
-    localStorage.removeItem(`pb_adm_${prevRoomId}`);
-    // Reset local in-memory state only — no STORE.save(), no Firebase write
-    S.db=[];S.session=null;S.archive=[];S.checkedIn.clear();
-    ADMIN_UNLOCKED=false;
-    renderDB();renderRoster();renderHistory();renderArchive();renderStandings();
-    updateHeader();updatePinStatus();_updateRoomBadge();
-    switchTab('setup');
-    _setSaveStatus('idle');
-    toast('Left room — data intact for other devices','ok');
-  },
+  // leaveRoom() removed — single fixed room, no room-switching needed
 
   // ACTION 3 — Reset Shared Room Data
   // Destructive global action. Writes null to Firebase — wipes room for ALL devices.
   // Must be called after explicit confirmation only.
   resetSharedRoom(){
-    if(!this.ready||!this.ref){toast('Not connected — cannot reset room','err');return;}
+    if(!this.ready||!this.ref){toast('Not connected — cannot wipe data','err');return;}
     this.ref.set(null).then(()=>{
-      const prevRoomId=this.roomId||localStorage.getItem('pb_room_id')||'local';
       this.clearConfig();
-      localStorage.removeItem('pb_room_id');
       localStorage.removeItem('pb_local_backup');
-      localStorage.removeItem(`pb_adm_${prevRoomId}`);
       S.db=[];S.session=null;S.archive=[];S.checkedIn.clear();
       ADMIN_UNLOCKED=false;
       renderDB();renderRoster();renderHistory();renderArchive();renderStandings();
-      updateHeader();updatePinStatus();_updateRoomBadge();
+      updateHeader();updatePinStatus();
       switchTab('setup');
       _setSaveStatus('idle');
-      toast('Room wiped — all devices will see empty state','warn',5000);
+      toast('All data wiped — all devices cleared','warn',5000);
     }).catch(e=>{
       toast('Reset failed: '+e.message,'err');
     });
@@ -764,13 +690,14 @@ const SYNC={
   },
 
   async connect(cfg,roomId){
+    // roomId param kept for backward compat but always overridden with fixed room
+    const FIXED_ROOM='main';
     this._updateBadge('connecting');
     try{
       await this._loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
       await this._loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js');
       if(!window.firebase)throw new Error('Firebase SDK failed to load');
-      // Use a named app ('pb16') so re-initialization is safe across page reloads
-      // and doesn't conflict with any other Firebase app on the page
+            // and doesn't conflict with any other Firebase app on the page
       let app;
       const APP_NAME='pb16';
       const existingApp=window.firebase.apps.find(a=>a.name===APP_NAME);
@@ -785,8 +712,8 @@ const SYNC={
         const t=setTimeout(()=>rej(new Error('Connection timeout — check internet or Firebase config')),8000);
         db.ref('.info/connected').once('value',snap=>{clearTimeout(t);res(snap.val());}).catch(e=>{clearTimeout(t);rej(e);});
       });
-      this.roomId=roomId;
-      this.ref=db.ref(`pb_ladder/${roomId}`);
+      this.roomId=FIXED_ROOM;
+      this.ref=db.ref(`pb_ladder/${FIXED_ROOM}`);
       // Track real-time connection state for save-status and offline detection
       _trackConnection(db);
       // Remove any existing listener before adding new one
@@ -811,7 +738,7 @@ const SYNC={
       this.ready=true;
       this.state='connected';
       this._updateBadge();
-      toast(`🟢 Live sync ON — Room ${roomId}`,'ok');
+      toast('🟢 Live — all devices connected','ok');
       return true;
     }catch(e){
       this.ready=false;this.state='error';this._updateBadge();
@@ -990,7 +917,7 @@ const SYNC={
             if(el.parentNode){
               el.remove();
               _resolveConflict(true);
-              toast('Sync conflict auto-resolved — kept your version (no action taken)','ok',4000);
+              toast('📲 Another device made changes — your version kept','ok',4000);
             }
           },30000);
         },50);
@@ -1092,25 +1019,25 @@ const SYNC={
         // First-launch PIN prompt: fires once when a brand-new empty room is created.
         // Condition: no PIN set, no players in DB, not player mode, not already prompted.
         const isNewEmptyRoom=!getAdminPin()&&!S.db?.length&&!S.archive?.length&&!PLAYER_MODE;
-        const alreadyPrompted=sessionStorage.getItem('pb_pin_prompted');
+        const alreadyPrompted=localStorage.getItem('pb_pin_prompted');
         if(isNewEmptyRoom&&!alreadyPrompted){
-          sessionStorage.setItem('pb_pin_prompted','1');
+          localStorage.setItem('pb_pin_prompted','1');
           setTimeout(()=>{
-            openModal(`<div class="modal-title">🔐 Set an Admin PIN?</div>
-              <p style="font-size:.76rem;color:var(--mu);line-height:1.6;margin-bottom:14px">
-                Your room is ready. We recommend setting a 4-digit PIN so players can't accidentally access organiser controls.<br/>
-                <span style="color:var(--go)">Players use the Player Link — they never need the PIN.</span>
+            openModal(`<div class="modal-title">🔐 Set Admin Code</div>
+              <p style="font-size:.76rem;color:var(--mu);line-height:1.6;margin-bottom:6px">
+                Protect organiser controls with an admin code before going live.
               </p>
-              <div style="display:flex;gap:7px">
-                <button class="btn bp" style="flex:2" onclick="closeModal();openPinSetupModal()">🔐 Set PIN now</button>
-                <button class="btn bg2" onclick="closeModal()">Skip for now</button>
-              </div>`);
-          },800); // slight delay so the UI settles first
+              <p style="font-size:.73rem;color:var(--go);margin-bottom:14px">
+                📱 Players use the Player Link and never need this code.
+              </p>
+              <button class="btn bp" style="width:100%;margin-bottom:7px" onclick="closeModal();openPinSetupModal()">🔐 Set Admin Code →</button>
+              <p style="font-size:.65rem;color:var(--mu);text-align:center">You can change or remove it any time from Setup → Admin Code.</p>`);
+          },800);
         }
       }else{
         _renderActiveTab();
         const rb=data?.meta?._by||data?._by||'';
-        if(rb&&rb!==DEVICE_ID)toast('🔄 Synced from another device','ok');
+        if(rb&&rb!==DEVICE_ID)toast('📲 Updated from another organiser','ok');
       }
     }catch(e){
       console.error('[sync] _applyRemote error',e);
@@ -1131,15 +1058,11 @@ const SYNC={
         if(!document.getElementById('sync-error-banner')){
           const b=document.createElement('div');
           b.id='sync-error-banner';
-          b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:rgba(248,113,113,.15);border-bottom:2px solid rgba(248,113,113,.4);padding:8px 16px;font-size:.73rem;font-weight:600;color:var(--re);text-align:center;font-family:"DM Sans",sans-serif';
+          b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:rgba(251,147,60,.12);border-bottom:2px solid rgba(251,147,60,.4);padding:7px 16px;font-size:.72rem;font-weight:600;color:var(--or);text-align:center;font-family:"DM Sans",sans-serif';
           const lobbyEscape=S.session?.status==='lobby'
             ?` &nbsp;·&nbsp; <a href="#" onclick="discardLobby();document.getElementById('sync-error-banner')?.remove();return false" style="color:var(--mu);text-decoration:underline">Discard check-in</a>`
             :'';
-          const noData=!S.db?.length&&!S.archive?.length;
-          const roomRecover=noData
-            ?` &nbsp;·&nbsp; <span style="color:var(--mu)">Have a room code? </span><input id="banner-room-inp" placeholder="ABC1234" style="width:80px;background:var(--s2);border:1px solid var(--bd);border-radius:4px;color:var(--tx);font-size:.7rem;padding:2px 5px;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')_recoverRoom()"/> <a href="#" onclick="_recoverRoomFromBanner();return false" style="color:var(--cy);text-decoration:underline">Rejoin</a>`
-            :'';
-          b.innerHTML=`⚠️ Sync error — showing last local data. <a href="#" onclick="location.href=location.href.split('?')[0]+'?r='+Date.now()+(location.hash||'');return false" style="color:var(--or);text-decoration:underline">Reload to retry</a>${lobbyEscape}${roomRecover} &nbsp;·&nbsp; <a href="#" onclick="document.getElementById('sync-error-banner').remove();return false" style="color:var(--mu);text-decoration:underline">Dismiss</a>`;
+          b.innerHTML=`📶 Viewing cached data — Firebase unreachable. <a href="#" onclick="location.href=location.href.split('?')[0]+'?r='+Date.now()+(location.hash||'');return false" style="color:var(--or);text-decoration:underline">Retry connection</a>${lobbyEscape} &nbsp;·&nbsp; <a href="#" onclick="document.getElementById('sync-error-banner').remove();return false" style="color:var(--mu);text-decoration:underline">Dismiss</a>`;
           document.body.prepend(b);
         }
       }
@@ -1167,7 +1090,6 @@ const SYNC={
       b.textContent='⚪ Offline';
       b.style.cssText='display:inline-flex;align-items:center;gap:3px;font-size:.65rem;font-weight:700;padding:3px 8px;border-radius:20px;background:var(--s2);border:1px solid var(--bd);color:var(--mu);cursor:pointer';
     }
-    _updateRoomBadge();
   },
 
   async autoConnect(){
@@ -1190,7 +1112,7 @@ const SYNC={
       messagingSenderId:'669188671832',
       appId:'1:669188671832:web:8335ae5c6dd9298170fd2d'
     };
-    const roomId=_getOrCreateRoomId();
+    const roomId='main'; // single fixed room — no codes needed
     const ok=await this.connect(cfg,roomId);
     if(!ok){
       // Update loading overlay to show error + retry
@@ -1889,6 +1811,14 @@ function deletePlayer(id){
 
 function toggleEdit(id){S.editId=S.editId===id?null:id;renderDB();}
 
+function updateDuprPreviewEdit(id){
+  const inp=document.getElementById(`ed-${id}`);
+  const prev=document.getElementById(`edp-${id}`);
+  if(!inp||!prev)return;
+  const val=parseFloat(inp.value);
+  prev.textContent=(!isNaN(val)&&val>=2&&val<=8)?`→ ~${duprToElo(val)} ELO`:'';
+}
+
 function savePlayerEdit(id){
   const p=gp(id);if(!p)return;
   const name=(document.getElementById(`en-${id}`)?.value||'').trim();
@@ -1897,7 +1827,19 @@ function savePlayerEdit(id){
   if(!name){toast('Name cannot be empty','err');return;}
   if(S.db.some(x=>x.id!==id&&x.name.toLowerCase()===name.toLowerCase()&&(x.tag||'').toLowerCase()===tag.toLowerCase())){toast('Another player has that name+tag','err');return;}
   if(rating<400||rating>2000){toast('Rating 400–2000','err');return;}
-  p.name=name;p.tag=tag;p.rating=rating;S.editId=null;
+  p.name=name;p.tag=tag;p.rating=rating;
+  // Save DUPR for NR players
+  if(p.isNR){
+    const duprEl=document.getElementById(`ed-${id}`);
+    const duprVal=parseFloat(duprEl?.value||'');
+    if(!isNaN(duprVal)&&duprVal>=2&&duprVal<=8){
+      p.dupr=duprVal;
+      p.nrLevelHint=duprToElo(duprVal);
+    }else if(duprEl&&duprEl.value===''){
+      p.dupr=null; // cleared
+    }
+  }
+  S.editId=null;
   STORE.save('db');renderDB();renderRoster();updatePvSelect();toast('Updated ✓','ok');
 }
 
@@ -1917,7 +1859,7 @@ function toggleCheckIn(id){
         if(p&&!S.session.players.find(x=>x.id===id)){
           const startR=p.isNR?(p.nrLevelHint||1000):(p.rating||1000);
           S.session.players.push({id,name:p.name,tag:p.tag||'',isNR:p.isNR||false,isSeeding:false,
-            sRating:startR,startRating:startR,wins:0,losses:0,ties:0,
+            sRating:startR,startRating:startR,baseRating:p.baseRating??p.rating??startR,wins:0,losses:0,ties:0,
             matchesPlayed:0,ptsFor:0,ptsAgainst:0,timeOnCourtMs:0,timeInQueueMs:0,status:'active'});
         }
       }
@@ -1927,8 +1869,31 @@ function toggleCheckIn(id){
   S.checkedIn.has(id)?S.checkedIn.delete(id):S.checkedIn.add(id);renderDB();renderRoster();
 }
 
-function selectAll(){S.db.forEach(p=>S.checkedIn.add(p.id));renderDB();renderRoster();}
-function selectNone(){S.checkedIn.clear();renderDB();renderRoster();}
+function selectAll(){
+  S.db.forEach(p=>{
+    if(!S.checkedIn.has(p.id)){
+      S.checkedIn.add(p.id);
+      // In lobby: also add to session roster
+      if(S.session?.status==='lobby'&&!S.session.activePlayers.includes(p.id)){
+        S.session.activePlayers.push(p.id);
+        const startR=p.isNR?(p.nrLevelHint||1000):(p.rating||1000);
+        S.session.players.push({id:p.id,name:p.name,tag:p.tag||'',isNR:p.isNR||false,isSeeding:false,
+          sRating:startR,startRating:startR,baseRating:p.baseRating??p.rating??startR,wins:0,losses:0,ties:0,
+          matchesPlayed:0,ptsFor:0,ptsAgainst:0,timeOnCourtMs:0,timeInQueueMs:0,status:'active'});
+      }
+    }
+  });
+  if(S.session?.status==='lobby'){STORE.save('session');renderLive();}
+  renderDB();renderRoster();
+}
+function selectNone(){
+  if(S.session?.status==='lobby'){
+    // In lobby: also remove all from session roster
+    S.session.activePlayers=[];S.session.players=[];
+    STORE.save('session');renderLive();
+  }
+  S.checkedIn.clear();renderDB();renderRoster();
+}
 
 /* ── SESSION ─────────────────────────────────────── */
 function startSession(){
@@ -1939,6 +1904,16 @@ function startSession(){
   if(S.session?.status==='lobby'){
     toast('Check-in open — go to Live tab','warn');
     switchTab('live');return;
+  }
+  // Block if no admin code — too risky to run a live event unprotected
+  if(!getAdminPin()){
+    openModal(`<div class="modal-title">🔐 Admin Code Required</div>
+      <p style="font-size:.76rem;color:var(--mu);line-height:1.6;margin-bottom:12px">
+        Set an admin code before starting a session. This prevents players from accidentally accessing organiser controls.
+      </p>
+      <button class="btn bp" style="width:100%;margin-bottom:7px" onclick="closeModal();openPinSetupModal()">🔐 Set Admin Code</button>
+      <p style="font-size:.65rem;color:var(--mu);text-align:center">Players use the Player Link and never need this code.</p>`);
+    return;
   }
   _invalidateMatchmakingCaches();
   _buildSessionTogetherCache();
@@ -1979,6 +1954,13 @@ function startSession(){
 
 function beginPlay(){
   if(!S.session||S.session.status!=='lobby')return;
+  if(!getAdminPin()){
+    openModal(`<div class="modal-title">🔐 Admin Code Required</div>
+      <p style="font-size:.76rem;color:var(--mu);line-height:1.6;margin-bottom:12px">Set an admin code before beginning play.</p>
+      <button class="btn bp" style="width:100%;margin-bottom:7px" onclick="closeModal();openPinSetupModal()">🔐 Set Admin Code</button>
+      <button class="btn bg2 sm" style="width:100%" onclick="closeModal()">Cancel</button>`);
+    return;
+  }
   if(S.session.activePlayers.length<4){toast('Need at least 4 players to begin','err');return;}
   S.session.status='active';
   S.session.sessionStart=Date.now();
@@ -1987,8 +1969,10 @@ function beginPlay(){
     .filter(id=>!gp(id)?.isNR).map(id=>gp(id)?.rating||1000);
   const sessAvg=ratedRatings.length?Math.round(ratedRatings.reduce((a,b)=>a+b,0)/ratedRatings.length):1000;
   S.session.players.forEach(sp=>{
-    if(sp.isNR&&sp.startRating<400+1){
-      const hint=gp(sp.id)?.nrLevelHint||sessAvg;
+    // Recompute NR start rating using session average ONLY if no explicit DUPR/hint was set.
+    // Players with a DUPR or manual level hint already have the correct seed — don't override.
+    if(sp.isNR&&!gp(sp.id)?.nrLevelHint){
+      const hint=sessAvg;
       sp.sRating=hint;sp.startRating=hint;
     }
   });
@@ -2020,7 +2004,8 @@ function applyScore(m,s1,s2){
     if(i<2){sp.ptsFor+=s1;sp.ptsAgainst+=s2;}else{sp.ptsFor+=s2;sp.ptsAgainst+=s1;}
     if(s1===s2)sp.ties=(sp.ties||0)+1;else if((i<2&&s1>s2)||(i>=2&&s2>s1))sp.wins++;else sp.losses++;
   });
-  [...m.t1,...m.t2].forEach(id=>checkNRPromotion(id));
+  const _anyPromo=[...m.t1,...m.t2].map(id=>checkNRPromotion(id)).some(Boolean);
+  if(_anyPromo)STORE.save(); // one save for all promotions in this match
   // Track NR pairing history to distribute calibration tax fairly
   const hasNR=[...m.t1,...m.t2].some(mid=>gp(mid)?.isNR||gsp(mid)?.isNR);
   if(hasNR&&S.session){
@@ -2086,7 +2071,7 @@ function renderRosterModal(){
       <div style="display:flex;gap:4px;flex-wrap:wrap">
         ${!left?`<button class="btn bg2 sm" style="font-size:.65rem" onclick="openOvrModal('${id}')">⚡ RTG</button>`:''}
         ${!left?`<button class="btn bg2 sm" style="font-size:.65rem" onclick="openNeverPairModal('${id}')">🚫 Pair</button>`:''}
-        ${!left&&S.session.cfMode?`<button class="btn bg2 sm" style="font-size:.65rem" onclick="${isPaused?`cfResumePlayer('${id}')`:`cfPausePlayer('${id}')`}">${isPaused?'▶':'⏸'}</button>`:''}
+        ${!left&&S.session.cfMode&&S.session.status==='active'?`<button class="btn bg2 sm" style="font-size:.65rem" onclick="${isPaused?`cfResumePlayer('${id}')`:`cfPausePlayer('${id}')`}">${isPaused?'▶':'⏸'}</button>`:''}
         ${!left?`<button class="btn bd2 sm" onclick="midRemove('${id}')">Leave</button>`:`<button class="btn bg2 sm" onclick="midRejoin('${id}')">Rejoin</button>`}
       </div>
     </div>`;
@@ -2190,7 +2175,8 @@ function midAdd(id){
   const startR=p.isNR?(()=>{const rated=S.session.players.filter(sp=>!sp.isNR).map(sp=>sp.sRating||1000);return rated.length?Math.round(rated.reduce((a,b)=>a+b,0)/rated.length):1000;})():(p.rating||1000);
   if(!gsp(id)){
     S.session.players.push({id,name:p.name,tag:p.tag||'',isNR:p.isNR||false,isSeeding:false,
-      sRating:startR,startRating:startR,wins:0,losses:0,ties:0,matchesPlayed:0,ptsFor:0,ptsAgainst:0,timeOnCourtMs:0,timeInQueueMs:0,status:'late'});
+      sRating:startR,startRating:startR,baseRating:p.baseRating??p.rating??startR,
+      wins:0,losses:0,ties:0,matchesPlayed:0,ptsFor:0,ptsAgainst:0,timeOnCourtMs:0,timeInQueueMs:0,status:'late'});
   }else{gsp(id).status='late';}
   S.checkedIn.add(id);
   if(S.session.cfMode){
@@ -2401,7 +2387,7 @@ function toggleDbAbsent(){
   _dbAbsentOnly=!_dbAbsentOnly;
   const btn=document.getElementById('db-absent-btn');
   if(btn){
-    btn.textContent=_dbAbsentOnly?'☑ Absent':'⬜ Absent';
+    btn.textContent='Absent';
     btn.classList.toggle('bc',_dbAbsentOnly);
     btn.classList.toggle('bg2',!_dbAbsentOnly);
   }
@@ -2410,13 +2396,20 @@ function toggleDbAbsent(){
 
 /* ── RENDER: DB ──────────────────────────────────── */
 function renderDB(){
+  // Sync Absent button visual state (may have been reset by DOM re-render)
+  const _abBtn=document.getElementById('db-absent-btn');
+  if(_abBtn){
+    _abBtn.textContent='Absent';
+    _abBtn.classList.toggle('bc',_dbAbsentOnly);
+    _abBtn.classList.toggle('bg2',!_dbAbsentOnly);
+  }
   // Refresh NR level labels if NR panel is open (checked-in pool may have changed)
   if(document.getElementById('np-nr-level')?.style.display!=='none')updateNRLevelLabels();
   const q=(document.getElementById('db-search')?.value||'').toLowerCase();
   let players=[...S.db].sort((a,b)=>{if(!!a.isNR!==!!b.isNR)return a.isNR?1:-1;return b.rating-a.rating;});
   if(q)players=players.filter(p=>plainName(p).toLowerCase().includes(q));
   if(_dbAbsentOnly)players=players.filter(p=>!S.checkedIn.has(p.id));
-  document.getElementById('db-badge').textContent=S.db.length;
+  document.getElementById('db-badge').textContent=_dbAbsentOnly?`${players.length}/${S.db.length}`:S.db.length;
   if(!players.length){document.getElementById('db-list').innerHTML=`<div class="empty">No players yet.</div>`;return;}
   document.getElementById('db-list').innerHTML=players.map(p=>{
     const chk=S.checkedIn.has(p.id),ed=S.editId===p.id;
@@ -2456,7 +2449,14 @@ function renderDB(){
             :`<input id="er-${p.id}" class="inp" type="number" value="${Math.round(p.rating)}" min="400" max="2000"/>`
           }</div>
         </div>
-        ${p.isNR?`<p style="font-size:.68rem;color:var(--pu);margin-bottom:7px">NR — rated after 5 games.</p>`:''}
+        ${p.isNR?`<div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:6px">
+          <div style="flex:1"><label>DUPR / EST. RATING <span style="font-weight:400;text-transform:none;font-size:.6rem">(2.0–8.0, optional)</span></label>
+            <input id="ed-${p.id}" class="inp" type="number" min="2" max="8" step="0.1" placeholder="e.g. 3.5"
+              value="${p.dupr||''}" oninput="updateDuprPreviewEdit('${p.id}')" style="width:100%"/>
+          </div>
+          <span id="edp-${p.id}" style="font-size:.7rem;color:var(--mu);padding-bottom:9px">${p.dupr?`→ ~${duprToElo(p.dupr)} ELO`:''}</span>
+        </div>
+        <p style="font-size:.68rem;color:var(--pu);margin-bottom:7px">NR — rated after 5 games.</p>`:''}
         <div style="display:flex;gap:6px">
           <button class="btn bp sm" onclick="savePlayerEdit('${p.id}')">✓ Save</button>
           <button class="btn bg2 sm" onclick="toggleEdit('${p.id}')">Cancel</button>
@@ -2499,8 +2499,14 @@ function renderRoster(){
     document.getElementById('start-hint').innerHTML=`<span style="font-size:.74rem;color:var(--cy)">✓ Check-in open — <a href="#" style="color:var(--cy);text-decoration:none" onclick="switchTab('live');return false">go to Live tab to begin play ↗</a></span>`;
   }else{
     btn.style.display='';
-    btn.disabled=false;btn.textContent='📋 Open Check-in';
-    document.getElementById('start-hint').textContent=hintText;
+    const hasCode=!!getAdminPin();
+    btn.disabled=!hasCode;
+    btn.textContent='📋 Open Check-in';
+    btn.title=hasCode?'':'Set an admin code first (see Admin Code above)';
+    btn.style.opacity=hasCode?'':'0.5';
+    document.getElementById('start-hint').innerHTML=hasCode
+      ?hintText
+      :`<span style="font-size:.74rem;color:var(--re)">⚠ Set admin code above to start a session</span>`;
   }
   
 }
@@ -2509,7 +2515,7 @@ function renderRoster(){
 function renderLive(){
   const status=S.session?.status;
   const none=!S.session;
-  document.getElementById('live-empty').style.display=(none&&!S.session)?'block':'none';
+  document.getElementById('live-empty').style.display=none?'block':'none';
   const cfw=document.getElementById('cf-live-wrap');
 
   if(!S.session){
@@ -2575,7 +2581,7 @@ function _renderLobby(){
         <div class="cpills" id="cpills-lobby">
           ${[1,2,3,4,5,6].map(n=>`<button class="cpill${n===courts?' sel':''}" data-c="${n}">${n}</button>`).join('')}
         </div>
-        <span style="font-size:.7rem;color:${summaryColor};margin-left:4px">${summaryText}</span>
+        <span id="lobby-summary" style="font-size:.7rem;color:${summaryColor};margin-left:4px">${summaryText}</span>
       </div>
 
       ${players.length?`
@@ -2592,19 +2598,40 @@ function _renderLobby(){
       <div style="font-size:.67rem;font-weight:700;color:var(--mu);letter-spacing:.06em;margin-bottom:6px">ADD PLAYERS</div>
       <div style="display:flex;flex-wrap:wrap;gap:5px">
         ${notIn.map(p=>`<button onclick="toggleCheckIn('${p.id}')" style="font-size:.73rem;font-weight:600;padding:5px 10px;border-radius:20px;border:1px solid var(--bd);background:var(--s2);color:var(--tx);cursor:pointer">${esc(p.name)}${p.tag?` <span style="font-size:.6rem;color:var(--or)">${esc(p.tag)}</span>`:''} <span style="font-size:.62rem;color:var(--mu)">${p.isNR?'NR':Math.round(p.rating)}</span></button>`).join('')}
-      </div>`:''
+      </div>`:
+      `<div style="font-size:.74rem;color:var(--gr);padding:4px 0">✓ All players are checked in</div>`
       }
     </div>`;
 
-    // Wire lobby court pills — updates S.courts and session.courts live
-    initCourtPills('cpills-lobby', n=>{
-      S.courts=n;
-      if(S.session)S.session.courts=n;
-      syncCourtPills('cpills-setup',n);
-      syncCourtPills('cpills-live',n);
-      STORE.save('session');
-      _renderLobby(); // re-render to update summary line
-    });
+    // Wire lobby court pills — clone pills to strip stale listeners before re-attaching
+    const lobbyPillCtr=document.getElementById('cpills-lobby');
+    if(lobbyPillCtr){
+      lobbyPillCtr.querySelectorAll('.cpill').forEach(pill=>{
+        const clone=pill.cloneNode(true);pill.parentNode.replaceChild(clone,pill);
+      });
+      initCourtPills('cpills-lobby', n=>{
+        S.courts=n;
+        if(S.session)S.session.courts=n;
+        syncCourtPills('cpills-setup',n);
+        syncCourtPills('cpills-live',n);
+        STORE.save('session');
+        const total=S.session?.activePlayers?.length||0;
+        const need=n*4;
+        const queuing=Math.max(0,total-need);
+        const starting=Math.min(need,total);
+        const rated=(S.session?.activePlayers||[]).map(id=>gp(id)).filter(p=>p&&!p.isNR);
+        const avg=rated.length?Math.round(rated.reduce((s,p)=>s+(p.rating||0),0)/rated.length):0;
+        const canBegin=total>=4;
+        const summaryEl=document.getElementById('lobby-summary');
+        if(summaryEl){
+          summaryEl.style.color=canBegin?'var(--gr)':'var(--mu)';
+          summaryEl.textContent=canBegin
+            ?`${n} court${n!==1?'s':''} · ${starting} starting · ${queuing>0?queuing+' queuing first':'everyone plays first!'} · avg ${avg}`
+            :`Need at least 4 players to begin`;
+        }
+        syncCourtPills('cpills-lobby',n);
+      });
+    }
   }
 
   // Hide queue section
@@ -2623,6 +2650,9 @@ function discardLobby(){
   showCfm(`Discard check-in for <strong>${esc(S.session.name)}</strong>?<br/><span style="font-size:.74rem;color:var(--mu)">No matches have been played — nothing will be saved.</span>`,'Discard','bd2',()=>{
     S.checkedIn.clear();S.session=null;
     CF._confirmAllBusy=false;CF._confirmAllLastTs=0;
+    // Reset session name field to day-based placeholder for next session
+    const nameEl=document.getElementById('sess-name-flow');
+    if(nameEl){nameEl.value='';const day=new Date().toLocaleDateString('en',{weekday:'long'});nameEl.placeholder=`${day} Open Play…`;}
     STORE.save();updateHeader();renderDB();renderRoster();renderLive();renderHistory();renderStandings();
     toast('Check-in discarded','warn');
     switchTab('setup');
@@ -2634,6 +2664,21 @@ function discardLobby(){
 function renderSessStd(){
   const el=document.getElementById('sess-std');
   if(!el)return;
+
+  // Lobby: show roster ordered by rating as a preview
+  if(S.session?.status==='lobby'){
+    const players=[...S.session.activePlayers].map(gp).filter(Boolean).sort((a,b)=>b.rating-a.rating);
+    if(!players.length){el.innerHTML='<div class="empty">No players checked in yet.</div>';return;}
+    const canBegin=players.length>=4;
+    el.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+        <div style="font-size:.68rem;color:var(--mu)">Skill preview — ${players.length} players · begin play to start matching</div>
+        ${canBegin?`<button class="btn bp sm" onclick="beginPlay()">▶ Begin Play (${players.length})</button>`:''}
+      </div>`+
+      `<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Current rating">RTG</th></tr></thead><tbody>`+
+      players.map((p,i)=>`<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.79rem">${esc(p.name)}${p.tag?`<span class="ptag">${esc(p.tag)}</span>`:''}${p.isNR?`<span class="nr-badge">NR</span>`:''}</td><td><span class="rv">${p.isNR?'NR':Math.round(p.rating)}</span></td></tr>`).join('')+
+      `</tbody></table>`;
+    return;
+  }
 
   // Determine which session data to show:
   // 1. Active session → live standings
@@ -2688,8 +2733,8 @@ function renderSessStd(){
     return `<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.79rem">${esc(name)}${tag?`<span class="ptag">${esc(tag)}</span>`:''}${nrTag}${courtTag}${sp.status==='left'?'<span class="tleft">LEFT</span>':''}</td><td style="font-size:.73rem;color:var(--mu)">${sp.wins}W/${sp.losses}L${sp.ties?'/'+sp.ties+'T':''}</td><td style="font-size:.71rem;color:var(--mu)">${pd>=0?'+':''}${pd}${sosTag}</td><td><span class="dl ${d>0?'du':d<0?'dd':'dz'}">${d>=0?'+':''}${d}</span></td><td><span class="rv">${rtgCell}</span></td></tr>`;
   }).join('');
 
-  el.innerHTML=labelHtml+`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th>W/L</th><th>PD+SOS</th><th>Δ</th><th>RTG</th></tr></thead><tbody>${rows}</tbody></table>
-  <div style="font-size:.62rem;color:var(--m2);margin-top:5px;padding:0 2px">SOS = avg opponent rating (↑ harder schedule, ↓ easier)</div>`;
+  el.innerHTML=labelHtml+`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Wins / Losses / Ties">W/L</th><th title="Points differential (scored minus conceded)">PD</th><th title="Rating change this session">+/−</th><th title="Current session rating">RTG</th></tr></thead><tbody>${rows}</tbody></table>
+  <div style="font-size:.62rem;color:var(--m2);margin-top:5px;padding:0 2px">PD = points diff · +/− = rating change · ↑/↓ = schedule strength vs avg</div>`;
 }
 // renderAllTime removed — all-time ratings visible in Setup player list
 
@@ -2903,7 +2948,7 @@ function renderArchive(){
       </div>
       <div class="arch-body">
         <div class="ct" style="margin-bottom:8px">🏆 Final Standings</div>
-        <table class="stbl" style="margin-bottom:14px"><thead><tr><th>#</th><th>PLAYER</th><th>W/L</th><th>PD</th><th>Δ RTG</th><th>FINAL</th></tr></thead><tbody>${stdRows}</tbody></table>
+        <table class="stbl" style="margin-bottom:14px"><thead><tr><th>#</th><th>PLAYER</th><th>W/L</th><th>PD</th><th>+/−</th><th>FINAL</th></tr></thead><tbody>${stdRows}</tbody></table>
         <div class="ct" style="margin-bottom:8px">📜 Match Log</div>
         ${matchHistory}
         <div style="margin-top:14px;border-top:1px solid var(--bd);padding-top:10px">
@@ -2967,6 +3012,11 @@ function onPvSelectChange(){
 /* ── SYNC MODAL ───────────────────────────────────── */
 function changeCourtsMidSession(){
   if(!S.session){toast('No active session','err');return;}
+  if(S.session.status==='lobby'){
+    // In lobby: just update the court pill selection — no active matches to worry about
+    toast('Change courts using the pill selector in the lobby','ok');
+    return;
+  }
   const cur=S.session.courts||1;
   const offset=S.session.courtOffset||0;
   openModal(`<div class="modal-title">⚙ Session Courts</div>
@@ -3122,8 +3172,22 @@ function _sugPickerClose(){
   document.querySelectorAll('.sug-player-btn').forEach(b=>{b.style.background='';b.style.color='';});
 }
 
+function openWipeConfirmModal(){
+  openModal(`<div class="modal-title" style="color:var(--re)">🗑 Wipe All Data</div>
+    <p style="font-size:.76rem;color:var(--mu);line-height:1.6;margin-bottom:12px">
+      This permanently deletes <strong style="color:var(--tx)">all players, sessions and history</strong> for every connected device. This cannot be undone.
+    </p>
+    <label style="color:var(--re)">TYPE "DELETE" TO CONFIRM</label>
+    <input id="wipe-confirm-inp" class="inp" placeholder="DELETE" style="margin-bottom:12px;text-align:center;letter-spacing:2px;font-weight:700"
+      oninput="document.getElementById('wipe-confirm-btn').disabled=this.value!=='DELETE'"/>
+    <div style="display:flex;gap:7px">
+      <button id="wipe-confirm-btn" class="btn bd2" style="flex:2" disabled
+        onclick="closeModal();SYNC.resetSharedRoom()">🗑 Wipe Everything</button>
+      <button class="btn bg2" onclick="closeModal()">Cancel</button>
+    </div>`);
+}
+
 function openSyncModal(){
-  const roomId=SYNC.roomId||localStorage.getItem('pb_room_id')||'—';
   const state=SYNC.state||'idle';
   const stateLabel={
     connected:'<span style="color:var(--gr);font-weight:700">🟢 Connected</span>',
@@ -3132,99 +3196,44 @@ function openSyncModal(){
     idle:'<span style="color:var(--mu);font-weight:700">⚪ Offline</span>'
   }[state]||'<span style="color:var(--mu)">Unknown</span>';
 
-  openModal(`<div class="modal-title">📡 Room & Sync</div>
+  openModal(`<div class="modal-title">📡 Sync Status</div>
 
-    <div style="background:rgba(34,211,238,.07);border:1px solid rgba(34,211,238,.25);border-radius:var(--ra);padding:12px;text-align:center;margin-bottom:10px">
-      <div style="font-size:.68rem;color:var(--mu);margin-bottom:2px;letter-spacing:.08em">ROOM CODE</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:var(--cy);letter-spacing:6px">${esc(roomId)}</div>
-      <div style="font-size:.71rem;margin-top:3px">${stateLabel}</div>
+    <div style="background:rgba(34,211,238,.07);border:1px solid rgba(34,211,238,.25);border-radius:var(--ra);padding:14px;text-align:center;margin-bottom:12px">
+      <div style="font-size:.72rem;margin-bottom:4px">${stateLabel}</div>
+      <div style="font-size:.68rem;color:var(--mu)">
+        ${state==='connected'
+          ?'All organisers see the same live session in real time.'
+          :'Not connected — changes won\'t sync to other devices.'}
+      </div>
     </div>
 
-    ${state==='connected'?`
-    <div style="font-size:.73rem;color:var(--mu);background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px;margin-bottom:10px;line-height:1.6">
-      <strong style="color:var(--tx)">Add another device:</strong> open this app on any device — it auto-joins room <strong style="color:var(--cy)">${esc(roomId)}</strong> and syncs live.
-    </div>`:`
-    <div style="background:rgba(251,191,36,.07);border:1px solid rgba(251,191,36,.25);border-radius:var(--ra);padding:9px;margin-bottom:10px;font-size:.73rem;color:var(--go)">
-      ${state==='error'?'Connection failed. Tap Retry or join a specific room below.':'Not connected. Tap Retry to reconnect.'}
-    </div>
-    <button class="btn bp" style="width:100%;margin-bottom:8px" onclick="closeModal();SYNC.ready=false;SYNC.state='idle';SYNC.autoConnect()">
+    ${state!=='connected'?`
+    <button class="btn bp" style="width:100%;margin-bottom:12px" onclick="closeModal();SYNC.ready=false;SYNC.state='idle';SYNC.autoConnect()">
       🔄 Retry Connection
-    </button>`}
+    </button>`:''}
 
-    <div class="dv" style="margin:10px 0"></div>
-
-    <div style="font-size:.72rem;color:var(--mu);font-weight:700;margin-bottom:5px">JOIN A SPECIFIC ROOM</div>
-    <div style="display:flex;gap:6px;margin-bottom:10px">
-      <input id="join-room-input" class="inp" placeholder="Enter room code…"
-        style="flex:1;text-transform:uppercase;letter-spacing:2px;font-family:'Bebas Neue',sans-serif;font-size:1rem"
-        maxlength="12" oninput="this.value=this.value.toUpperCase()"/>
-      <button class="btn bc" onclick="joinSpecificRoom()">Join</button>
-    </div>
-
-    <div class="dv" style="margin:10px 0"></div>
-
-    <div style="font-size:.72rem;color:var(--mu);font-weight:700;margin-bottom:4px">DEVICE ACTIONS <span style="font-weight:400;color:var(--m2)">— local only, no Firebase write</span></div>
-    <div style="display:flex;gap:6px;margin-bottom:10px">
-      <button class="btn bc sm" style="flex:1" onclick="closeModal();generateNewRoom()" title="Leave this room and connect to a new empty one. Other devices unaffected.">🔀 New Room</button>
-      <button class="btn bs sm" style="flex:1" onclick="closeModal();SYNC.leaveRoom()" title="Disconnect this device. Room data stays intact for others.">🚪 Leave Room</button>
-    </div>
-
-    <div style="font-size:.72rem;color:var(--re);font-weight:700;margin-bottom:4px">⚠️ SHARED ROOM RESET <span style="font-weight:400;color:var(--m2)">— wipes data for ALL devices</span></div>
-    <button class="btn bd2 sm" style="width:100%;margin-bottom:10px"
-      onclick="showCfm('<strong>Wipe this room for ALL devices?</strong><br/><span style=\\'font-size:.73rem;color:var(--mu)\\'>This deletes all players, sessions and history from Firebase. Cannot be undone. Other devices will lose all data immediately.</span>','🗑 Wipe Room','bd2',()=>{closeModal();SYNC.resetSharedRoom();})">
-      🗑 Wipe Shared Room Data
-    </button>
-
-    <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px;font-size:.7rem;color:var(--mu)">
+    <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px;font-size:.7rem;color:var(--mu);margin-bottom:12px">
       <strong style="color:var(--tx)">Firebase:</strong> ladder-open-play &nbsp;·&nbsp;
       <strong style="color:var(--tx)">Device:</strong> ${DEVICE_ID.slice(0,6)}
     </div>
-    <button class="btn bg2 sm" style="width:100%;margin-top:10px" onclick="closeModal()">Close</button>`);
+
+    <div style="font-size:.72rem;color:var(--re);font-weight:700;margin-bottom:4px">⚠️ WIPE ALL DATA <span style="font-weight:400;color:var(--m2)">— affects ALL devices</span></div>
+    <button class="btn bd2 sm" style="width:100%;margin-bottom:10px"
+      onclick="openWipeConfirmModal()">
+      🗑 Wipe All Data
+    </button>
+
+    <button class="btn bg2 sm" style="width:100%" onclick="closeModal()">Close</button>`);
 }
 
-async function joinSpecificRoom(){
-  const input=document.getElementById('join-room-input');
-  const roomId=(input?.value||'').trim().toUpperCase();
-  if(!roomId||roomId.length<4){toast('Enter a room code (min 4 chars)','err');return;}
-  // Store the new room ID and reconnect
-  localStorage.setItem('pb_room_id',roomId);
-  SYNC.clearConfig();
-  closeModal();
-  toast(`Joining room ${roomId}…`,'ok');
-  const cfg={
-    apiKey:'AIzaSyCntwgc62wfRackl_sGFpp7FZiXmJvIhYI',
-    authDomain:'ladder-open-play.firebaseapp.com',
-    databaseURL:'https://ladder-open-play-default-rtdb.asia-southeast1.firebasedatabase.app',
-    projectId:'ladder-open-play',storageBucket:'ladder-open-play.firebasestorage.app',
-    messagingSenderId:'669188671832',appId:'1:669188671832:web:8335ae5c6dd9298170fd2d'
-  };
-  const ok=await SYNC.connect(cfg,roomId);
-  if(ok)_updateRoomBadge();
-}
 
-async function doConnectSync(){
-  const cfgRaw=(document.getElementById('sync-cfg-input')?.value||'').trim();
-  const roomId=(document.getElementById('sync-room-input')?.value||'').trim().toUpperCase();
-  if(!cfgRaw){toast('Paste your Firebase config JSON','err');return;}
-  if(!roomId||roomId.length<4){toast('Enter a room code (min 4 chars)','err');return;}
-  let cfg;
-  try{cfg=JSON.parse(cfgRaw);}catch(e){toast('Invalid JSON — check your Firebase config','err');return;}
-  if(!cfg.databaseURL){toast('Config must include databaseURL (from Firebase Realtime DB)','err');return;}
-  const btn=document.getElementById('sync-connect-btn');
-  if(btn){btn.textContent='Connecting…';btn.disabled=true;}
-  const ok=await SYNC.connect(cfg,roomId);
-  if(ok){closeModal();SYNC._updateBadge();}
-  else if(btn){btn.textContent='🔴 Connect Live Sync';btn.disabled=false;}
-}
-
-/* ── SHARE / QR ───────────────────────────────────── */
 function openShareModal(){
   const base=window.location.href.split('#')[0].split('?')[0];
   const shareUrl=base+'?view=player';
   const noPinWarning=!S.adminPin?`
     <div style="background:rgba(251,147,60,.08);border:1px solid rgba(251,147,60,.35);border-radius:var(--ra);padding:9px 12px;margin-bottom:10px;font-size:.73rem;color:var(--or);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <span style="flex:1">⚠️ <strong>No PIN set</strong> — anyone who sees this URL can access organiser controls by removing <code style="font-size:.68rem;background:rgba(0,0,0,.3);padding:1px 4px;border-radius:3px">?view=player</code>.</span>
-      <button class="btn bg2 sm" style="white-space:nowrap;font-size:.68rem" onclick="closeModal();openPinSetupModal()">Set PIN →</button>
+      <span style="flex:1">⚠️ <strong>No admin code set</strong> — anyone who sees this URL can access organiser controls by removing <code style="font-size:.68rem;background:rgba(0,0,0,.3);padding:1px 4px;border-radius:3px">?view=player</code>.</span>
+      <button class="btn bg2 sm" style="white-space:nowrap;font-size:.68rem" onclick="closeModal();openPinSetupModal()">Set Code →</button>
     </div>`:'';
   openModal(`<div class="modal-title">📱 Share Player Link</div>
     ${noPinWarning}
@@ -3307,6 +3316,114 @@ function updateProgress(){
 }
 
 /* ── doNextRound (with pending-score protection) ─── */
+function openImportModal(){
+  _importData=null;_csvRows=null; // reset stale state from previous open
+  openModal(`<div class="modal-title">📥 Import Data</div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:12px">
+      <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:12px">
+        <div style="font-weight:700;font-size:.8rem;margin-bottom:5px">📦 JSON Backup (full restore)</div>
+        <div style="font-size:.72rem;color:var(--mu);margin-bottom:8px">Restores players, ratings and session history from a previously exported JSON backup.</div>
+        <input type="file" id="imp-file" accept=".json" class="inp" style="font-size:.72rem;padding:4px" onchange="previewImport(this)"/>
+        <div id="imp-preview" style="font-size:.7rem;color:var(--mu);margin-top:6px"></div>
+        <button id="imp-btn" class="btn bp" style="width:100%;margin-top:8px;display:none" onclick="runImport()">📥 Import &amp; Replace</button>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:12px">
+        <div style="font-weight:700;font-size:.8rem;margin-bottom:5px">📊 CSV (players only)</div>
+        <div style="font-size:.72rem;color:var(--mu);margin-bottom:8px">Adds players from a CSV. Expected columns: Name, Tag, Rating. Existing players are not overwritten.</div>
+        <input type="file" id="imp-csv-file" accept=".csv,.txt" class="inp" style="font-size:.72rem;padding:4px" onchange="previewCsvImport(this)"/>
+        <div id="imp-csv-preview" style="font-size:.7rem;color:var(--mu);margin-top:6px"></div>
+        <button id="imp-csv-btn" class="btn bc" style="width:100%;margin-top:8px;display:none" onclick="runCsvImport()">📊 Add Players</button>
+      </div>
+    </div>
+    <button class="btn bg2 sm" style="width:100%" onclick="closeModal()">Close</button>`);
+}
+
+let _importData=null,_csvRows=null;
+
+function previewImport(input){
+  const f=input.files[0];if(!f)return;
+  const prev=document.getElementById('imp-preview');
+  const btn=document.getElementById('imp-btn');
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const data=JSON.parse(e.target.result);
+      const players=(data.players||[]).length;
+      const archive=(data.archive||[]).length;
+      const hasSession=!!data.session;
+      prev.textContent=`Found: ${players} player${players!==1?'s':''}, ${archive} archived session${archive!==1?'s':''}${hasSession?' + 1 active session':''}`;
+      prev.style.color='var(--gr)';
+      _importData=data;
+      btn.style.display='block';
+    }catch(err){
+      prev.textContent='⚠ Could not parse file — check it is a valid JSON export.';
+      prev.style.color='var(--re)';
+      _importData=null;
+      btn.style.display='none';
+    }
+  };
+  reader.readAsText(f);
+}
+
+function runImport(){
+  if(!_importData)return;
+  showCfm('<strong>Replace all data with this backup?</strong><br/><span style="font-size:.73rem;color:var(--mu)">Current players, ratings and history will be overwritten.</span>','📥 Import','bp',()=>{
+    if(_importData.players)S.db=_importData.players;
+    if(_importData.archive)S.archive=_importData.archive;
+    if(_importData.session)S.session=_importData.session;
+    else S.session=null;
+    S.checkedIn=new Set();
+    _importData=null;
+    STORE.save();
+    renderDB();renderRoster();renderHistory();renderArchive();renderStandings();updateHeader();updatePvSelect();
+    closeModal();
+    toast('✅ Import complete','ok',4000);
+  });
+}
+
+function previewCsvImport(input){
+  const f=input.files[0];if(!f)return;
+  const prev=document.getElementById('imp-csv-preview');
+  const btn=document.getElementById('imp-csv-btn');
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const rows=e.target.result.split(/\r?\n/).filter(l=>l.trim());
+      const data=rows.slice(1).map(r=>{
+        // handle both comma and tab separated, quoted or unquoted
+        const cols=r.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(c=>c.replace(/^"|"$/g,'').trim());
+        return{name:cols[0]||'',tag:cols[1]||'',rating:parseInt(cols[2])||1000};
+      }).filter(r=>r.name);
+      _csvRows=data;
+      const newCount=data.filter(r=>!S.db.find(p=>p.name.toLowerCase()===r.name.toLowerCase())).length;
+      prev.textContent=`Found ${data.length} players, ${newCount} new (${data.length-newCount} already exist, will be skipped).`;
+      prev.style.color=newCount?'var(--gr)':'var(--mu)';
+      btn.style.display=newCount?'block':'none';
+    }catch(err){
+      prev.textContent='⚠ Could not parse CSV.';
+      prev.style.color='var(--re)';
+      _csvRows=null;
+      btn.style.display='none';
+    }
+  };
+  reader.readAsText(f);
+}
+
+function runCsvImport(){
+  if(!_csvRows)return;
+  let added=0;
+  _csvRows.forEach(r=>{
+    if(!r.name||S.db.find(p=>p.name.toLowerCase()===r.name.toLowerCase()))return;
+    S.db.push({id:uid(),name:r.name,tag:r.tag,rating:r.rating,baseRating:r.rating,
+      isNR:false,gamesPlayed:0,wins:0,losses:0,ties:0,createdAt:new Date().toISOString()});
+    added++;
+  });
+  _csvRows=null;
+  STORE.save('db');renderDB();renderRoster();updatePvSelect();
+  closeModal();
+  toast(`✅ Added ${added} player${added!==1?'s':''}`,`ok`,3000);
+}
+
 function openExportModal(){
   openModal(`<div class="modal-title">📤 Export Data</div>
     <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
@@ -3328,7 +3445,7 @@ function runExport(fmt){
   } else if(fmt==='pdf'){
     content=buildSessionReport();filename=`pb-session-report-${Date.now()}.txt`;mime='text/plain;charset=utf-8';
   } else {
-    content=JSON.stringify({version:18,exportDate:new Date().toISOString(),players:S.db,session:S.session,archive:S.archive},null,2);
+    content=JSON.stringify({version:23,exportDate:new Date().toISOString(),players:S.db,session:S.session,archive:S.archive},null,2);
     filename=`pb-ladder-${Date.now()}.json`;mime='application/json;charset=utf-8';
   }
   // FIX: Blob correctly handles non-ASCII chars (e.g. "Hải long")
@@ -3404,108 +3521,6 @@ function doCopyEl(id){
 
 /* ── RESET RATINGS ─────────────────────────────────── */
 
-/* ── SYR x APL EXAMPLE DATA ────────────────────────── */
-function seedExampleData(){
-  if(S.db.length>0||S.archive.length>0) return; // don't overwrite existing data
-  const I={aqwa:'ex01',jon:'ex02',mag:'ex03',mar:'ex04',jay:'ex05',vonn:'ex06',an:'ex07',kez:'ex08',
-    huy:'ex09',say:'ex10',hai:'ex11',cha:'ex12',mer:'ex13',hwa:'ex14',imm:'ex15',
-    dav:'ex16',kk:'ex17',boss:'ex18',qui:'ex19',matt:'ex20',kon:'ex21'};
-  S.db=[
-    {id:I.aqwa,name:'Aqwa',        tag:'',rating:1123,gamesPlayed:8, wins:8,losses:0,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.jon, name:'Jon',         tag:'',rating:1056,gamesPlayed:8, wins:6,losses:2,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.mag, name:'Magilian',    tag:'',rating:1041,gamesPlayed:7, wins:5,losses:2,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.jay, name:'JayKtm',      tag:'',rating:1025,gamesPlayed:7, wins:4,losses:3,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.an,  name:'An',          tag:'',rating:1018,gamesPlayed:7, wins:4,losses:3,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.huy, name:'Huy',         tag:'',rating:1017,gamesPlayed:7, wins:4,losses:3,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.say, name:'SayantanSen', tag:'',rating:1017,gamesPlayed:7, wins:4,losses:3,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.hai, name:'Hải long',    tag:'',rating:1017,gamesPlayed:5, wins:3,losses:2,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.mar, name:'Martin Brown',tag:'',rating:1012,gamesPlayed:7, wins:4,losses:3,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.kez, name:'Keziah',      tag:'',rating:1010,gamesPlayed:7, wins:4,losses:3,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.vonn,name:'Vonn',        tag:'',rating:1009,gamesPlayed:7, wins:4,losses:3,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.imm, name:'Imm Pasara',  tag:'',rating:991, gamesPlayed:7, wins:3,losses:4,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.mer, name:'merbg',       tag:'',rating:987, gamesPlayed:7, wins:3,losses:4,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.dav, name:'David Liu',   tag:'',rating:986, gamesPlayed:7, wins:3,losses:4,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.cha, name:'Chantana',    tag:'',rating:985, gamesPlayed:7, wins:3,losses:4,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.hwa, name:'Hwasaup',     tag:'',rating:980, gamesPlayed:7, wins:3,losses:4,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.kk,  name:'KK',          tag:'',rating:977, gamesPlayed:4, wins:1,losses:3,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.matt,name:'Matt',        tag:'',rating:966, gamesPlayed:7, wins:2,losses:5,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.boss,name:'Boss',        tag:'',rating:937, gamesPlayed:7, wins:2,losses:5,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.kon, name:'Konstantin',  tag:'',rating:925, gamesPlayed:7, wins:1,losses:6,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-    {id:I.qui, name:'Quillon',     tag:'',rating:921, gamesPlayed:7, wins:1,losses:6,ties:0,createdAt:'2025-03-28T00:00:00Z'},
-  ];
-  const mk=(id,c,t1a,t2a,s1,s2)=>({id,court:c,t1:t1a.map(k=>I[k]),t2:t2a.map(k=>I[k]),s1,s2,status:'done',eloDeltas:null});
-  const archPlayers=S.db.map(p=>({id:p.id,name:p.name,tag:p.tag||'',sRating:p.rating,startRating:1000,wins:p.wins,losses:p.losses,ties:p.ties,matchesPlayed:p.gamesPlayed,ptsFor:0,ptsAgainst:0}));
-  S.archive=[{
-    id:'syr-apl-28mar2025',
-    name:'[SYR x APL] Weekend Pickles & Ladders',
-    date:'2025-03-28T15:00:00.000Z',
-    players:archPlayers,
-    rounds:[
-      {number:1, ts:'2025-03-28T15:00:00Z',
-        sitOuts:[I.aqwa,I.huy,I.hwa,I.jon,I.kez,I.kk,I.mag,I.say],
-        matches:[mk('r1m1',1,['vonn','an'],  ['dav','qui'],  11,4),
-                 mk('r1m2',2,['cha','jay'],  ['matt','kon'], 11,3),
-                 mk('r1m3',3,['mer','mar'],  ['imm','boss'], 8,11)]},
-      {number:2, ts:'2025-03-28T15:20:00Z',
-        sitOuts:[I.an,I.boss,I.cha,I.hwa,I.imm,I.jay,I.say,I.vonn],
-        matches:[mk('r2m1',1,['mar','kez'],  ['mer','kon'],  11,7),
-                 mk('r2m2',2,['dav','matt'], ['aqwa','qui'], 7,10),
-                 mk('r2m3',3,['mag','kk'],   ['huy','jon'],  11,5)]},
-      {number:3, ts:'2025-03-28T15:40:00Z',
-        sitOuts:[I.dav,I.huy,I.jon,I.kon,I.mar,I.matt,I.mer,I.qui],
-        matches:[mk('r3m1',1,['jay','hwa'],  ['say','cha'],  11,0),
-                 mk('r3m2',2,['vonn','kk'],  ['mag','an'],   6,11),
-                 mk('r3m3',3,['boss','kez'], ['aqwa','imm'], 0,11)]},
-      {number:4, ts:'2025-03-28T16:00:00Z',
-        sitOuts:[I.boss,I.cha,I.dav,I.kez,I.kon,I.matt,I.mer,I.qui],
-        matches:[mk('r4m1',1,['hwa','jon'],  ['say','huy'],  1,11),
-                 mk('r4m2',2,['aqwa','jay'], ['an','imm'],   11,2),
-                 mk('r4m3',3,['mar','kk'],   ['vonn','mag'], 10,11)]},
-      {number:5, ts:'2025-03-28T16:20:00Z',
-        sitOuts:[I.an,I.aqwa,I.imm,I.jay,I.kk,I.mag,I.mar,I.vonn],
-        matches:[mk('r5m1',1,['say','hwa'],  ['cha','huy'],  10,8),
-                 mk('r5m2',2,['mer','kez'],  ['qui','boss'], 11,5),
-                 mk('r5m3',3,['dav','kon'],  ['matt','jon'], 0,11)]},
-      {number:6, ts:'2025-03-28T16:40:00Z',
-        sitOuts:[I.boss,I.cha,I.dav,I.jon,I.kon,I.matt,I.mer,I.qui],
-        matches:[mk('r6m1',1,['aqwa','mag'], ['imm','jay'],  11,5),
-                 mk('r6m2',2,['vonn','hwa'], ['say','an'],   1,11),
-                 mk('r6m3',3,['mar','huy'],  ['kk','kez'],   11,8)]},
-      {number:7, ts:'2025-03-28T17:00:00Z',
-        sitOuts:[I.huy,I.hwa,I.imm,I.kez,I.kk,I.mar,I.say,I.vonn],
-        matches:[mk('r7m1',1,['mer','jon'],  ['cha','matt'], 11,5),
-                 mk('r7m2',2,['dav','boss'], ['qui','kon'],  11,9),
-                 mk('r7m3',3,['aqwa','an'],  ['mag','jay'],  11,4)]},
-      {number:8, ts:'2025-03-28T17:20:00Z',
-        sitOuts:[I.an,I.aqwa,I.cha,I.dav,I.jay,I.kk,I.kon,I.mag,I.qui],
-        matches:[mk('r8m1',1,['mer','huy'],  ['hai','say'],  11,10),
-                 mk('r8m2',2,['mar','jon'],  ['imm','kez'],  10,8),
-                 mk('r8m3',3,['vonn','matt'],['hwa','boss'], 11,3)]},
-      {number:9, ts:'2025-03-28T17:40:00Z',
-        sitOuts:[I.boss,I.hwa,I.imm,I.jon,I.kez,I.kk,I.mar,I.matt,I.vonn],
-        matches:[mk('r9m1',1,['hai','qui'],  ['cha','dav'],  4,11),
-                 mk('r9m2',2,['aqwa','kon'], ['mag','an'],   8,6),
-                 mk('r9m3',3,['mer','say'],  ['huy','jay'],  4,11)]},
-      {number:10,ts:'2025-03-28T18:00:00Z',
-        sitOuts:[I.an,I.aqwa,I.huy,I.jay,I.kk,I.kon,I.mag,I.mer,I.say],
-        matches:[mk('r10m1',1,['mar','vonn'],['hai','jon'],  5,11),
-                 mk('r10m2',2,['cha','kez'], ['imm','matt'], 11,9),
-                 mk('r10m3',3,['qui','boss'],['hwa','dav'],  0,11)]},
-      {number:11,ts:'2025-03-28T18:20:00Z',
-        sitOuts:[I.boss,I.cha,I.hwa,I.imm,I.kez,I.kk,I.matt,I.qui,I.vonn],
-        matches:[mk('r11m1',1,['hai','aqwa'],['jay','kon'],  11,3),
-                 mk('r11m2',2,['mag','jon'], ['an','huy'],   11,5),
-                 mk('r11m3',3,['mar','say'], ['mer','dav'],  11,8)]},
-      {number:12,ts:'2025-03-28T18:40:00Z',
-        sitOuts:[I.an,I.dav,I.huy,I.jay,I.kk,I.mag,I.mar,I.mer,I.say],
-        matches:[mk('r12m1',1,['hai','kez'], ['cha','hwa'],  11,6),
-                 mk('r12m2',2,['vonn','imm'],['boss','matt'],11,5),
-                 mk('r12m3',3,['aqwa','jon'],['qui','kon'],  11,0)]},
-    ]
-  }];
-  STORE.save();
-  toast('📊 Loaded [SYR x APL] Weekend Pickles & Ladders — Mar 28 2025','ok');
-}
 
 /* ── END SESSION WITH SUMMARY ──────────────────────── */
 function doEndSession(){
@@ -3516,10 +3531,14 @@ function doEndSession(){
       players:S.session.players.map(sp=>{const p=gp(sp.id)||{};return{id:sp.id,name:sp.name||p.name||'?',tag:sp.tag||p.tag||'',sRating:sp.sRating,startRating:sp.startRating,wins:sp.wins,losses:sp.losses,ties:sp.ties,matchesPlayed:sp.matchesPlayed,ptsFor:sp.ptsFor,ptsAgainst:sp.ptsAgainst};}),
       cfLog:JSON.parse(JSON.stringify(S.session.cfLog||[]))};
     S.archive.unshift(arch);if(S.archive.length>30)S.archive.pop();
-    const top=[...arch.players].sort((a,b)=>b.sRating-a.sRating).slice(0,3);
+    const topN=arch.players.length>=6?3:1; // show 1 winner for small sessions
+    const top=[...arch.players].sort((a,b)=>b.sRating-a.sRating).slice(0,topN);
     const n=S.session.name;S.checkedIn.clear();S.session=null;
     CF._confirmAllBusy=false;CF._confirmAllLastTs=0;
     if(_cfTick){clearInterval(_cfTick);_cfTick=null;}
+    // Reset session name field for next session
+    const _nameEl=document.getElementById('sess-name-flow');
+    if(_nameEl){_nameEl.value='';const _day=new Date().toLocaleDateString('en',{weekday:'long'});_nameEl.placeholder=`${_day} Open Play…`;}
     recalcAllTimeRatings();
     STORE.save();stopTimer();stopElapsed();
     const pb=document.getElementById('prog-bar');if(pb)pb.style.width='0%';
@@ -3534,10 +3553,10 @@ function doEndSession(){
         <div class="pnc"><div class="pn">${esc(sp.name)}${sp.tag?`<span class="ptag">${esc(sp.tag)}</span>`:''}</div></div>
         <div style="font-size:.75rem;color:var(--mu)">${sp.wins}W/${sp.losses}L</div>
         <div class="pr">${Math.round(sp.sRating)}</div>
-        <span class="dl ${(sp.sRating-sp.startRating)>0?'du':(sp.sRating-sp.startRating)<0?'dd':'dz'}">${sp.sRating-sp.startRating>=0?'+':''}${Math.round(sp.sRating-sp.startRating)}</span>
+        ${(()=>{const d=Math.round(sp.sRating-sp.startRating);return d!==0?`<span class="dl ${d>0?'du':'dd'}">${d>=0?'+':''}${d}</span>`:'';})()} 
       </div>`).join('')}
       <button class="btn bp" style="width:100%;margin-top:14px" onclick="closeModal();switchTab('standings')">View Full Standings →</button>`);
-    switchTab('standings');
+    // Stay on current tab — user navigates via the modal button above
   });
 }
 
@@ -3562,7 +3581,8 @@ function openEditScoreCF(matchIdx){
     <div style="display:flex;gap:7px;margin-top:10px">
       <button class="btn bp" style="flex:1" onclick="_saveCFScore(${matchIdx})">Save &amp; Recalculate</button>
       <button class="btn bg2" style="flex:1" onclick="closeModal()">Cancel</button>
-    </div>`);
+    </div>
+    <button class="btn bd2 sm" style="width:100%;margin-top:8px" onclick="closeModal();deleteMatchFromHistory(${matchIdx})" title="Delete match and reverse ELO impact">🗑 Delete &amp; Reverse ELO</button>`);
   renderQS('cfeqs','cfes1','cfes2');
 }
 function _saveCFScore(matchIdx){
@@ -3657,12 +3677,15 @@ function updateHeader(){
   if(S.session?.status==='lobby'){
     b.textContent='LOBBY';b.className='';b.style.color='var(--gr)';
     s.textContent=S.session.name;
+    document.title=`📋 ${S.session.name} | Pickleball Ladder`;
   }else if(S.session?.status==='active'){
     b.style.color='';
     const label=S.session.cfMode?`CF ${S.session.cfMatchCount||0}`:`R${S.session.round}`;
     b.textContent=`${label} LIVE`;b.className='live';s.textContent=S.session.name;
+    document.title=`🟢 ${S.session.name} | Pickleball Ladder`;
   }else{
     b.style.color='';b.textContent='SETUP';b.className='';s.textContent='No active session';
+    document.title='🏓 Pickleball Ladder';
   }
   const sb=document.getElementById('share-btn');
   if(sb&&!PLAYER_MODE)sb.style.display='inline-flex';
@@ -3717,7 +3740,7 @@ function initCourtPills(containerId,onSel){
 }
 
 /* § ADMIN — PIN hashed, device-session scoped
-/* ── ADMIN PIN SYSTEM ────────────────────────────────────────────────
+/* ── ADMIN CODE SYSTEM ────────────────────────────────────────────────
    Security model:
    · PIN is NEVER stored or transmitted in plaintext.
      Only SHA-256(pin) is stored in S.adminPin and synced via Firebase.
@@ -3743,112 +3766,70 @@ function initCourtPills(containerId,onSel){
    ══════════════════════════════════════════════════════════════════ */
 
 let ADMIN_UNLOCKED=false;
-let _pinBuffer='';
 
-// ── Room-scoped device lock key ──────────────────────────────────
-function _deviceLockKey(){
-  return`pb_dev_lock_${SYNC.roomId||localStorage.getItem('pb_room_id')||'local'}`;
-}
-function _setDeviceLocked(value){
-  try{localStorage.setItem(_deviceLockKey(),JSON.stringify({locked:!!value}));}
-  catch(e){}
-}
-function _isDeviceLocked(){
-  try{const raw=localStorage.getItem(_deviceLockKey());if(!raw)return false;return!!JSON.parse(raw).locked;}
-  catch(e){return false;}
-}
-
-// ── SHA-256 PIN hashing ──────────────────────────────────────────
-async function _hashPin(pin){
-  const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(pin));
+// ── Admin Code hashing & storage ─────────────────────────────────
+async function _hashPin(code){
+  const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(code));
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
-
-// ── Public PIN API ───────────────────────────────────────────────
 function getAdminPin(){return S.adminPin||'';}
-
-async function setAdminPin(pin){
-  S.adminPin=pin?await _hashPin(pin):'';
+async function setAdminPin(code){
+  S.adminPin=code?await _hashPin(code):'';
   STORE.save();
 }
 
-// ── PIN dot display ──────────────────────────────────────────────
-function _updatePinDots(){
-  for(let i=0;i<4;i++){
-    const d=document.getElementById(`pd${i}`);
-    if(d)d.classList.toggle('filled',i<_pinBuffer.length);
-  }
-}
-
-function pinKey(k){
-  if(_pinBuffer.length>=4)return;
-  _pinBuffer+=k;
-  _updatePinDots();
-  if(_pinBuffer.length===4)setTimeout(_checkPin,180);
-}
-function pinDel(){if(_pinBuffer.length>0){_pinBuffer=_pinBuffer.slice(0,-1);_updatePinDots();}}
-
-// Keyboard support for PIN entry — essential for laptop/desktop users
-document.addEventListener('keydown',e=>{
-  const overlay=document.getElementById('admin-lock');
-  if(!overlay?.classList.contains('open'))return;
-  if(e.key>='0'&&e.key<='9'){e.preventDefault();pinKey(e.key);}
-  else if(e.key==='Backspace'){e.preventDefault();pinDel();}
-});
-
-// ── PIN entry flow ───────────────────────────────────────────────
-async function _checkPin(){
+// ── Admin Code entry ─────────────────────────────────────────────
+async function _submitAdminCode(){
   const stored=getAdminPin();
-  const entered=_pinBuffer;
-  _pinBuffer='';
+  const inp=document.getElementById('admin-code-input');
+  const entered=(inp?.value||'').trim();
+  if(!entered){inp?.focus();return;}
 
   if(!stored){
-    // No PIN set yet: two-step set flow
-    if(!window._pinStage){
-      window._pinStage='confirm';window._pinFirst=entered;
-      document.getElementById('lock-sub').textContent='Re-enter PIN to confirm.';
-      _updatePinDots();return;
+    // No code set yet — use this as the new code (first unlock sets it)
+    if(!window._codeStage){
+      window._codeStage='confirm';window._codeFirst=entered;
+      if(inp)inp.value='';inp?.focus();
+      document.getElementById('lock-sub').textContent='Re-enter code to confirm.';
+      return;
     }
-    if(entered===window._pinFirst){
-      window._pinStage=null;window._pinFirst=null;
+    if(entered===window._codeFirst){
+      window._codeStage=null;window._codeFirst=null;
       await setAdminPin(entered);
       _doUnlock();
-      toast('Admin PIN set ✓','ok');
+      toast('Admin code set ✓','ok');
     }else{
-      window._pinStage=null;window._pinFirst=null;
-      document.getElementById('lock-sub').textContent='PINs didn\'t match. Try again.';
-      _updatePinDots();
+      window._codeStage=null;window._codeFirst=null;
+      if(inp)inp.value='';inp?.focus();
+      _codeFail("Codes didn't match. Try again.");
     }
     return;
   }
 
-  // Verify PIN (backwards-compat: migrate 4-char plaintext to hash)
-  let hash;
-  if(stored.length===4){
-    if(entered!==stored){_pinFail();return;}
-    hash=await _hashPin(entered);
-    S.adminPin=hash;
-    STORE.save();
-  }else{
-    hash=await _hashPin(entered);
-    if(hash!==stored){_pinFail();return;}
-  }
-  _doUnlock();
+  // Verify — hash and compare
+  const hash=await _hashPin(entered);
+  if(hash===stored){_doUnlock();}
+  else{if(inp)inp.value='';inp?.focus();_codeFail('Wrong code. Try again.');}
 }
 
-function _pinFail(){
-  document.getElementById('lock-sub').textContent='Wrong PIN. Try again.';
-  document.getElementById('lock-sub').style.color='var(--re)';
-  _updatePinDots();
+function _codeFail(msg){
+  const s=document.getElementById('lock-sub');
+  if(s){s.textContent=msg;s.style.color='var(--re)';}
   setTimeout(()=>{
-    const s=document.getElementById('lock-sub');
-    if(s){s.textContent='Enter your admin PIN to continue.';s.style.color='';}
+    const s2=document.getElementById('lock-sub');
+    if(s2){s2.textContent='Enter your admin code to continue.';s2.style.color='';}
   },1800);
 }
+
 
 // ── Lock / Unlock ────────────────────────────────────────────────
 function _showAdminLockOverlay(){
   document.getElementById('admin-lock').classList.add('open');
+  // Focus the input so user can type immediately (works on desktop)
+  setTimeout(()=>{
+    const inp=document.getElementById('admin-code-input');
+    if(inp){inp.value='';inp.focus();}
+  },80);
 }
 function _hideAdminLockOverlay(){
   document.getElementById('admin-lock').classList.remove('open');
@@ -3856,23 +3837,39 @@ function _hideAdminLockOverlay(){
 
 function _doUnlock(){
   ADMIN_UNLOCKED=true;
-  _pinBuffer='';_updatePinDots();
-  _setDeviceLocked(false);   // persist unlocked state locally
+  const inp=document.getElementById('admin-code-input');
+  if(inp)inp.value='';
+  _setDeviceLocked(false);
   _hideAdminLockOverlay();
   const lb=document.getElementById('lock-btn');
   if(lb)lb.style.display=getAdminPin()?'inline-block':'none';
   updatePinStatus();
+  renderRoster(); // refresh start button state — now code is set
 }
 
 function lockAdmin(){
-  if(!getAdminPin()){toast('Set a PIN first (Setup tab → Admin PIN)','warn');return;}
+  if(!getAdminPin()){toast('Set an Admin Code first (Setup tab → Admin Code)','warn');return;}
   ADMIN_UNLOCKED=false;
-  _setDeviceLocked(true);    // persist locked state locally
-  document.getElementById('lock-sub').textContent='Enter your admin PIN to continue.';
+  _setDeviceLocked(true);
+  document.getElementById('lock-sub').textContent='Enter your admin code to continue.';
   document.getElementById('lock-sub').style.color='';
-  _pinBuffer='';_updatePinDots();
   const lb=document.getElementById('lock-btn');if(lb)lb.style.display='none';
   _showAdminLockOverlay();
+}
+
+// ── Device lock state (persisted in localStorage per device) ─────
+// Keeps this device locked across page reloads without re-entering the code.
+// Key is tied to the fixed room so it resets if the room changes.
+const _LOCK_KEY='pb_dev_lock_main';
+function _setDeviceLocked(locked){
+  try{localStorage.setItem(_LOCK_KEY,JSON.stringify({locked}));}catch(e){}
+}
+function _isDeviceLocked(){
+  try{
+    const v=localStorage.getItem(_LOCK_KEY);
+    if(v)return JSON.parse(v).locked===true;
+  }catch(e){}
+  return false;
 }
 
 // ── Called after state is restored (init, _applyRemote first load) ──
@@ -3881,17 +3878,15 @@ function checkAdminAccess(){
   const pin=getAdminPin();
 
   if(!pin){
-    // No PIN set — open access mode. Grant access silently.
-    // Never force the organiser to set up a PIN just to use the app.
-    // PIN setup is opt-in from Settings, not a gate on first load.
+    // No code set — open access mode. Grant access silently.
     _doUnlock();
     return;
   }
 
-  // PIN is set: check persistent device lock state
+  // Code is set: check persistent device lock state
   if(_isDeviceLocked()){
     const sub=document.getElementById('lock-sub');
-    if(sub){sub.textContent='Enter your admin PIN to continue.';sub.style.color='';}
+    if(sub){sub.textContent='Enter your admin code to continue.';sub.style.color='';}
     _showAdminLockOverlay();
     return;
   }
@@ -3904,11 +3899,15 @@ function updatePinStatus(){
   const el=document.getElementById('pin-status');if(!el)return;
   const pin=getAdminPin();
   if(pin){
-    el.innerHTML='✓ PIN is set — admin access protected';
+    el.innerHTML='✓ Admin code set — access protected';
     el.style.color='var(--gr)';
+    const req=document.getElementById('pin-required-badge');
+    if(req)req.style.display='none';
   }else{
-    el.innerHTML='No PIN set — admin is open to anyone &nbsp;<button class="btn bp sm" style="font-size:.65rem;padding:3px 10px" onclick="openPinSetupModal()">Set PIN now</button>';
-    el.style.color='var(--or)';
+    el.innerHTML='No admin code — <strong>required before starting a session</strong> &nbsp;<button class="btn bp sm" style="font-size:.65rem;padding:3px 10px" onclick="openPinSetupModal()">Set Code now</button>';
+    el.style.color='var(--re)';
+    const req=document.getElementById('pin-required-badge');
+    if(req)req.style.display='';
   }
   // Show 🔓 badge in header when no PIN — visible reminder that room is unprotected
   const badge=document.getElementById('admin-mode-badge');
@@ -3918,24 +3917,24 @@ function updatePinStatus(){
 // ── PIN setup modal ──────────────────────────────────────────────
 function openPinSetupModal(){
   const pin=getAdminPin();
-  openModal(`<div class="modal-title">🔐 Admin PIN ${pin?'Change':'Setup'}</div>
+  openModal(`<div class="modal-title">🔐 Admin Code ${pin?'Change':'Setup'}</div>
     <p style="font-size:.76rem;color:var(--mu);margin-bottom:12px;line-height:1.55">
-      ${pin?'Enter your current PIN, then set a new one.':'Set a 4-digit PIN. Required every time the app is opened on a new device.'}
+      ${pin?'Enter your current code, then set a new one.':'Set an admin code (any length). Required when the app is opened on a new device.'}
     </p>
-    ${pin?`<label>CURRENT PIN</label>
-    <input id="cur-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:8px;letter-spacing:6px;text-align:center;font-size:1.2rem" onkeydown="if(event.key==='Enter')_savePinModal()"/>`:``}
-    <label>NEW PIN (4 digits)</label>
-    <input id="new-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:8px;letter-spacing:6px;text-align:center;font-size:1.2rem" onkeydown="if(event.key==='Enter')_savePinModal()"/>
-    <label>CONFIRM NEW PIN</label>
-    <input id="conf-pin" class="inp" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="margin-bottom:12px;letter-spacing:6px;text-align:center;font-size:1.2rem" onkeydown="if(event.key==='Enter')_savePinModal()"/>
+    ${pin?`<label>CURRENT CODE</label>
+    <input id="cur-pin" class="inp" type="password" placeholder="Enter code" style="margin-bottom:8px;text-align:center;font-size:1.1rem" onkeydown="if(event.key==='Enter')_savePinModal()"/>`:``}
+    <label>NEW CODE</label>
+    <input id="new-pin" class="inp" type="password" placeholder="Enter code" style="margin-bottom:8px;text-align:center;font-size:1.1rem" onkeydown="if(event.key==='Enter')_savePinModal()"/>
+    <label>CONFIRM NEW CODE</label>
+    <input id="conf-pin" class="inp" type="password" placeholder="Enter code" style="margin-bottom:12px;text-align:center;font-size:1.1rem" onkeydown="if(event.key==='Enter')_savePinModal()"/>
     <div style="display:flex;gap:7px;flex-wrap:wrap">
-      <button class="btn bp" style="flex:2" onclick="_savePinModal()">Save PIN</button>
-      ${pin?`<button class="btn bd2 sm" onclick="_removePinModal()">Remove PIN</button>`:''}
+      <button class="btn bp" style="flex:2" onclick="_savePinModal()">Save Code</button>
+      ${pin?`<button class="btn bd2 sm" onclick="_removePinModal()">Remove Code</button>`:''}
       <button class="btn bg2 sm" onclick="closeModal()">Cancel</button>
     </div>
     ${pin?`<div class="dv" style="margin:12px 0"></div>
-    <div style="font-size:.72rem;color:var(--re);font-weight:700;margin-bottom:4px">⚠️ RESET PIN FOR ALL DEVICES</div>
-    <button class="btn bd2 sm" style="width:100%" onclick="_resetPinAllDevices()">Reset PIN (affects all devices)</button>`:''}
+    <div style="font-size:.72rem;color:var(--re);font-weight:700;margin-bottom:4px">⚠️ RESET CODE FOR ALL DEVICES</div>
+    <button class="btn bd2 sm" style="width:100%" onclick="_resetPinAllDevices()">Reset code (affects all devices)</button>`:''}
   `);
 }
 
@@ -3944,9 +3943,9 @@ async function _removePinModal(){
   if(stored){
     const cur=(document.getElementById('cur-pin')?.value||'').trim();
     const curHash=await _hashPin(cur);
-    if(curHash!==stored){toast('Current PIN is wrong','err');return;}
+    if(curHash!==stored){toast('Current code is wrong','err');return;}
   }
-  showCfm('Remove admin PIN? Anyone will be able to access admin mode.','Remove PIN','bd2',()=>{
+  showCfm('Remove admin code? Anyone will be able to access admin mode.','Remove Code','bd2',()=>{
     S.adminPin='';
     STORE.save();
     _setDeviceLocked(false);
@@ -3954,7 +3953,7 @@ async function _removePinModal(){
     _hideAdminLockOverlay();
     closeModal();
     updatePinStatus();
-    toast('PIN removed','warn');
+    toast('Admin code removed','warn');
   });
 }
 
@@ -3963,27 +3962,27 @@ async function _savePinModal(){
   if(stored){
     const cur=(document.getElementById('cur-pin')?.value||'').trim();
     const curHash=await _hashPin(cur);
-    if(curHash!==stored){toast('Current PIN is wrong','err');return;}
+    if(curHash!==stored){toast('Current code is wrong','err');return;}
   }
   const p1=(document.getElementById('new-pin')?.value||'').trim();
   const p2=(document.getElementById('conf-pin')?.value||'').trim();
-  if(!/^\d{4}$/.test(p1)){toast('PIN must be exactly 4 digits','err');return;}
-  if(p1!==p2){toast('PINs do not match','err');return;}
-  setAdminPin(p1);closeModal();updatePinStatus();toast('Admin PIN updated ✓','ok');
+  if(p1.length<3){toast('Code must be at least 3 characters','err');return;}
+  if(p1!==p2){toast('Codes don\'t match','err');return;}
+  setAdminPin(p1);closeModal();updatePinStatus();renderRoster();toast('Admin code updated ✓','ok');
 }
 
-// Reset PIN globally — forces all devices to re-enter PIN on next access
+// Reset code globally — forces all devices to re-enter PIN on next access
 function _resetPinAllDevices(){
   showCfm(
-    '<strong>Reset PIN for ALL devices?</strong><br/><span style="font-size:.73rem;color:var(--mu)">Every connected device will be locked out until a new PIN is set. This affects the shared room immediately.</span>',
-    '🔑 Reset PIN','bd2',()=>{
+    '<strong>Reset admin code for ALL devices?</strong><br/><span style="font-size:.73rem;color:var(--mu)">Every connected device will be locked out until a new code is set. This affects the shared room immediately.</span>',
+    '🔑 Reset Code','bd2',()=>{
       S.adminPin='';
       STORE.save();                    // pushes null PIN to Firebase — affects all devices
       _setDeviceLocked(false);         // this device: clear lock state (will show set-PIN prompt)
       ADMIN_UNLOCKED=false;
       closeModal();
       checkAdminAccess();              // show the lock overlay with set-PIN prompt
-      toast('Admin PIN reset — all devices will require a new PIN','warn',5000);
+      toast('Admin code reset — all devices will need to re-enter the code','warn',5000);
     }
   );
 }
@@ -4014,6 +4013,29 @@ function toggleNRInput(checked){
 }
 
 // Compute session-position percentile ratings from tonight's checked-in rated players
+/* ── ADVANCED MODE TOGGLE ─────────────────────────────────────────
+   Simple mode (default): shows only core controls needed during play.
+   Advanced mode: reveals Lock pair, Courts mid-session, Audit log,
+   Auto-confirm, Lock+Shuffle, Quality — things power organisers need.
+   State persists in localStorage across page loads.
+   ─────────────────────────────────────────────────────────────────*/
+function toggleAdvMode(){
+  const isAdv=document.body.hasAttribute('data-adv');
+  if(isAdv){
+    document.body.removeAttribute('data-adv');
+    localStorage.removeItem('pb_adv_mode');
+    toast('Simple mode','ok');
+  }else{
+    document.body.setAttribute('data-adv','1');
+    localStorage.setItem('pb_adv_mode','1');
+    toast('Advanced mode — more controls visible','ok');
+  }
+}
+function _restoreAdvMode(){
+  if(localStorage.getItem('pb_adv_mode')==='1')
+    document.body.setAttribute('data-adv','1');
+}
+
 function duprToElo(dupr){
   // Linear mapping: DUPR 2.0 → ELO 700, 4.0 → 1000, 6.0 → 1300
   // Each DUPR point = 150 ELO points
@@ -4063,17 +4085,20 @@ function setNRLevel(level){
 }
 
 /* ── NR promotion ── */
+// Returns true if promotion happened (caller is responsible for STORE.save)
 function checkNRPromotion(id){
-  const p=gp(id),sp=gsp(id);if(!p||!sp||!p.isNR)return;
+  const p=gp(id),sp=gsp(id);if(!p||!sp||!p.isNR)return false;
   const games=sp.matchesPlayed||0;
   if(games>=5){
     p.isNR=false;p.isSeeding=false;
     p.rating=Math.max(400,Math.round(sp.sRating));
     sp.isNR=false;sp.isSeeding=false;
     AUDIT.log('nr_promotion',`NR promotion: ${p.name} rated at ${p.rating} after ${games} calibration games`);
-    STORE.save();
     toast(`🎯 ${esc(p.name)} rated at <strong>${p.rating}</strong>`,'ok',4500);
-  }else if(games>=3){p.isSeeding=true;sp.isSeeding=true;}
+    return true;
+  }
+  if(games>=3){p.isSeeding=true;sp.isSeeding=true;}
+  return false;
 }
 
 let _cfTick=null;
@@ -5278,10 +5303,23 @@ const CF={
   submitScore(courtNum){
     if(!S.session)return;
     const court=S.session.cfCourts?.[courtNum];if(!court?.match)return;
-    const m=court.match;
     const s1=parseInt(document.getElementById(`cf-s1-${courtNum}`)?.value);
     const s2=parseInt(document.getElementById(`cf-s2-${courtNum}`)?.value);
     if(isNaN(s1)||isNaN(s2)||s1<0||s2<0){toast('Enter valid scores','err');return;}
+    // Soft warnings — confirm unusual scores, don't block them
+    const hi=Math.max(s1,s2),lo=Math.min(s1,s2);
+    const warn=hi>25?`Score ${s1}–${s2} looks very high — correct?`
+      :s1===0&&s2===0?`Score 0–0 — is that right?`
+      :(hi>=11&&lo===0)?`Shutout ${s1}–${s2} — correct?`
+      :null;
+    if(warn){showCfm(warn,'Yes, submit','bp',()=>this._doSubmitScore(courtNum,s1,s2));return;}
+    this._doSubmitScore(courtNum,s1,s2);
+  },
+
+  _doSubmitScore(courtNum,s1,s2){
+    if(!S.session)return;
+    const court=S.session.cfCourts?.[courtNum];if(!court?.match)return;
+    const m=court.match;
     const now=Date.now();
     m.s1=s1;m.s2=s2;m.status='done';m.endTime=now;
     m.eloDeltas=ELO.calcIds(m.t1,m.t2,s1,s2);
@@ -5297,7 +5335,8 @@ const CF={
     });
     [...m.t1,...m.t2].forEach(id=>checkNRPromotion(id));
     // Track NR pairing distribution
-    const hasNR=[...m.t1,...m.t2].some(mid=>gp(mid)?.isNR||gsp(mid)?.isNR);
+  const _anyPromo=[...m.t1,...m.t2].map(id=>checkNRPromotion(id)).some(Boolean);
+  if(_anyPromo)STORE.save(); // one save for all promotions in this match
     if(hasNR){
       if(!S.session.nrPairingHx)S.session.nrPairingHx={};
       [...m.t1,...m.t2].forEach(mid=>{
@@ -5776,7 +5815,11 @@ const CF={
       const acBtn=document.getElementById('cf-ac-toggle');
       if(acBtn){acBtn.classList.toggle('bc',!!S.session.cfAutoConfirm);acBtn.classList.toggle('bg2',!S.session.cfAutoConfirm);acBtn.style.display='';}
       const acDur=document.getElementById('cf-ac-dur');
-      if(acDur)acDur.style.display=S.session.cfAutoConfirm?'':'none';
+      if(acDur){
+        acDur.style.display=S.session.cfAutoConfirm?'':'none';
+        // Pre-set duration from saved session value
+        if(S.session.cfAutoConfirmDur)acDur.value=String(S.session.cfAutoConfirmDur);
+      }
     }
     if(isLobby){return;} // rest of renderLive is courts/queue — not relevant in lobby
 
@@ -6024,8 +6067,8 @@ const CF={
       <div style="display:flex;gap:7px;flex-wrap:wrap">
         <button class="btn bp" style="flex:1 1 100%" onclick="cancelAutoConfirm(${courtNum});CF.confirmSuggestion(${courtNum})">✓ Confirm — Start Court ${(S.session?.courtOffset||0)+courtNum}</button>
         <button class="btn bs sm" title="Full reshuffle" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleSuggestion(${courtNum})">↺ Reshuffle</button>
-        <button class="btn bs sm" title="Partial reshuffle — lock some players" onclick="cancelAutoConfirm(${courtNum});CF.openPartialReshuffle(${courtNum})">🔒 Lock+Shuffle</button>
-        ${sug.meta?.constraintReason&&['wait-override','outlier-wait','playtime-catch-up'].includes(sug.meta.constraintReason)?`<button class="btn bs sm" style="color:var(--cy)" title="Regenerate prioritising match quality — ignores wait/fairness pressure this once" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleQualityFirst(${courtNum})">⚖ Quality</button>`:``}
+        <button class="btn bs sm adv-only" style="display:none" title="Partial reshuffle — lock some players" onclick="cancelAutoConfirm(${courtNum});CF.openPartialReshuffle(${courtNum})">🔒 Lock+Shuffle</button>
+        ${sug.meta?.constraintReason&&['wait-override','outlier-wait','playtime-catch-up'].includes(sug.meta.constraintReason)?`<button class="btn bs sm adv-only" style="display:none;color:var(--cy)" title="Regenerate prioritising match quality — ignores wait/fairness pressure this once" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleQualityFirst(${courtNum})">⚖ Quality</button>`:``}
       </div></div>`;
   },
 
@@ -6116,29 +6159,33 @@ const CF={
     const avgIdleMin=totalStarts>0
       ?Math.round((totalIdleMs+liveIdleMs)/totalStarts/60000*10)/10:null;
 
-    el.innerHTML=`<div class="ct" style="margin-bottom:8px">📈 Session Health</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;font-size:.74rem">
-        <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px">
-          <div style="color:var(--mu);font-size:.65rem;margin-bottom:3px">GAMES / PLAYER</div>
-          <div style="font-weight:700;color:var(--tx)">${avgG} avg <span style="color:${spread>3?'var(--or)':'var(--gr)'}">· spread ${spread}</span></div>
-          <div style="font-size:.67rem;color:var(--mu)">${minG}–${maxG} range</div>
-        </div>
-        <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px">
-          <div style="color:var(--mu);font-size:.65rem;margin-bottom:3px">MATCH QUALITY</div>
-          <div style="font-weight:700;color:var(--tx)">${qualLabel}</div>
-          <div style="font-size:.67rem;color:var(--mu)">avg ${avgGap}pt gap</div>
-        </div>
-        <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px">
-          <div style="color:var(--mu);font-size:.65rem;margin-bottom:3px">AVG WAIT TIME</div>
-          <div style="font-weight:700;color:${avgWaitMin>18?'var(--or)':'var(--tx)'}">${avgWaitMin} min</div>
-          <div style="font-size:.67rem;color:var(--mu)">${log.length} matches total</div>
-        </div>
-        <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px">
-          <div style="color:var(--mu);font-size:.65rem;margin-bottom:3px">AVG IDLE / MATCH</div>
-          <div style="font-weight:700;color:${avgIdleMin!==null&&avgIdleMin>4?'var(--or)':'var(--tx)'}">${avgIdleMin!==null?avgIdleMin+'min':'—'}</div>
-          <div style="font-size:.67rem;color:var(--mu)">between matches per court</div>
-        </div>
-      </div>`;
+    const isCollapsed=S.session._healthCollapsed||false;
+    const statsHtml=isCollapsed?'':
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;font-size:.74rem;margin-top:8px">'+
+      '<div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px">'+
+        '<div style="color:var(--mu);font-size:.65rem;margin-bottom:3px">GAMES / PLAYER</div>'+
+        `<div style="font-weight:700;color:var(--tx)">${avgG} avg <span style="color:${spread>3?'var(--or)':'var(--gr)'}">· spread ${spread}</span></div>`+
+        `<div style="font-size:.67rem;color:var(--mu)">${minG}–${maxG} range</div>`+
+      '</div>'+
+      '<div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px">'+
+        '<div style="color:var(--mu);font-size:.65rem;margin-bottom:3px">MATCH QUALITY</div>'+
+        `<div style="font-weight:700;color:var(--tx)">${qualLabel}</div>`+
+        `<div style="font-size:.67rem;color:var(--mu)">avg ${avgGap}pt gap</div>`+
+      '</div>'+
+      '<div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px">'+
+        '<div style="color:var(--mu);font-size:.65rem;margin-bottom:3px">AVG WAIT TIME</div>'+
+        `<div style="font-weight:700;color:${avgWaitMin>18?'var(--or)':'var(--tx)'}">${avgWaitMin} min</div>`+
+        `<div style="font-size:.67rem;color:var(--mu)">${log.length} matches total</div>`+
+      '</div>'+
+      '<div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:8px">'+
+        '<div style="color:var(--mu);font-size:.65rem;margin-bottom:3px">AVG IDLE / MATCH</div>'+
+        `<div style="font-weight:700;color:${avgIdleMin!==null&&avgIdleMin>4?'var(--or)':'var(--tx)'}">${avgIdleMin!==null?avgIdleMin+'min':'—'}</div>`+
+        '<div style="font-size:.67rem;color:var(--mu)">between matches per court</div>'+
+      '</div></div>';
+    el.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="S.session._healthCollapsed=!S.session._healthCollapsed;CF._renderHealthPanel()">
+        <div class="ct" style="margin-bottom:0">📈 Session Health</div>
+        <span style="font-size:.7rem;color:var(--mu)">${isCollapsed?'▼ Show':'▲ Hide'}</span>
+      </div>`+statsHtml;
   },
 
   _renderQueue(){
@@ -6365,7 +6412,7 @@ function _backupToLocal(){
       archive:JSON.parse(JSON.stringify(S.archive||[])),
       checkedIn:[...S.checkedIn],
       savedAt:Date.now(),
-      roomId:SYNC.roomId||localStorage.getItem('pb_room_id')||'?'
+      roomId:'main'
     }));
   }catch(e){console.warn('[backup] Local backup failed:',e);}
 }
@@ -6375,28 +6422,6 @@ function _getLocalBackup(){
   catch(e){return null;}
 }
 
-function _recoverRoom(){
-  const inp=document.getElementById('fb-room-inp')||document.getElementById('banner-room-inp');
-  const roomId=(inp?.value||'').trim().toUpperCase();
-  if(!roomId||roomId.length<4){toast('Enter a valid room code','err');return;}
-  localStorage.setItem('pb_room_id',roomId);
-  localStorage.removeItem('pb_local_backup');
-  const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
-  SYNC.clearConfig();
-  SYNC.autoConnect();
-  toast(`Reconnecting to room ${roomId}…`,'ok');
-}
-function _recoverRoomFromBanner(){
-  const inp=document.getElementById('banner-room-inp');
-  const roomId=(inp?.value||'').trim().toUpperCase();
-  if(!roomId||roomId.length<4){toast('Enter a valid room code','err');return;}
-  localStorage.setItem('pb_room_id',roomId);
-  localStorage.removeItem('pb_local_backup');
-  document.getElementById('sync-error-banner')?.remove();
-  SYNC.clearConfig();
-  SYNC.autoConnect();
-  toast(`Reconnecting to room ${roomId}…`,'ok');
-}
 
 function _showRestoreButtonIfAvailable(){
   const b=_getLocalBackup();
@@ -6405,7 +6430,7 @@ function _showRestoreButtonIfAvailable(){
   if(!b||!b.session||!btn)return;
   const mins=Math.round((Date.now()-b.savedAt)/60000);
   const ago=mins<=1?'just now':`${mins} min ago`;
-  if(sub)sub.textContent=`Firebase unreachable — local backup from ${ago} is available`;
+  if(sub)sub.textContent=`Offline — showing local backup from ${ago}`;
   btn.style.display='inline-flex';
 }
 
@@ -6418,7 +6443,7 @@ function _restoreFromLocal(){
   S.session?.activePlayers?.forEach(id=>S.checkedIn.add(id));
   const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
   renderDB();renderRoster();renderHistory();renderArchive();renderLive();renderStandings();
-  updateHeader();updatePinStatus();_updateRoomBadge();
+  updateHeader();updatePinStatus();
   _setSaveStatus('offline');
   toast('📦 Session restored from local backup — working offline','ok',5000);
   setTimeout(()=>{if(!SYNC.ready)SYNC.autoConnect();},8000);
@@ -6454,14 +6479,14 @@ function _startLoadingProgressTimer(){
         // Auto-dismiss: show cached data, Firebase still syncing in background
         fl2.classList.add('hidden');
         _pageFirstLoad=false;
-        if(sub)sub.textContent='Connecting to Firebase';
+        if(sub)sub.textContent='Connecting…';
         const rb=document.getElementById('fb-retry-btn');
         if(rb)rb.style.display='none';
         toast('📶 Slow connection — showing cached data. Sync continues in background.','warn',5000);
         _setSaveStatus('offline');
       } else {
         // No backup — keep showing overlay but update message
-        if(sub)sub.textContent='Waiting for Firebase… check your connection';
+        if(sub)sub.textContent='Still connecting — check your internet';
       }
     },3000);
   },3000);
@@ -6476,13 +6501,14 @@ function _stopLoadingProgressTimer(){
 function _autoRestoreFromLocal(){
   const b=_getLocalBackup();
   if(!b||!b.db)return false;
-  const roomId=localStorage.getItem('pb_room_id');
   const ageMs=Date.now()-(b.savedAt||0);
   // Discard if older than 48 h
   if(ageMs>48*3600*1000){console.log('[backup] Local snapshot too old, skipping');return false;}
-  // Discard if belongs to a different room — don't pollute a new room with old data
-  if(b.roomId&&roomId&&b.roomId!==roomId){
-    console.log('[backup] Snapshot is for a different room, clearing stale data');
+  // Discard if backup belongs to a different room (old room codes like 'SYRxAPL').
+  // With a fixed room, any backup whose roomId !== 'main' is stale and must not apply.
+  const CURRENT_ROOM='main';
+  if(b.roomId&&b.roomId!==CURRENT_ROOM){
+    console.log('[backup] Snapshot is from old room '+b.roomId+', clearing stale data');
     localStorage.removeItem('pb_local_backup');
     return false;
   }
@@ -6695,11 +6721,12 @@ function renderHistory(){
   const gn=id=>{const sp=gsp(id);if(sp?.name)return esc(sp.name+(sp.tag?` ${sp.tag}`:''));return esc(gp(id)?.name||'?');};
   const log=S.session.cfLog||[];
   if(!log.length){
-    const count=S.session.players?.length||0;
+    const count=S.session.activePlayers?.length||S.session.players?.length||0;
+    const isLobby=S.session.status==='lobby';
     el.innerHTML=`<div class="empty" style="text-align:center;padding:18px 10px">
-      <div style="font-size:1.8rem;margin-bottom:8px">🏓</div>
-      <div style="font-size:.82rem;color:var(--tx);font-weight:600;margin-bottom:4px">No matches yet</div>
-      <div style="font-size:.72rem;color:var(--mu)">${count} player${count!==1?'s':''} checked in — match history will appear here after the first score is submitted.</div>
+      <div style="font-size:1.8rem;margin-bottom:8px">${isLobby?'📋':'🏓'}</div>
+      <div style="font-size:.82rem;color:var(--tx);font-weight:600;margin-bottom:4px">${isLobby?'Check-in open':'No matches yet'}</div>
+      <div style="font-size:.72rem;color:var(--mu)">${isLobby?`${count} player${count!==1?'s':''} in lobby — matches will appear here once play begins.`:`${count} player${count!==1?'s':''} checked in — match history will appear here after the first score is submitted.`}</div>
     </div>`;
     return;
   }
@@ -6716,8 +6743,7 @@ function renderHistory(){
       <div class="hscore" style="${tie?'color:var(--go)':''}">${sc}</div>
       <div style="flex:1;text-align:right;font-weight:${!t1w&&!tie?700:400};color:${!t1w&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div>
       <span style="font-size:.63rem;color:var(--m2)">${durMin}${extTag}</span>
-      <button class="sedit" style="width:auto;margin-top:0" onclick="openEditScoreCF(${origIdx})">✏️</button>
-      <button class="sedit" style="width:auto;margin-top:0;color:var(--re)" onclick="deleteMatchFromHistory(${origIdx})" title="Delete match and reverse ELO impact">🗑</button>
+      <button class="sedit" style="width:auto;margin-top:0" onclick="openEditScoreCF(${origIdx})">✏️ Edit</button>
     </div>`;
   }).join('');
 }
@@ -6886,7 +6912,7 @@ function renderPlayerView(){
       <div style="display:flex;gap:10px;justify-content:center;margin-top:6px">
         <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--gr)">${sp.wins}</div><div style="font-size:.62rem;color:var(--mu)">WINS</div></div>
         <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--re)">${sp.losses}</div><div style="font-size:.62rem;color:var(--mu)">LOSSES</div></div>
-        <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:${d>=0?'var(--gr)':'var(--re)'}">${d>=0?'+':''}${d}</div><div style="font-size:.62rem;color:var(--mu)">Rating Δ</div></div>
+        <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:${d>=0?'var(--gr)':'var(--re)'}">${d>=0?'+':''}${d}</div><div style="font-size:.62rem;color:var(--mu)">Rating</div></div>
         <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--mu)">${pd>=0?'+':''}${pd}</div><div style="font-size:.62rem;color:var(--mu)">PTS DIFF</div></div>
       </div>
     </div>`;
@@ -6948,10 +6974,22 @@ function renderPlayerView(){
   }
 
   el.innerHTML=statusHtml+sessHtml+matchHtml;
+
+  // Show "Last updated N min ago" in player mode so users know if data is fresh
+  if(PLAYER_MODE&&S._lastSaveTs){
+    const mins=Math.round((Date.now()-S._lastSaveTs)/60000);
+    const label=mins<1?'just now':mins===1?'1 min ago':`${mins} min ago`;
+    let lu=document.getElementById('pv-last-updated');
+    if(!lu){
+      lu=document.createElement('div');lu.id='pv-last-updated';
+      lu.style.cssText='text-align:center;font-size:.64rem;color:var(--mu);padding:6px 0 2px';
+      el.appendChild(lu);
+    }
+    lu.textContent=`⏱ Stats updated ${label}`;
+  }
 }
 
 
-// March 28 session data parsed from PDF
 /* § BOOT */
 let PLAYER_MODE=false; // true when URL has ?view=player or #player
 
@@ -6974,18 +7012,22 @@ function initPlayerMode(){
   if(shareBtn)shareBtn.style.display='none';
   const lockBtn=document.getElementById('lock-btn');
   if(lockBtn)lockBtn.style.display='none';
-  // Also hide room code badge and sync badge — no need to expose room info to players
-  const roomBadge=document.getElementById('room-code-badge');
-  if(roomBadge)roomBadge.style.display='none';
+  // Also hide sync badge — no need to expose connection info to players
   const syncBadge=document.getElementById('sync-badge');
   if(syncBadge)syncBadge.style.display='none';
   switchTab('player');
 }
 
 function init(){
+  _restoreAdvMode(); // must be first — sets data-adv before any render
+  // Set session name placeholder to current day and pre-fill from last used value
+  const nameEl=document.getElementById('sess-name-flow');
+  if(nameEl){
+    const day=new Date().toLocaleDateString('en',{weekday:'long'});
+    nameEl.placeholder=`${day} Open Play…`;
+  }
   // Pre-fill session name from last used value
   const savedName=localStorage.getItem('pb_last_sess_name');
-  const nameEl=document.getElementById('sess-name-flow');
   if(savedName&&nameEl&&!nameEl.value)nameEl.value=savedName;
   initCourtPills('cpills-setup',n=>{S.courts=n;renderRoster();});
   initCourtPills('cpills-live',n=>{
@@ -6996,7 +7038,6 @@ function init(){
   document.querySelectorAll('.tb').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.tab)));
   document.getElementById('cfm-bg').addEventListener('click',function(e){if(e.target===this)document.getElementById('cfm-no').click();});
   initPlayerMode();
-  _updateRoomBadge();
 
   // Auto-restore local snapshot immediately — app is usable before Firebase responds
   const _didRestore=_autoRestoreFromLocal();
