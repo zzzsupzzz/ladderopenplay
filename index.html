@@ -979,6 +979,28 @@ const SYNC={
 
       S.db=remote.db||[];
       S.session=remote.session||null;
+      // v8: If a device receives a live session snapshot before/without db,
+      // rebuild a read-safe db from the session's player snapshot. This prevents
+      // fresh/mobile devices from showing '?' players and gives Firebase a chance
+      // to repair the db node without changing the current live session.
+      if((!S.db||!S.db.length) && Array.isArray(S.session?.players) && S.session.players.length){
+        console.warn('[sync] Remote session has players but db is empty/missing — rebuilding db from session.players');
+        S.db=S.session.players.map(sp=>({
+          id:sp.id,
+          name:sp.name||'?',
+          tag:sp.tag||'',
+          rating:Math.round(sp.sRating||sp.startRating||1000),
+          baseRating:Math.round(sp.startRating||sp.sRating||1000),
+          isNR:!!sp.isNR,
+          gamesPlayed:sp.matchesPlayed||0,
+          wins:sp.wins||0,
+          losses:sp.losses||0,
+          ties:sp.ties||0,
+          ptsFor:sp.ptsFor||0,
+          ptsAgainst:sp.ptsAgainst||0
+        }));
+        setTimeout(()=>{ if(SYNC.ready&&SYNC.ref) STORE.save('db'); },250);
+      }
       // v7: if a stale/corrupt mobile snapshot ever produced CF suggestions/courts with
       // player ids not present in the authoritative DB, remove only the suggestions.
       // Active court matches are kept, but will render '?' only if Firebase session is truly corrupt.
@@ -1246,7 +1268,12 @@ let _saveStatusTimer=null;
 /* § UTILS
 /* ── UTILS ───────────────────────────────────────── */
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5);}
-function gp(id){return S.db.find(p=>p.id===id);}
+function gp(id){
+  // v8: live sessions may arrive with session.players before/without db on a fresh device.
+  // Use session.players as a display fallback so courts never show '?' when the session
+  // already contains the player snapshot.
+  return (S.db||[]).find(p=>p.id===id) || (S.session?.players||[]).find(p=>p.id===id);
+}
 function gsp(id){return S.session?.players.find(p=>p.id===id);}
 function courtDefaultLabel(courtNum){return `Court ${(S.session?.courtOffset||0)+Number(courtNum)}`;}
 function courtLabel(courtNum){
@@ -7205,7 +7232,7 @@ function initPlayerMode(){
 
 function init(){
   _restoreAdvMode();
-  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v7 remote-only first load + no mobile stale restore');
+  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v8 session-player fallback + remote db guard');
   // One-time clear of old local backups that don't include adminPin.
   // Without this, the old backup (adminPin missing) gets restored first, briefly
   // showing "No admin code" until Firebase responds. New backups include adminPin.
