@@ -105,7 +105,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--tx);min-h
 @keyframes blink{50%{opacity:.3}}
 /* ── Advanced mode: .adv-only items hidden until "More" is toggled ── */
 .adv-only{display:none!important}
-[data-adv] .adv-only{display:revert!important}
+[data-adv] .adv-only{display:flex!important}
 [data-adv] #adv-mode-btn{border-color:var(--cy)!important;color:var(--cy)!important}
 #hbadge{font-size:.7rem;font-weight:700;padding:3px 10px;border-radius:20px;background:var(--s2);border:1px solid var(--bd);color:var(--mu)}
 #hbadge.live{border-color:var(--gr);color:var(--gr)}
@@ -468,7 +468,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
         <div style="display:flex;gap:5px;flex-wrap:wrap">
           <button class="btn bs sm" onclick="openRosterModal()">👤 Players ±</button>
           <button id="cf-ac-toggle" class="btn bg2 sm adv-only" onclick="toggleCFAutoConfirm()" title="Auto-confirm suggestions after timer">⚡ Auto</button>
-          <select id="cf-ac-dur" class="inp adv-only" style="width:70px;font-size:.72rem;padding:4px 6px;display:none" onchange="S.session&&(S.session.cfAutoConfirmDur=+this.value)" title="Auto-confirm delay">
+          <select id="cf-ac-dur" class="inp adv-only" style="width:70px;font-size:.72rem;padding:4px 6px" onchange="S.session&&(S.session.cfAutoConfirmDur=+this.value)" title="Auto-confirm delay">
             <option value="30">30s</option>
             <option value="60">60s</option>
             <option value="90">90s</option>
@@ -3920,7 +3920,7 @@ async function _savePinModal(){
   const p2=(document.getElementById('conf-pin')?.value||'').trim();
   if(p1.length<3){toast('Code must be at least 3 characters','err');return;}
   if(p1!==p2){toast('Codes don\'t match','err');return;}
-  setAdminPin(p1);closeModal();updatePinStatus();renderRoster();toast('Admin code updated ✓','ok');
+  await setAdminPin(p1);closeModal();updatePinStatus();renderRoster();toast('Admin code updated ✓','ok');
 }
 
 // Reset code globally — forces all devices to re-enter PIN on next access
@@ -6019,8 +6019,8 @@ const CF={
       <div style="display:flex;gap:7px;flex-wrap:wrap">
         <button class="btn bp" style="flex:1 1 100%" onclick="cancelAutoConfirm(${courtNum});CF.confirmSuggestion(${courtNum})">✓ Confirm — Start Court ${(S.session?.courtOffset||0)+courtNum}</button>
         <button class="btn bs sm" title="Full reshuffle" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleSuggestion(${courtNum})">↺ Reshuffle</button>
-        <button class="btn bs sm adv-only" style="display:none" title="Partial reshuffle — lock some players" onclick="cancelAutoConfirm(${courtNum});CF.openPartialReshuffle(${courtNum})">🔒 Lock+Shuffle</button>
-        ${sug.meta?.constraintReason&&['wait-override','outlier-wait','playtime-catch-up'].includes(sug.meta.constraintReason)?`<button class="btn bs sm adv-only" style="display:none;color:var(--cy)" title="Regenerate prioritising match quality — ignores wait/fairness pressure this once" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleQualityFirst(${courtNum})">⚖ Quality</button>`:``}
+        <button class="btn bs sm adv-only" title="Partial reshuffle — lock some players" onclick="cancelAutoConfirm(${courtNum});CF.openPartialReshuffle(${courtNum})">🔒 Lock+Shuffle</button>
+        ${sug.meta?.constraintReason&&['wait-override','outlier-wait','playtime-catch-up'].includes(sug.meta.constraintReason)?`<button class="btn bs sm adv-only" style="color:var(--cy)" title="Regenerate prioritising match quality — ignores wait/fairness pressure this once" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleQualityFirst(${courtNum})">⚖ Quality</button>`:``}
       </div></div>`;
   },
 
