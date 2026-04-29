@@ -863,46 +863,14 @@ const SYNC={
         }
       }
 
-      // First-load reconcile: local newer than Firebase → push local up ONLY when safe.
-      // Safety rules (all must pass):
-      //   1. Local backup is more than 5s newer than remote (network glitch buffer)
-      //   2. Local backup belongs to THIS device (same _by) — another device's backup should never push
-      //   3. Remote does NOT have an active session — if remote has a live session, it always wins
-      //   4. Local state is substantively complete (has players + matches or archive)
+      // v6 SAFETY: on first load, Firebase is authoritative if it has any real room data.
+      // A phone may have an old local backup that is newer by timestamp because it
+      // was opened later. That backup must NEVER auto-push over Firebase. Local
+      // backups are display-only until the organiser performs a real action.
       if(!allowDestructive&&isFirstLoad&&remoteTs>0){
-        const localBackupTs=_getLocalBackup()?.savedAt||0;
-        const localBackupBy=_getLocalBackup()?._by||'';
-        const remoteHasActiveSession=
-          (remote.session?.status==='active'&&(remote.session?.cfMatchCount||0)>0)
-          ||remote.session?.status==='lobby'; // lobby is in-progress, never overwrite with stale local
-        if(localBackupTs>remoteTs+5000){
-          const localHasData=(S.db?.length>0)&&((S.session?.status==='active'&&(S.session?.cfMatchCount||0)>0)||(S.archive?.length>0));
-          const remoteHasData=(remote.db?.length>0)&&((remote.session?.status==='active'&&(remote.session?.cfMatchCount||0)>0)||(remote.archive||[]).length>0);
-          // Remote active session always wins — prevents stale backup from wiping live session
-          if(remoteHasActiveSession){
-            console.warn('[sync] Remote has active session — local backup will not override');
-            // Fall through to apply remote
-          } else if(!localHasData&&remoteHasData){
-            console.warn('[sync] Local backup has no data but remote does — remote wins, skipping local push');
-            _stopLoadingProgressTimer();
-            const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
-            _pageFirstLoad=false;
-            checkAdminAccess();
-            _renderActiveTab();
-            // Fall through to apply remote below
-          } else if(localHasData || ((S.db||[]).length>0 && !(remote.db||[]).length)){
-            console.log(`[sync] Local (${localBackupTs}) newer/richer than Firebase (${remoteTs}) — pushing local up`);
-            setTimeout(()=>STORE.save('all'),200);
-            _stopLoadingProgressTimer();
-            const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
-            if(_pageFirstLoad&&S.session?.status==='active'&&!PLAYER_MODE){
-              switchTab('live');startElapsed();updateProgress();
-            }
-            _pageFirstLoad=false;
-            checkAdminAccess();
-            _renderActiveTab();
-            return;
-          }
+        const remoteHasAnyData=(remote.db?.length>0)||!!remote.session||(remote.archive||[]).length>0||!!adminPinVal;
+        if(remoteHasAnyData){
+          console.log('[sync] First-load: Firebase has data — remote wins over local cache');
         }
       }
 
@@ -955,29 +923,9 @@ const SYNC={
         return;
       }
 
-      // First-load completeness recovery: if this browser has a richer local backup
-      // than Firebase (common after Firebase was accidentally overwritten by incognito),
-      // restore the richer local snapshot even if the remote write is newer.
-      if(!allowDestructive&&isFirstLoad&&remoteTs>0){
-        const richerLocal=(localDbLen>remoteDbLen&&localDbLen>=4)||
-          (localHasLive&&!remoteHasLive)||
-          ((S.session?.cfLog?.length||0)>((remote.session?.cfLog||[]).length||0));
-        const localLooksReal=localDbLen>0&&(S.session||S.archive?.length>0||S.adminPin);
-        if(richerLocal&&localLooksReal){
-          console.warn('[sync] First-load: local snapshot is richer than Firebase — restoring local to Firebase',{
-            localDbLen,remoteDbLen,localHasLive,remoteHasLive
-          });
-          setTimeout(()=>STORE.save('all'),250);
-          _stopLoadingProgressTimer();
-          const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
-          _pageFirstLoad=false;
-          HAS_REMOTE_HYDRATED=true;
-          checkAdminAccess();
-          _renderActiveTab();
-          toast('📦 Restored richer local database back to Firebase','ok',5000);
-          return;
-        }
-      }
+      // v6: disabled automatic richer-local restore on first load.
+      // Recovery from local backup is now manual only; this prevents a stale phone
+      // from resurrecting an old live session/history into the shared room.
 
       // cfLog shrink guard
       const localCfLogLen=S.session?.cfLog?.length||0;
@@ -6772,7 +6720,8 @@ function _autoRestoreFromLocal(){
 
   const mins=Math.round(ageMs/60000);
   const ago=mins<=0?'just now':`${mins}m ago`;
-  console.log(`[backup] Auto-restored local snapshot from ${ago}`);
+  console.log(`[backup] Auto-restored local snapshot from ${ago} (cache only; Firebase will overwrite when ready)`);
+  S._cacheOnlyRestore=true;
   _setSaveStatus('saving'); // will update to 'saved' once Firebase confirms
   return true;
 }
@@ -7247,7 +7196,7 @@ function initPlayerMode(){
 
 function init(){
   _restoreAdvMode();
-  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v5 atomic confirm-all + stale-suggestion cleanup');
+  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v6 remote-wins mobile stale-cache lock');
   // One-time clear of old local backups that don't include adminPin.
   // Without this, the old backup (adminPin missing) gets restored first, briefly
   // showing "No admin code" until Firebase responds. New backups include adminPin.
