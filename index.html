@@ -639,6 +639,7 @@ const DEVICE_ID=Math.random().toString(36).slice(2,10); // Runtime only — no l
 /* ── FIREBASE REAL-TIME SYNC ──────────────────────── */
 const SYNC={
   ready:false, ref:null, roomId:null, _ignoreNext:false, _unsubscribe:null,
+  _pendingWrite:null, // queued write made before connection was ready
   _conflictActive:false, // prevents stacking multiple conflict toasts
   _pendingConflict:null, // queues latest dropped conflict for re-run after resolve
   // Connection state: 'idle' | 'connecting' | 'connected' | 'error'
@@ -646,6 +647,7 @@ const SYNC={
 
   clearConfig(){
     this.ready=false;this.ref=null;this.roomId=null;this.state='idle';
+    this._pendingWrite=null;
     if(this._unsubscribe){this._unsubscribe();this._unsubscribe=null;}
     this._updateBadge();
   },
@@ -738,6 +740,12 @@ const SYNC={
       this.ready=true;
       this.state='connected';
       this._updateBadge();
+      // Flush any write queued before this connection was established
+      if(this._pendingWrite&&(Date.now()-this._pendingWrite.ts<30000)){
+        console.log('[sync] Early-flush queued write on connect, segment:',this._pendingWrite.segment);
+        const pw=this._pendingWrite;this._pendingWrite=null;
+        setTimeout(()=>STORE.push(pw.segment,pw.onComplete),200);
+      }
       toast('🟢 Live — all devices connected','ok');
       return true;
     }catch(e){
@@ -749,8 +757,12 @@ const SYNC={
 
   push(segment='all', onComplete=null){
     if(!this.ready||!this.ref){
-      // Sync not ready — still fire onComplete so callers (conflict resolution etc.) don't jam
-      if(onComplete)onComplete();
+      // SYNC not ready yet — queue this write and flush once connected.
+      // This handles the common case where the user adds a player/starts a session
+      // before Firebase has finished connecting (especially on mobile with slow WiFi).
+      console.log('[sync] Write queued (not ready yet), segment:', segment);
+      this._pendingWrite={segment,onComplete,ts:Date.now()};
+      if(onComplete)onComplete(); // don't block callers
       return;
     }
     S._lastSaveTs=Date.now();
@@ -1016,6 +1028,14 @@ const SYNC={
         }
         _pageFirstLoad=false;
         checkAdminAccess();
+        // Flush any write that was queued before connection was ready
+        if(SYNC._pendingWrite&&(Date.now()-SYNC._pendingWrite.ts<30000)){
+          console.log('[sync] Flushing queued write, segment:',SYNC._pendingWrite.segment);
+          const pw=SYNC._pendingWrite;SYNC._pendingWrite=null;
+          setTimeout(()=>STORE.push(pw.segment,pw.onComplete),100);
+        }else{
+          SYNC._pendingWrite=null;
+        }
         // First-launch PIN prompt: fires once when a brand-new empty room is created.
         // Condition: no PIN set, no players in DB, not player mode, not already prompted.
         const isNewEmptyRoom=!getAdminPin()&&!S.db?.length&&!S.archive?.length&&!PLAYER_MODE;
