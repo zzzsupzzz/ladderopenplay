@@ -1283,6 +1283,34 @@ function courtLabel(courtNum){
 }
 function courtLabelEsc(courtNum){return esc(courtLabel(courtNum));}
 
+// v9: Tap a court label to rename that court immediately.
+// Names are stored inside the active session and synced to all admin devices.
+function openCourtRenameModal(courtNum){
+  if(!S.session){toast('No active session','warn');return;}
+  const current=(S.session.courtNames||{})[courtNum]||'';
+  const fallback=courtDefaultLabel(courtNum);
+  openModal(`<div class="modal-title">✏️ Rename ${esc(fallback)}</div>
+    <p style="font-size:.74rem;color:var(--mu);line-height:1.5;margin-bottom:10px">Give this court a custom name. Leave blank to use <strong>${esc(fallback)}</strong>.</p>
+    <label>COURT NAME</label>
+    <input id="court-rename-inp" class="inp" value="${esc(current)}" placeholder="e.g. Center Court / Court A" style="margin-bottom:12px" onkeydown="if(event.key==='Enter')saveCourtRename(${courtNum})"/>
+    <div style="display:flex;gap:7px">
+      <button class="btn bp" style="flex:1" onclick="saveCourtRename(${courtNum})">Save</button>
+      <button class="btn bg2" onclick="closeModal()">Cancel</button>
+    </div>`);
+  setTimeout(()=>{const i=document.getElementById('court-rename-inp');if(i){i.focus();i.select();}},80);
+}
+function saveCourtRename(courtNum){
+  if(!S.session)return;
+  const val=(document.getElementById('court-rename-inp')?.value||'').trim();
+  S.session.courtNames=S.session.courtNames||{};
+  const before=courtLabel(courtNum);
+  if(val)S.session.courtNames[courtNum]=val;else delete S.session.courtNames[courtNum];
+  const after=courtLabel(courtNum);
+  AUDIT.log('court_rename',`Renamed ${before} → ${after}`,courtNum);
+  closeModal();STORE.save('session');renderLive();
+  toast(`Court renamed: ${after}`,'ok');
+}
+
 /* § AUDIT — organiser action log (cancel, swap, delete, court change) */
 const AUDIT={
   // Write one entry to S.session.auditLog (no-op if no active session)
@@ -5839,6 +5867,59 @@ const CF={
     closeModal();STORE.save('session');renderLive();
   },
 
+  // v9: Tap a player name on a live court, then tap the replacement.
+  // This is the same accounting as Swap Player, but without the two-step Swap button workflow.
+  openActivePlayerReplace(courtNum,outId){
+    if(!S.session)return;
+    const ct=S.session.cfCourts?.[courtNum];
+    if(!ct?.match){toast('No active match on this court','warn');return;}
+    const m=ct.match;
+    if(![...m.t1,...m.t2].includes(outId)){toast('That player is no longer on this court','warn');return;}
+    const onOtherCourts=new Set(Object.entries(S.session.cfCourts||{})
+      .filter(([c,cx])=>+c!==courtNum&&cx?.status==='playing'&&cx.match)
+      .flatMap(([,cx])=>[...cx.match.t1,...cx.match.t2]));
+    const currentOnThis=new Set([...m.t1,...m.t2]);
+    const available=[...(S.session.cfQueue||[]),...(S.session.cfPaused||[])]
+      .filter(q=>q&&q.id&&!onOtherCourts.has(q.id)&&!currentOnThis.has(q.id))
+      .sort((a,b)=>(gp(a.id)?.name||'').localeCompare(gp(b.id)?.name||''));
+    const outName=gp(outId)?.name||'?';
+    if(!available.length){toast('No available players to replace with','warn');return;}
+    openModal(`<div class="modal-title">⇄ Replace ${esc(outName)}</div>
+      <p style="font-size:.74rem;color:var(--mu);line-height:1.5;margin-bottom:10px">Tap a player below to replace <strong>${esc(outName)}</strong> on ${courtLabelEsc(courtNum)} immediately.</p>
+      <div style="background:rgba(251,147,60,.08);border:1px solid rgba(251,147,60,.3);border-radius:8px;padding:8px 10px;margin-bottom:12px;font-size:.71rem;color:var(--or)">
+        ⚠ ${esc(outName)} will not receive ELO or a result for this match.
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+        ${available.map(q=>`<button class="btn bs sm" style="font-size:.75rem;padding:7px 11px" onclick="CF.applyActivePlayerReplace(${courtNum},'${outId}','${q.id}')">${esc(gp(q.id)?.name||'?')} <span style="font-size:.62rem;color:var(--mu)">${Math.round(CF.cfRating(q.id))}</span></button>`).join('')}
+      </div>
+      <button class="btn bg2" style="width:100%" onclick="closeModal()">Cancel</button>`);
+  },
+
+  applyActivePlayerReplace(courtNum,outId,inId){
+    if(!S.session)return;
+    const ct=S.session.cfCourts?.[courtNum];
+    if(!ct?.match)return;
+    if(outId===inId){toast('Select a different player','err');return;}
+    const m=ct.match;
+    if(![...m.t1,...m.t2].includes(outId)){closeModal();toast('That player is no longer on this court','warn');return;}
+    const onOtherCourts=new Set(Object.entries(S.session.cfCourts||{})
+      .filter(([c,cx])=>+c!==courtNum&&cx?.status==='playing'&&cx.match)
+      .flatMap(([,cx])=>[...cx.match.t1,...cx.match.t2]));
+    if(onOtherCourts.has(inId)){toast('That player is already playing on another court','err');return;}
+    ct.match={...m,
+      t1:m.t1.map(id=>id===outId?inId:id),
+      t2:m.t2.map(id=>id===outId?inId:id)
+    };
+    S.session.cfQueue=(S.session.cfQueue||[]).filter(q=>q.id!==inId);
+    if(S.session.cfPaused)S.session.cfPaused=S.session.cfPaused.filter(q=>q.id!==inId);
+    S.session.cfPauseAfterGame=(S.session.cfPauseAfterGame||[]).filter(id=>id!==outId&&id!==inId);
+    if(!S.session.cfQueue.find(q=>q.id===outId))
+      S.session.cfQueue.push({id:outId,since:Date.now(),consec:0});
+    AUDIT.log('swap_active',`Tap-replace: ${gp(outId)?.name||'?'} out → ${gp(inId)?.name||'?'} in`,courtNum);
+    closeModal();STORE.save('session');renderLive();
+    toast(`${gp(outId)?.name||'?'} → ${gp(inId)?.name||'?'} on ${courtLabel(courtNum)}`,'ok');
+  },
+
   openActiveMatchSwap(courtNum){
     if(!S.session)return;
     const ct=S.session.cfCourts[courtNum];
@@ -6263,11 +6344,12 @@ const CF={
       ${ids.map(id=>`<span onclick="_sugPickerToggle(event,'${courtNum}','${id}')" style="font-weight:600;cursor:pointer;padding:2px 5px;border-radius:6px;transition:background .12s" class="sug-player-btn" data-id="${id}" title="Tap to replace">${gn(id)}</span> <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span>`).join(' <span style="color:var(--m2)"> &amp; </span> ')}
       <div style="font-size:.63rem;color:var(--m2);margin-top:3px">avg ${avg}</div></div>`;
     return `<div class="cf-suggest" data-court="${courtNum}">
-      <div class="cf-suggest-hd">🏓 ${courtLabelEsc(courtNum)} — READY</div>
+      <div class="cf-suggest-hd"><span onclick="openCourtRenameModal(${courtNum})" title="Tap to rename court" style="cursor:pointer">🏓 ${courtLabelEsc(courtNum)} — READY ✎</span></div>
       <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:9px">
         ${pTeam(sug.t1,t1Avg,t1pgap)}<div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--m2)">VS</div>${pTeam(sug.t2,t2Avg,t2pgap)}
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:9px">${chips}</div>
+      <div id="sug-picker-${courtNum}" style="display:none;margin:6px 0 8px;background:var(--s3);border:1px solid var(--bd);border-radius:var(--ra);padding:8px"></div>
       <div class="cf-ac-wrap" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;min-height:22px">
         ${_cfAutoConfirmTimers[courtNum]?`<span id="cf-ac-${courtNum}" style="font-size:.7rem;color:var(--mu)">Auto-starting…</span><button class="btn bg2 sm" style="font-size:.65rem;padding:2px 8px" onclick="cancelAutoConfirm(${courtNum})">Cancel</button>`:''}
       </div>
@@ -6298,7 +6380,7 @@ const CF={
     const extTag=ext?`<span style="font-size:.62rem;font-weight:700;color:var(--or);background:rgba(251,147,60,.12);border:1px solid rgba(251,147,60,.3);border-radius:5px;padding:1px 5px">EXTENDED</span>`:'';
     return `<div class="court-card ${ext?'extended':''}">
       <div class="chead">
-        <span class="clbl">${courtLabelEsc(courtNum)}</span>
+        <span class="clbl" onclick="openCourtRenameModal(${courtNum})" title="Tap to rename court" style="cursor:pointer">${courtLabelEsc(courtNum)} ✎</span>
         <div style="display:flex;align-items:center;gap:8px">
           ${extTag}
           <span data-cf-elapsed="${courtNum}" class="ct-timer">--:--</span>
@@ -6307,9 +6389,9 @@ const CF={
       </div>
       <div class="cbody">
         <div class="teams">
-          <div class="team">${m.t1.map(id=>`<div style="display:flex;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:.82rem">${gn(id)} <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span>${pauseBtn(id)}</div>`).join('')}<div class="team-avg">Avg ${t1Avg}</div></div>
+          <div class="team">${m.t1.map(id=>`<div style="display:flex;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:.82rem"><span onclick="CF.openActivePlayerReplace(${courtNum},'${id}')" title="Tap to replace this player" style="cursor:pointer;padding:2px 5px;border-radius:6px">${gn(id)}</span> <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span>${pauseBtn(id)}</div>`).join('')}<div class="team-avg">Avg ${t1Avg}</div></div>
           <div class="vs-lbl">VS</div>
-          <div class="team">${m.t2.map(id=>`<div style="display:flex;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:.82rem">${gn(id)} <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span>${pauseBtn(id)}</div>`).join('')}<div class="team-avg">Avg ${t2Avg}</div></div>
+          <div class="team">${m.t2.map(id=>`<div style="display:flex;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:.82rem"><span onclick="CF.openActivePlayerReplace(${courtNum},'${id}')" title="Tap to replace this player" style="cursor:pointer;padding:2px 5px;border-radius:6px">${gn(id)}</span> <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span>${pauseBtn(id)}</div>`).join('')}<div class="team-avg">Avg ${t2Avg}</div></div>
         </div>
         <div class="srow" style="margin-top:10px">
           <input class="sinp inp" id="cf-s1-${courtNum}" type="number" inputmode="numeric" pattern="[0-9]*" min="0" max="99" placeholder="0"/>
@@ -6321,7 +6403,7 @@ const CF={
         <button class="btn bp" style="width:100%;margin-top:8px" onclick="CF.submitScore(${courtNum})">✓ Submit Score</button>
         <div style="display:flex;gap:6px;margin-top:6px">
           <button class="btn bg2 sm" style="flex:1" onclick="CF.cancelActiveMatch(${courtNum})" title="Cancel this match — return all players to queue">✕ Cancel Match</button>
-          <button class="btn bg2 sm" style="flex:1" onclick="CF.openActiveMatchSwap(${courtNum})" title="Swap a player mid-match">⇄ Swap Player</button>
+          <button class="btn bg2 sm adv-only" style="flex:1" onclick="CF.openActiveMatchSwap(${courtNum})" title="Fallback swap menu">⇄ Swap Player</button>
         </div>
       </div></div>`;
   },
@@ -7232,7 +7314,7 @@ function initPlayerMode(){
 
 function init(){
   _restoreAdvMode();
-  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v8 session-player fallback + remote db guard');
+  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v9 tap-to-rename-courts + tap-to-replace-players');
   // One-time clear of old local backups that don't include adminPin.
   // Without this, the old backup (adminPin missing) gets restored first, briefly
   // showing "No admin code" until Firebase responds. New backups include adminPin.
