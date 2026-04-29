@@ -890,8 +890,8 @@ const SYNC={
             checkAdminAccess();
             _renderActiveTab();
             // Fall through to apply remote below
-          } else if(localHasData){
-            console.log(`[sync] Local (${localBackupTs}) newer than Firebase (${remoteTs}) — pushing local up`);
+          } else if(localHasData || ((S.db||[]).length>0 && !(remote.db||[]).length)){
+            console.log(`[sync] Local (${localBackupTs}) newer/richer than Firebase (${remoteTs}) — pushing local up`);
             setTimeout(()=>STORE.save('all'),200);
             _stopLoadingProgressTimer();
             const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
@@ -995,6 +995,38 @@ const SYNC={
       if(!allowDestructive&&!isFirstLoad&&remoteArchiveLen<localArchiveLen){
         preservedArchive=[...S.archive];
         console.warn(`[sync] Archive shrink blocked (${remoteArchiveLen}<${localArchiveLen})`);
+      }
+
+      // HARD REPAIR GUARD: if a device receives a meta-only / db-missing remote
+      // while it already has a populated local database, do NOT let that remote clear
+      // the local player list. This is the exact failure seen when an incognito/admin
+      // device writes only meta and the shared db disappears until the normal browser
+      // refreshes. Preserve the richer local state and immediately repair Firebase.
+      const _remoteDbHasPlayers=Array.isArray(remote.db)&&remote.db.length>0;
+      const _localDbHasPlayers=Array.isArray(S.db)&&S.db.length>0;
+      const _remoteMissingDb=!_remoteDbHasPlayers;
+      if(!allowDestructive&&_remoteMissingDb&&_localDbHasPlayers){
+        console.warn('[sync] Remote is missing db but local has players — preserving local db and repairing Firebase');
+        remote.db=JSON.parse(JSON.stringify(S.db));
+        if((!remote.archive||!remote.archive.length)&&(S.archive||[]).length){
+          remote.archive=JSON.parse(JSON.stringify(S.archive));
+        }
+        if(!remote.session&&S.session){
+          remote.session=JSON.parse(JSON.stringify(S.session));
+        }
+        setTimeout(()=>{
+          if(SYNC.ready&&SYNC.ref){
+            const repairMeta={_by:DEVICE_ID,_ts:Date.now(),_v:(S._version||0)+1};
+            const pin=(S.adminPin||adminPinVal||'').trim();
+            if(pin)repairMeta.adminPin=pin;
+            _pushWithRetry({
+              db:JSON.parse(JSON.stringify(S.db||[])),
+              archive:JSON.parse(JSON.stringify(S.archive||[])),
+              session:S.session?JSON.parse(JSON.stringify(S.session)):null,
+              meta:repairMeta
+            },0);
+          }
+        },150);
       }
 
       S.db=remote.db||[];
@@ -4060,7 +4092,7 @@ async function _removePinModal(){
   }
   showCfm('Remove admin code? Anyone will be able to access admin mode.','Remove Code','bd2',()=>{
     S.adminPin='';
-    STORE.save();
+    if(SYNC.ready&&SYNC.ref){SYNC.ref.child('meta').update({adminPin:'',_by:DEVICE_ID,_ts:Date.now(),_v:(S._version||0)+1});}else{_backupToLocal();}
     ADMIN_UNLOCKED=true;
     _hideAdminLockOverlay();
     closeModal();
@@ -4093,7 +4125,7 @@ function _resetPinAllDevices(){
     '<strong>Reset admin code for ALL devices?</strong><br/><span style="font-size:.73rem;color:var(--mu)">Every connected device will be locked out until a new code is set. This affects the shared room immediately.</span>',
     '🔑 Reset Code','bd2',()=>{
       S.adminPin='';
-      STORE.save();                    // pushes null PIN to Firebase — affects all devices
+      if(SYNC.ready&&SYNC.ref){SYNC.ref.child('meta').update({adminPin:'',_by:DEVICE_ID,_ts:Date.now(),_v:(S._version||0)+1});}else{_backupToLocal();}
       ADMIN_UNLOCKED=false;
       closeModal();
       checkAdminAccess();              // show the lock overlay with set-PIN prompt
@@ -7187,7 +7219,7 @@ function initPlayerMode(){
 
 function init(){
   _restoreAdvMode();
-  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v3 end-session sync approval + anti-wipe');
+  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v4 db-missing repair + meta-only pin writes');
   // One-time clear of old local backups that don't include adminPin.
   // Without this, the old backup (adminPin missing) gets restored first, briefly
   // showing "No admin code" until Firebase responds. New backups include adminPin.
