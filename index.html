@@ -765,7 +765,11 @@ const SYNC={
     // _applyRemote rejects incoming writes with the same version to prevent
     // two devices writing simultaneously and silently overwriting each other.
     S._version=(S._version||0)+1;
-    const meta={_by:DEVICE_ID,_ts:S._lastSaveTs,_v:S._version,adminPin:S.adminPin||''};
+    // CRITICAL: only include adminPin in meta when we have a real hash.
+    // A push from a device that loaded before Firebase returned the hash
+    // would otherwise overwrite the stored hash with an empty string.
+    const meta={_by:DEVICE_ID,_ts:S._lastSaveTs,_v:S._version};
+    if(S.adminPin)meta.adminPin=S.adminPin; // only write hash when it exists
     const updates={meta};
     if(segment==='all'||segment==='session')
       updates.session=S.session?JSON.parse(JSON.stringify(S.session)):null;
@@ -796,8 +800,10 @@ const SYNC={
       // Sync metadata
       const remoteTs=(remote.meta?._ts)||remote._ts||0;
       const remoteBy=(remote.meta?._by)||remote._by||'';
-      const adminPinVal=(typeof remote.meta?.adminPin!=='undefined')?remote.meta.adminPin:
-                        (typeof remote.adminPin!=='undefined'?remote.adminPin:'');
+      // Only apply adminPin from remote if it's a real non-empty hash.
+      // Never overwrite a good local hash with empty (caused by a push from a device
+      // that hadn't yet received the PIN from Firebase when it pushed).
+      const adminPinVal=(remote.meta?.adminPin||remote.adminPin||'').trim();
       const localTs=S._lastSaveTs||0;
 
       // First-load reconcile: local newer than Firebase → push local up ONLY when safe.
@@ -891,12 +897,11 @@ const SYNC={
       S.session=remote.session||null;
       S.archive=preservedArchive||(remote.archive||[]);
       if(preservedCfLog&&S.session)S.session.cfLog=preservedCfLog;
-      if(typeof adminPinVal!=='undefined'){
+      if(adminPinVal){
+        // Only update if remote has a real hash — never wipe local hash with empty
         const pinChanged=S.adminPin!==adminPinVal;
         S.adminPin=adminPinVal;
         if(pinChanged){
-          // PIN changed from remote — re-run access check and update UI immediately.
-          // Without this, Setup tab shows "No admin code" even after Firebase has the hash.
           updatePinStatus();
           checkAdminAccess();
           renderRoster();
@@ -6992,7 +6997,17 @@ function initPlayerMode(){
 }
 
 function init(){
-  _restoreAdvMode(); // must be first — sets data-adv before any render
+  _restoreAdvMode();
+  console.log('[pb] Build: PIN-HYDRATION-FIX-v2');
+  // One-time clear of old local backups that don't include adminPin.
+  // Without this, the old backup (adminPin missing) gets restored first, briefly
+  // showing "No admin code" until Firebase responds. New backups include adminPin.
+  const _bv=localStorage.getItem('pb_backup_version');
+  if(_bv!=='2'){
+    localStorage.removeItem('pb_local_backup');
+    localStorage.setItem('pb_backup_version','2');
+    console.log('[pb] Cleared old backup (missing adminPin field)');
+  }
   // CRITICAL: Remove stale pb_room_id from localStorage.
   // Old app versions stored a random room code here and connected to it.
   // Current app uses only 'main'. Any leftover key causes devices to connect
