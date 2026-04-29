@@ -3639,7 +3639,11 @@ function doEndSession(){
     const _nameEl=document.getElementById('sess-name-flow');
     if(_nameEl){_nameEl.value='';const _day=new Date().toLocaleDateString('en',{weekday:'long'});_nameEl.placeholder=`${_day} Open Play…`;}
     recalcAllTimeRatings();
-    STORE.save();stopTimer();stopElapsed();
+    // End Session intentionally writes session:null and archive:+1 to Firebase.
+    // Mark it as an organiser-approved destructive transition so other devices
+    // do not mistake the ended session for an empty/stale browser overwrite.
+    markDestructiveWrite('end_session');
+    STORE.save('all');stopTimer();stopElapsed();
     const pb=document.getElementById('prog-bar');if(pb)pb.style.width='0%';
     updateHeader();renderDB();renderRoster();renderHistory();renderArchive();renderStandings();updatePvSessFilter();
     const totalM=(arch.cfLog||[]).length;
@@ -7183,7 +7187,7 @@ function initPlayerMode(){
 
 function init(){
   _restoreAdvMode();
-  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v2 anti-wipe + score-submit fix');
+  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v3 end-session sync approval + anti-wipe');
   // One-time clear of old local backups that don't include adminPin.
   // Without this, the old backup (adminPin missing) gets restored first, briefly
   // showing "No admin code" until Firebase responds. New backups include adminPin.
