@@ -610,6 +610,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 /* § STATE */
 const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,extendedMin:16,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
 let _pageFirstLoad=true; // true only once — blocks reconnection from forcing tab switch
+let HAS_REMOTE_HYDRATED=false; // true after first successful _applyRemote — guards DB writes
 
 /* ── Room ID management ─────────────────────────────
    Each organiser device generates its own room code and stores it
@@ -974,7 +975,7 @@ const SYNC={
           if(S.session?.status==='active'){startElapsed();updateProgress();}
         }
         _pageFirstLoad=false;
-        checkAdminAccess();
+        HAS_REMOTE_HYDRATED=true; // Firebase data is now in S — safe to write db/session/archive
         // Flush any write that was queued before connection was ready
         if(SYNC._pendingWrite&&(Date.now()-SYNC._pendingWrite.ts<30000)){
           console.log('[sync] Flushing queued write, segment:',SYNC._pendingWrite.segment);
@@ -1002,6 +1003,7 @@ const SYNC={
           },800);
         }
       }else{
+        HAS_REMOTE_HYDRATED=true; // remote data applied — writes are now safe
         _renderActiveTab();
         const rb=data?.meta?._by||data?._by||'';
         if(rb&&rb!==DEVICE_ID)toast('📲 Updated from another organiser','ok');
@@ -1110,14 +1112,18 @@ const SYNC={
 
 /* § STORE */
 const STORE={
-  // Returns a Promise that resolves when Firebase confirms the write.
-  // Callers that need confirmation (e.g. setAdminPin) can await this.
-  // All other callers can fire-and-forget as before.
   save(segment='all'){
-    _backupToLocal(); // local snapshot immediately — Firebase confirm follows
+    // Safety guard: never write db/archive to Firebase before remote data has been
+    // received. A premature write with empty S.db would wipe the real player database.
+    if(!HAS_REMOTE_HYDRATED&&(segment==='all'||segment==='db')&&(!S.db||S.db.length===0)&&(!S.archive||S.archive.length===0)){
+      console.warn('[store] Blocked empty-DB write before Firebase hydration (segment:',segment,')');
+      _backupToLocal();
+      return Promise.resolve(); // don't block callers, just skip the Firebase write
+    }
+    _backupToLocal();
     _setSaveStatus('saving');
     return new Promise(resolve=>{
-      SYNC.push(segment, resolve); // resolve fires after Firebase confirms
+      SYNC.push(segment, resolve);
     });
   }
 };
@@ -3747,7 +3753,21 @@ async function _hashPin(code){
 function getAdminPin(){return S.adminPin||'';}
 async function setAdminPin(code){
   S.adminPin=code?await _hashPin(code):'';
-  await STORE.save(); // wait for Firebase to confirm before returning
+  // CRITICAL: write ONLY meta.adminPin to Firebase.
+  // Never call STORE.save() here — that pushes db/session/archive and would
+  // overwrite the real player database with whatever S.db contains right now,
+  // which may be empty if Firebase hasn't finished hydrating yet.
+  if(SYNC.ready&&SYNC.ref){
+    await SYNC.ref.child('meta').update({
+      adminPin:S.adminPin,
+      _by:DEVICE_ID,
+      _ts:Date.now()
+    });
+  }else{
+    // Not connected yet — backup locally; meta will sync on next write
+    console.warn('[pin] Firebase not ready — adminPin saved locally, will sync on next write');
+    _backupToLocal();
+  }
 }
 
 // ── Admin Code entry ─────────────────────────────────────────────
