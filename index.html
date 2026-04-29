@@ -1095,10 +1095,15 @@ const SYNC={
 
 /* § STORE */
 const STORE={
+  // Returns a Promise that resolves when Firebase confirms the write.
+  // Callers that need confirmation (e.g. setAdminPin) can await this.
+  // All other callers can fire-and-forget as before.
   save(segment='all'){
-    _backupToLocal(); // snapshot locally on every save — Firebase confirm updates timestamp
-    SYNC.push(segment);
+    _backupToLocal(); // local snapshot immediately — Firebase confirm follows
     _setSaveStatus('saving');
+    return new Promise(resolve=>{
+      SYNC.push(segment, resolve); // resolve fires after Firebase confirms
+    });
   }
 };
 
@@ -3727,7 +3732,7 @@ async function _hashPin(code){
 function getAdminPin(){return S.adminPin||'';}
 async function setAdminPin(code){
   S.adminPin=code?await _hashPin(code):'';
-  STORE.save();
+  await STORE.save(); // wait for Firebase to confirm before returning
 }
 
 // ── Admin Code entry ─────────────────────────────────────────────
@@ -3920,7 +3925,11 @@ async function _savePinModal(){
   const p2=(document.getElementById('conf-pin')?.value||'').trim();
   if(p1.length<3){toast('Code must be at least 3 characters','err');return;}
   if(p1!==p2){toast('Codes don\'t match','err');return;}
-  await setAdminPin(p1);closeModal();updatePinStatus();renderRoster();toast('Admin code updated ✓','ok');
+  const btn=document.querySelector('#modal-box .btn.bp');
+  if(btn){btn.disabled=true;btn.textContent='Saving…';}
+  await setAdminPin(p1);
+  closeModal();updatePinStatus();renderRoster();
+  toast('✅ Admin code saved and confirmed','ok');
 }
 
 // Reset code globally — forces all devices to re-enter PIN on next access
