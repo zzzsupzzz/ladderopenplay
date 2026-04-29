@@ -640,7 +640,7 @@ const DEVICE_ID=Math.random().toString(36).slice(2,10); // Runtime only — no l
 /* ── FIREBASE REAL-TIME SYNC ──────────────────────── */
 const SYNC={
   ready:false, ref:null, roomId:null, _ignoreNext:false, _unsubscribe:null,
-  _pendingWrite:null, // queued write made before connection was ready
+  _pendingWrite:null, // queued Firebase update snapshot made before connection was ready
   // Connection state: 'idle' | 'connecting' | 'connected' | 'error'
   state:'idle',
 
@@ -751,20 +751,9 @@ const SYNC={
     }
   },
 
-  push(segment='all', onComplete=null){
-    if(!this.ready||!this.ref){
-      // SYNC not ready yet — queue this write and flush once connected.
-      // This handles the common case where the user adds a player/starts a session
-      // before Firebase has finished connecting (especially on mobile with slow WiFi).
-      console.log('[sync] Write queued (not ready yet), segment:', segment);
-      this._pendingWrite={segment,onComplete,ts:Date.now()};
-      if(onComplete)onComplete(); // don't block callers
-      return;
-    }
+  _buildUpdates(segment='all'){
     S._lastSaveTs=Date.now();
     // Monotonic version counter: increments on every write.
-    // _applyRemote rejects incoming writes with the same version to prevent
-    // two devices writing simultaneously and silently overwriting each other.
     S._version=(S._version||0)+1;
     // CRITICAL: only include adminPin in meta when we have a real hash.
     // A push from a device that loaded before Firebase returned the hash
@@ -775,9 +764,24 @@ const SYNC={
     if(segment==='all'||segment==='session')
       updates.session=S.session?JSON.parse(JSON.stringify(S.session)):null;
     if(segment==='all'||segment==='db')
-      updates.db=S.db;
+      updates.db=JSON.parse(JSON.stringify(S.db||[]));
     if(segment==='all'||segment==='archive')
-      updates.archive=S.archive;
+      updates.archive=JSON.parse(JSON.stringify(S.archive||[]));
+    return updates;
+  },
+
+  push(segment='all', onComplete=null){
+    const updates=this._buildUpdates(segment);
+    if(!this.ready||!this.ref){
+      // SYNC not ready yet — queue the ACTUAL update snapshot, not just the segment name.
+      // Without this, first Firebase hydration could clear S.db before the queued write
+      // flushes, causing an empty database to be pushed to Firebase.
+      console.log('[sync] Write snapshot queued (not ready yet), segment:', segment);
+      this._pendingWrite={segment,updates,onComplete,ts:Date.now()};
+      _setSaveStatus('saving');
+      if(onComplete)onComplete(); // don't block callers
+      return;
+    }
     _pushWithRetry(updates, 0, onComplete);
   },
 
@@ -806,6 +810,30 @@ const SYNC={
       // that hadn't yet received the PIN from Firebase when it pushed).
       const adminPinVal=(remote.meta?.adminPin||remote.adminPin||'').trim();
       const localTs=S._lastSaveTs||0;
+
+      // First-load bootstrap/recovery: if Firebase is truly empty but this browser has
+      // a complete local snapshot (common after an older build only saved locally),
+      // push that snapshot up instead of allowing the empty remote to wipe S.
+      if(isFirstLoad&&remoteTs===0){
+        const localHasData=(S.db?.length>0)||!!S.session||(S.archive||[]).length>0||!!S.adminPin;
+        const remoteHasData=(remote.db?.length>0)||!!remote.session||(remote.archive||[]).length>0||!!adminPinVal;
+        if(localHasData&&!remoteHasData){
+          console.warn('[sync] Firebase room empty — bootstrapping from local snapshot');
+          const updates=this._buildUpdates('all');
+          setTimeout(()=>_pushWithRetry(updates,0),100);
+          _stopLoadingProgressTimer();
+          const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
+          if(_pageFirstLoad&&(S.session?.status==='active'||S.session?.status==='lobby')&&!PLAYER_MODE){
+            switchTab('live');
+            if(S.session?.status==='active'){startElapsed();updateProgress();}
+          }
+          _pageFirstLoad=false;
+          HAS_REMOTE_HYDRATED=true;
+          checkAdminAccess();
+          _renderActiveTab();
+          return;
+        }
+      }
 
       // First-load reconcile: local newer than Firebase → push local up ONLY when safe.
       // Safety rules (all must pass):
@@ -978,9 +1006,9 @@ const SYNC={
         HAS_REMOTE_HYDRATED=true; // Firebase data is now in S — safe to write db/session/archive
         // Flush any write that was queued before connection was ready
         if(SYNC._pendingWrite&&(Date.now()-SYNC._pendingWrite.ts<30000)){
-          console.log('[sync] Flushing queued write, segment:',SYNC._pendingWrite.segment);
+          console.log('[sync] Flushing queued write snapshot, segment:',SYNC._pendingWrite.segment);
           const pw=SYNC._pendingWrite;SYNC._pendingWrite=null;
-          setTimeout(()=>STORE.push(pw.segment,pw.onComplete),100);
+          setTimeout(()=>_pushWithRetry(pw.updates,0,pw.onComplete),100);
         }else{
           SYNC._pendingWrite=null;
         }
@@ -6403,6 +6431,7 @@ function _backupToLocal(){
       checkedIn:[...S.checkedIn],
       adminPin:S.adminPin||'', // include hash so UI is correct before Firebase responds
       savedAt:Date.now(),
+      _by:DEVICE_ID,
       roomId:'main'
     }));
   }catch(e){console.warn('[backup] Local backup failed:',e);}
@@ -7012,7 +7041,7 @@ function initPlayerMode(){
 
 function init(){
   _restoreAdvMode();
-  console.log('[pb] Build: PIN-HYDRATION-FIX-v2');
+  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v1');
   // One-time clear of old local backups that don't include adminPin.
   // Without this, the old backup (adminPin missing) gets restored first, briefly
   // showing "No admin code" until Firebase responds. New backups include adminPin.
