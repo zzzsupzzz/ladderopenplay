@@ -1046,10 +1046,21 @@ const SYNC={
 
       if(S.session){
         if(S.session.cfMode){
-          // Merge local suggestions
+          // Merge only valid local suggestions. Never preserve a suggestion for a court
+          // that Firebase already says is playing, and never preserve suggestions whose
+          // players are no longer in the queue / are already on another court. This prevents
+          // Device B from showing stale "ready to confirm" cards above already-started courts.
           S.session.cfSuggestions=S.session.cfSuggestions||{};
           Object.entries(localSugs).forEach(([c,sug])=>{
-            if(!S.session.cfSuggestions[c])S.session.cfSuggestions[c]=sug;
+            const ct=S.session.cfCourts?.[c];
+            const queueIds=new Set((S.session.cfQueue||[]).map(q=>q.id));
+            const playingIds=new Set(Object.values(S.session.cfCourts||{})
+              .filter(ct=>ct&&ct.status==='playing'&&ct.match)
+              .flatMap(ct=>[...ct.match.t1,...ct.match.t2]));
+            const ids=sug?.allIds||[];
+            const valid=ids.length===4&&(!ct||ct.status==='ready')&&
+              ids.every(id=>queueIds.has(id))&&!ids.some(id=>playingIds.has(id));
+            if(!S.session.cfSuggestions[c]&&valid)S.session.cfSuggestions[c]=sug;
           });
           // Restore locally-playing courts (null-safe existing slot check)
           S.session.cfCourts=S.session.cfCourts||{};
@@ -1075,6 +1086,18 @@ const SYNC={
           _d('cfPairLastAt');_d('cfPairLastLost');
           _a('cfLog');_a('cfQueue');_a('cfPaused');
           _d('cfCourts');
+          // Final stale-suggestion cleanup after all CF fields are normalized.
+          const _queueIds=new Set((S.session.cfQueue||[]).map(q=>q.id));
+          const _playingIds=new Set(Object.values(S.session.cfCourts||{})
+            .filter(ct=>ct&&ct.status==='playing'&&ct.match)
+            .flatMap(ct=>[...ct.match.t1,...ct.match.t2]));
+          Object.entries(S.session.cfSuggestions||{}).forEach(([c,sug])=>{
+            const ct=S.session.cfCourts?.[c];
+            const ids=sug?.allIds||[];
+            const bad=(ct&&ct.status==='playing')||ids.length!==4||
+              ids.some(id=>_playingIds.has(id))||!ids.every(id=>_queueIds.has(id));
+            if(bad)delete S.session.cfSuggestions[c];
+          });
         }
         S.checkedIn.clear();
         S.session.activePlayers?.forEach(id=>S.checkedIn.add(id));
@@ -5377,7 +5400,7 @@ const CF={
   },
 
   /* Confirm a suggestion — start the match */
-  confirmSuggestion(courtNum){
+  confirmSuggestion(courtNum, opts={}){
     if(!S.session)return;
     const sug=S.session.cfSuggestions[courtNum];if(!sug)return;
     // ── SAFETY: detect stale suggestions ──────────────────────────────
@@ -5442,8 +5465,10 @@ const CF={
     // Recording it here would capture the pre-game count, making the cooldown expire 1 game early
     MM.recHx([match]);
     delete S.session.cfSuggestions[courtNum];
-    STORE.save('session');renderLive();renderStandings();
-    toast(`${courtLabel(courtNum)} started 🏓`,'ok');
+    if(!opts.deferSave){
+      STORE.save('session');renderLive();renderStandings();
+      toast(`${courtLabel(courtNum)} started 🏓`,'ok');
+    }
   },
 
   /* Submit score for a CF court */
@@ -6094,12 +6119,12 @@ const CF={
         // New suggestion is conflict-free — confirm it right now
         newSug.allIds.forEach(id=>usedIds.add(id));
         cancelAutoConfirm(c);
-        CF.confirmSuggestion(c);
+        CF.confirmSuggestion(c,{deferSave:true});
       } else {
         // No overlap — confirm directly
         sug.allIds.forEach(id=>usedIds.add(id));
         cancelAutoConfirm(c);
-        CF.confirmSuggestion(c);
+        CF.confirmSuggestion(c,{deferSave:true});
         anyChange=true;
       }
     }
@@ -6111,7 +6136,10 @@ const CF={
         .filter(([c,ct])=>!courts.includes(+c)&&ct.status==='ready'&&!S.session.cfSuggestions[+c])
         .map(([c])=>+c);
       if(readyNeedRefresh.length)CF.batchGenerateSuggestions(readyNeedRefresh,null);
+      STORE.save('session');
       renderLive();
+      renderStandings();
+      toast(`All ready courts started 🏓`,'ok');
     }
     }finally{CF._confirmAllBusy=false;}
   },
@@ -7219,7 +7247,7 @@ function initPlayerMode(){
 
 function init(){
   _restoreAdvMode();
-  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v4 db-missing repair + meta-only pin writes');
+  console.log('[pb] Build: FIREBASE-SOURCE-OF-TRUTH-v5 atomic confirm-all + stale-suggestion cleanup');
   // One-time clear of old local backups that don't include adminPin.
   // Without this, the old backup (adminPin missing) gets restored first, briefly
   // showing "No admin code" until Firebase responds. New backups include adminPin.
