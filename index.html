@@ -467,6 +467,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
         </div>
         <div style="display:flex;gap:5px;flex-wrap:wrap">
           <button class="btn bs sm" onclick="openRosterModal()">👤 Players ±</button>
+          <button class="btn bs sm" onclick="changeCourtsMidSession()" title="Increase/decrease courts or rename courts during live play">🏟 Courts ±</button>
           <button id="cf-ac-toggle" class="btn bg2 sm adv-only" onclick="toggleCFAutoConfirm()" title="Auto-confirm suggestions after timer">⚡ Auto</button>
           <select id="cf-ac-dur" class="inp adv-only" style="width:70px;font-size:.72rem;padding:4px 6px" onchange="S.session&&(S.session.cfAutoConfirmDur=+this.value)" title="Auto-confirm delay">
             <option value="30">30s</option>
@@ -485,7 +486,7 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
       <div class="ct">⏳ Queue <span id="cf-queue-badge" style="font-size:.66rem;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(34,211,238,.1);color:var(--cy)">0</span>
         <button onclick="openQueueRulesModal()" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;align-items:center;gap:1px" title="How the queue works"><span style="font-size:.75rem">ℹ️</span><span>Rules</span></button>
         <button onclick="openLockPairModal()" class="adv-only" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;flex-direction:column;align-items:center;gap:1px" title="Lock two players as permanent partners this session"><span style="font-size:.75rem">🔒</span><span>Lock</span></button>
-        <button onclick="changeCourtsMidSession()" class="adv-only" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;flex-direction:column;align-items:center;gap:1px" title="Change court count or court start number"><span style="font-size:.75rem">⚙</span><span>Courts</span></button>
+        <button onclick="changeCourtsMidSession()" class="adv-only" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;flex-direction:column;align-items:center;gap:1px" title="Increase/decrease court count, start number, or court names"><span style="font-size:.75rem">⚙</span><span>Courts</span></button>
         <button onclick="AUDIT.open()" class="adv-only" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;flex-direction:column;align-items:center;gap:1px" title="Audit log — organiser actions this session"><span style="font-size:.75rem">📋</span><span>Log</span></button>
       </div>
       <div id="cf-locked-pairs-display"></div>
@@ -611,6 +612,9 @@ tr.r1 .rnk{color:var(--go)}tr.r2 .rnk{color:#c0ccd8}tr.r3 .rnk{color:#d4956a}
 const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,extendedMin:16,timerSec:0,timerRunning:false,timerInterval:null,editId:null};
 let _pageFirstLoad=true; // true only once — blocks reconnection from forcing tab switch
 let HAS_REMOTE_HYDRATED=false; // true after first successful _applyRemote — guards DB writes
+let ALLOW_DESTRUCTIVE_WRITE_REASON=null; // set only by explicit organizer actions: delete/wipe/import
+function markDestructiveWrite(reason){ALLOW_DESTRUCTIVE_WRITE_REASON=reason||'organizer_action';}
+function clearDestructiveWriteMarker(){ALLOW_DESTRUCTIVE_WRITE_REASON=null;}
 
 /* ── Room ID management ─────────────────────────────
    Each organiser device generates its own room code and stores it
@@ -661,15 +665,17 @@ const SYNC={
   // Must be called after explicit confirmation only.
   resetSharedRoom(){
     if(!this.ready||!this.ref){toast('Not connected — cannot wipe data','err');return;}
-    this.ref.set(null).then(()=>{
-      this.clearConfig();
+    const ts=Date.now();
+    const wipePacket={meta:{_by:DEVICE_ID,_ts:ts,_v:(S._version||0)+1,_wipe:true,_wipeId:uid(),_allowDestructive:true,_destructiveReason:'wipe_all_data'}};
+    this.ref.set(wipePacket).then(()=>{
       localStorage.removeItem('pb_local_backup');
-      S.db=[];S.session=null;S.archive=[];S.checkedIn.clear();
-      ADMIN_UNLOCKED=false;
+      S.db=[];S.session=null;S.archive=[];S.checkedIn.clear();S.adminPin='';
+      S._lastSaveTs=ts;S._version=wipePacket.meta._v;
+      ADMIN_UNLOCKED=false;HAS_REMOTE_HYDRATED=true;
       renderDB();renderRoster();renderHistory();renderArchive();renderStandings();
       updateHeader();updatePinStatus();
       switchTab('setup');
-      _setSaveStatus('idle');
+      _setSaveStatus('saved');
       toast('All data wiped — all devices cleared','warn',5000);
     }).catch(e=>{
       toast('Reset failed: '+e.message,'err');
@@ -759,6 +765,11 @@ const SYNC={
     // A push from a device that loaded before Firebase returned the hash
     // would otherwise overwrite the stored hash with an empty string.
     const meta={_by:DEVICE_ID,_ts:S._lastSaveTs,_v:S._version};
+    if(ALLOW_DESTRUCTIVE_WRITE_REASON){
+      meta._allowDestructive=true;
+      meta._destructiveReason=ALLOW_DESTRUCTIVE_WRITE_REASON;
+      clearDestructiveWriteMarker();
+    }
     if(S.adminPin)meta.adminPin=S.adminPin; // only write hash when it exists
     const updates={meta};
     if(segment==='all'||segment==='session')
@@ -789,6 +800,22 @@ const SYNC={
     try{
       const remote=data||{};
 
+      // Explicit organiser wipe tombstone. Handle before local-richer recovery,
+      // otherwise a browser with old local data would re-bootstrap Firebase.
+      if(remote.meta?._wipe){
+        S.db=[];S.session=null;S.archive=[];S.checkedIn.clear();S.adminPin='';
+        S._lastSaveTs=remote.meta._ts||Date.now();S._version=remote.meta._v||S._version||0;
+        localStorage.removeItem('pb_local_backup');
+        HAS_REMOTE_HYDRATED=true;ADMIN_UNLOCKED=false;
+        _stopLoadingProgressTimer();
+        const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
+        renderDB();renderRoster();renderHistory();renderArchive();renderStandings();updateHeader();updatePinStatus();
+        if(!PLAYER_MODE)switchTab('setup');
+        _setSaveStatus('saved');
+        toast('🗑 Shared database was wiped by organiser','warn',4500);
+        return;
+      }
+
       // Preserve locally-generated suggestions not yet in Firebase
       const localSugs=S.session?.cfSuggestions
         ?Object.fromEntries(Object.entries(S.session.cfSuggestions).filter(([,v])=>v))
@@ -810,6 +837,7 @@ const SYNC={
       // that hadn't yet received the PIN from Firebase when it pushed).
       const adminPinVal=(remote.meta?.adminPin||remote.adminPin||'').trim();
       const localTs=S._lastSaveTs||0;
+      const allowDestructive=!!remote.meta?._allowDestructive;
 
       // First-load bootstrap/recovery: if Firebase is truly empty but this browser has
       // a complete local snapshot (common after an older build only saved locally),
@@ -841,7 +869,7 @@ const SYNC={
       //   2. Local backup belongs to THIS device (same _by) — another device's backup should never push
       //   3. Remote does NOT have an active session — if remote has a live session, it always wins
       //   4. Local state is substantively complete (has players + matches or archive)
-      if(isFirstLoad&&remoteTs>0){
+      if(!allowDestructive&&isFirstLoad&&remoteTs>0){
         const localBackupTs=_getLocalBackup()?.savedAt||0;
         const localBackupBy=_getLocalBackup()?._by||'';
         const remoteHasActiveSession=
@@ -913,7 +941,7 @@ const SYNC={
       const localHasLive=!!(S.session&&(S.session.status==='active'||S.session.status==='lobby'));
       const remoteHasLive=!!(remote.session&&(remote.session.status==='active'||remote.session.status==='lobby'));
       const incomingFromOther=remoteBy&&remoteBy!==DEVICE_ID;
-      const destructiveIncoming=!isFirstLoad&&incomingFromOther&&remoteTs>0&&(
+      const destructiveIncoming=!allowDestructive&&!isFirstLoad&&incomingFromOther&&remoteTs>0&&(
         (localDbLen>0&&remoteDbLen>0&&remoteDbLen<localDbLen) ||
         (localHasLive&&!remoteHasLive) ||
         ((S.session?.cfLog?.length||0)>0&&((remote.session?.cfLog||[]).length<(S.session?.cfLog?.length||0)))
@@ -930,7 +958,7 @@ const SYNC={
       // First-load completeness recovery: if this browser has a richer local backup
       // than Firebase (common after Firebase was accidentally overwritten by incognito),
       // restore the richer local snapshot even if the remote write is newer.
-      if(isFirstLoad&&remoteTs>0){
+      if(!allowDestructive&&isFirstLoad&&remoteTs>0){
         const richerLocal=(localDbLen>remoteDbLen&&localDbLen>=4)||
           (localHasLive&&!remoteHasLive)||
           ((S.session?.cfLog?.length||0)>((remote.session?.cfLog||[]).length||0));
@@ -955,7 +983,7 @@ const SYNC={
       const localCfLogLen=S.session?.cfLog?.length||0;
       const remoteCfLogLen=remote.session?.cfLog?.length||0;
       let preservedCfLog=null;
-      if(!isFirstLoad&&remoteCfLogLen<localCfLogLen){
+      if(!allowDestructive&&!isFirstLoad&&remoteCfLogLen<localCfLogLen){
         preservedCfLog=[...S.session.cfLog];
         console.warn(`[sync] cfLog shrink blocked (${remoteCfLogLen}<${localCfLogLen})`);
       }
@@ -964,7 +992,7 @@ const SYNC={
       const localArchiveLen=S.archive?.length||0;
       const remoteArchiveLen=(remote.archive||[]).length;
       let preservedArchive=null;
-      if(!isFirstLoad&&remoteArchiveLen<localArchiveLen){
+      if(!allowDestructive&&!isFirstLoad&&remoteArchiveLen<localArchiveLen){
         preservedArchive=[...S.archive];
         console.warn(`[sync] Archive shrink blocked (${remoteArchiveLen}<${localArchiveLen})`);
       }
@@ -1209,6 +1237,13 @@ let _saveStatusTimer=null;
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5);}
 function gp(id){return S.db.find(p=>p.id===id);}
 function gsp(id){return S.session?.players.find(p=>p.id===id);}
+function courtDefaultLabel(courtNum){return `Court ${(S.session?.courtOffset||0)+Number(courtNum)}`;}
+function courtLabel(courtNum){
+  const names=S.session?.courtNames||{};
+  const custom=(names[courtNum]||'').trim();
+  return custom||courtDefaultLabel(courtNum);
+}
+function courtLabelEsc(courtNum){return esc(courtLabel(courtNum));}
 
 /* § AUDIT — organiser action log (cancel, swap, delete, court change) */
 const AUDIT={
@@ -1222,7 +1257,8 @@ const AUDIT={
       mc:S.session.cfMatchCount||0,   // match-count anchor for context
       action,                          // short machine-readable key
       detail,                          // human string shown in log
-      court: courtNum!=null ? (offset+courtNum) : null
+      court: courtNum!=null ? (offset+courtNum) : null,
+      courtLabel: courtNum!=null ? courtLabel(courtNum) : null
     });
     // Keep at most 300 entries (3-hour session with frequent edits stays well under this)
     if(S.session.auditLog.length>300)S.session.auditLog.splice(0,S.session.auditLog.length-300);
@@ -1264,7 +1300,7 @@ const AUDIT={
       return;
     }
     const rows=log.map(e=>{
-      const courtLabel=e.court!=null?`<span style="font-size:.65rem;background:rgba(99,179,237,.12);color:var(--cy);border-radius:10px;padding:1px 6px;margin-left:4px">Court ${e.court}</span>`:'';
+      const courtLabel=e.court!=null?`<span style="font-size:.65rem;background:rgba(99,179,237,.12);color:var(--cy);border-radius:10px;padding:1px 6px;margin-left:4px">${esc(e.courtLabel||('Court '+e.court))}</span>`:'';
       const mcLabel=`<span style="font-size:.63rem;color:var(--mu)">after match ${e.mc}</span>`;
       return `<div style="display:flex;gap:8px;padding:7px 0;border-bottom:1px solid var(--bd);align-items:flex-start">
         <div style="font-size:.95rem;min-width:20px;text-align:center;padding-top:1px">${this._icon(e.action)}</div>
@@ -1858,6 +1894,7 @@ function deletePlayer(id){
   const p=gp(id);if(!p)return;
   showCfm(`Delete <strong>${plainName(p)}</strong>?<br/><span style="font-size:.75rem;color:var(--mu)">Cannot be undone.</span>`,'Delete','bd2',()=>{
     S.db=S.db.filter(x=>x.id!==id);S.checkedIn.delete(id);if(S.editId===id)S.editId=null;
+    markDestructiveWrite('delete_player');
     STORE.save('db');renderDB();renderRoster();updatePvSelect();toast('Deleted','warn');
   });
 }
@@ -1993,7 +2030,7 @@ function startSession(){
     partnerHx:{},oppHx:{},oppHxTime:{},
     nrPairingHx:{},
     cfQueue:[],cfPinnedIds:[],cfPauseAfterGame:[],cfLockedPairs:[],cfSoftPairs:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,
-    courtOffset:0,
+    courtOffset:0,courtNames:{},
     cfMatchupHx:{},cfGroupHx:{},cfPairConsec:{},cfPairWins:{},cfMustSplitPair:null,cfPaused:[],
     cfPairSessionCount:{},cfPairLastAt:{},cfPairLastLost:{},
     neverPair:{},ratingOverrides:{},
@@ -3075,13 +3112,16 @@ function changeCourtsMidSession(){
   openModal(`<div class="modal-title">⚙ Session Courts</div>
     <label>NUMBER OF COURTS</label>
     <div style="display:flex;gap:8px;margin-bottom:12px">
-      ${[1,2,3,4,5,6].map(n=>`<button class="btn ${n===cur?'bp':'bg2'} sm" style="flex:1;padding:8px 0"
-        onclick="document.querySelectorAll('#court-count-btns button').forEach(b=>b.className='btn bg2 sm');this.className='btn bp sm';this.dataset.val='${n}';S._tmpCourts=${n}" id="cc-btn-${n}">${n}</button>`).join('')}
+      ${[1,2,3,4,5,6].map(n=>`<button class="cc-btn btn ${n===cur?'bp':'bg2'} sm" style="flex:1;padding:8px 0"
+        onclick="document.querySelectorAll('.cc-btn').forEach(b=>b.className='cc-btn btn bg2 sm');this.className='cc-btn btn bp sm';this.dataset.val='${n}';S._tmpCourts=${n}" id="cc-btn-${n}">${n}</button>`).join('')}
     </div>
-    <div id="court-count-btns" style="display:none"></div>
     <label>COURT START NUMBER (first court label)</label>
     <input id="court-offset-inp" class="inp" type="number" min="1" max="20" value="${offset+1}" style="margin-bottom:12px"/>
-    <div style="font-size:.71rem;color:var(--mu);margin-bottom:10px">Example: set to 2 if you use courts 2–4.</div>
+    <div style="font-size:.71rem;color:var(--mu);margin-bottom:10px">Example: set to 2 if you use courts 2–4. During live play, increasing courts adds ready courts immediately. Decreasing courts removes the highest-numbered courts; if a removed court has a live match, the app will ask before cancelling it and returning players to queue.</div>
+    <label>CUSTOM COURT NAMES <span style="font-weight:400;text-transform:none">(optional)</span></label>
+    <div id="court-name-fields" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
+      ${[1,2,3,4,5,6].map(n=>`<div style="display:flex;align-items:center;gap:6px"><span style="font-size:.7rem;color:var(--mu);width:58px">Court ${offset+n}</span><input id="court-name-${n}" class="inp" value="${esc((S.session.courtNames||{})[n]||'')}" placeholder="e.g. Center Court / Court A" style="font-size:.76rem;padding:6px 8px"/></div>`).join('')}
+    </div>
     <div style="display:flex;gap:7px">
       <button class="btn bp" style="flex:1" onclick="_applySessionCourts()">Apply</button>
       <button class="btn bg2" onclick="closeModal()">Cancel</button>
@@ -3100,6 +3140,11 @@ function _applySessionCourts(){
   const oldCount=S.session.courts;
   const oldOffset=S.session.courtOffset||0;
   S.session.courtOffset=newOffset;
+  S.session.courtNames=S.session.courtNames||{};
+  for(let i=1;i<=6;i++){
+    const val=(document.getElementById(`court-name-${i}`)?.value||'').trim();
+    if(val)S.session.courtNames[i]=val;else delete S.session.courtNames[i];
+  }
   if(newCount===oldCount){
     closeModal();STORE.save('session');renderLive();
     if(newOffset!==oldOffset)
@@ -3427,6 +3472,7 @@ function runImport(){
     else S.session=null;
     S.checkedIn=new Set();
     _importData=null;
+    markDestructiveWrite('import_replace');
     STORE.save();
     renderDB();renderRoster();renderHistory();renderArchive();renderStandings();updateHeader();updatePvSelect();
     closeModal();
@@ -5361,7 +5407,7 @@ const CF={
     MM.recHx([match]);
     delete S.session.cfSuggestions[courtNum];
     STORE.save('session');renderLive();renderStandings();
-    toast(`Court ${courtNum} started 🏓`,'ok');
+    toast(`${courtLabel(courtNum)} started 🏓`,'ok');
   },
 
   /* Submit score for a CF court */
@@ -5700,6 +5746,55 @@ const CF={
         <button class="btn bd2 sm" style="margin-top:4px" onclick="closeModal()">Never mind</button>
       </div>`);
   },
+  openMoveCourt(courtNum){
+    if(!S.session)return;
+    const ct=S.session.cfCourts?.[courtNum];
+    if(!ct?.match){toast('No active match on this court','warn');return;}
+    const opts=[];
+    for(let c=1;c<=S.session.courts;c++){
+      if(c===courtNum)continue;
+      const dest=S.session.cfCourts?.[c];
+      const status=dest?.status==='playing'?'swap with active match':'move here';
+      opts.push(`<option value="${c}">${courtLabelEsc(c)} — ${status}</option>`);
+    }
+    if(!opts.length){toast('No other court available','warn');return;}
+    openModal(`<div class="modal-title">↔ Move Match — ${courtLabelEsc(courtNum)}</div>
+      <p style="font-size:.74rem;color:var(--mu);margin-bottom:10px">Move this live match to another court. If the destination court is already playing, the two courts will swap.</p>
+      <label>DESTINATION COURT</label>
+      <select id="move-court-dest" class="inp" style="margin-bottom:12px">${opts.join('')}</select>
+      <div style="display:flex;gap:7px">
+        <button class="btn bp" style="flex:1" onclick="CF.confirmMoveCourt(${courtNum})">Apply</button>
+        <button class="btn bg2" onclick="closeModal()">Cancel</button>
+      </div>`);
+  },
+
+  confirmMoveCourt(fromCourt){
+    const toCourt=parseInt(document.getElementById('move-court-dest')?.value);
+    if(!S.session||!toCourt||toCourt===fromCourt)return;
+    S.session.cfCourts=S.session.cfCourts||{};
+    const from=S.session.cfCourts[fromCourt];
+    const to=S.session.cfCourts[toCourt]||{status:'ready',match:null,idleStart:Date.now(),totalIdleMs:0,matchCount:0};
+    if(!from?.match){closeModal();toast('Source court is no longer active','warn');return;}
+    const fromLabel=courtLabel(fromCourt),toLabel=courtLabel(toCourt);
+    const now=Date.now();
+    if(to.status==='playing'&&to.match){
+      const fromMatch={...from.match,courtNum:toCourt};
+      const toMatch={...to.match,courtNum:fromCourt};
+      S.session.cfCourts[fromCourt]={...to,match:toMatch,status:'playing'};
+      S.session.cfCourts[toCourt]={...from,match:fromMatch,status:'playing'};
+      AUDIT.log('court_change',`Swapped live courts: ${fromLabel} ↔ ${toLabel}`,fromCourt);
+      toast(`Swapped ${fromLabel} ↔ ${toLabel}`,'ok');
+    }else{
+      const movedMatch={...from.match,courtNum:toCourt};
+      S.session.cfCourts[toCourt]={...from,match:movedMatch,status:'playing'};
+      S.session.cfCourts[fromCourt]={status:'ready',match:null,idleStart:now,totalIdleMs:from.totalIdleMs||0,matchCount:from.matchCount||0,lastMatchupKey:from.lastMatchupKey||null};
+      delete S.session.cfSuggestions[toCourt];
+      AUDIT.log('court_change',`Moved live match: ${fromLabel} → ${toLabel}`,toCourt);
+      toast(`Moved match to ${toLabel}`,'ok');
+    }
+    closeModal();STORE.save('session');renderLive();
+  },
+
   openActiveMatchSwap(courtNum){
     if(!S.session)return;
     const ct=S.session.cfCourts[courtNum];
@@ -6121,7 +6216,7 @@ const CF={
       ${ids.map(id=>`<span onclick="_sugPickerToggle(event,'${courtNum}','${id}')" style="font-weight:600;cursor:pointer;padding:2px 5px;border-radius:6px;transition:background .12s" class="sug-player-btn" data-id="${id}" title="Tap to replace">${gn(id)}</span> <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span>`).join(' <span style="color:var(--m2)"> &amp; </span> ')}
       <div style="font-size:.63rem;color:var(--m2);margin-top:3px">avg ${avg}</div></div>`;
     return `<div class="cf-suggest" data-court="${courtNum}">
-      <div class="cf-suggest-hd">🏓 COURT ${(S.session?.courtOffset||0)+courtNum} — READY</div>
+      <div class="cf-suggest-hd">🏓 ${courtLabelEsc(courtNum)} — READY</div>
       <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:9px">
         ${pTeam(sug.t1,t1Avg,t1pgap)}<div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--m2)">VS</div>${pTeam(sug.t2,t2Avg,t2pgap)}
       </div>
@@ -6130,7 +6225,7 @@ const CF={
         ${_cfAutoConfirmTimers[courtNum]?`<span id="cf-ac-${courtNum}" style="font-size:.7rem;color:var(--mu)">Auto-starting…</span><button class="btn bg2 sm" style="font-size:.65rem;padding:2px 8px" onclick="cancelAutoConfirm(${courtNum})">Cancel</button>`:''}
       </div>
       <div style="display:flex;gap:7px;flex-wrap:wrap">
-        <button class="btn bp" style="flex:1 1 100%" onclick="cancelAutoConfirm(${courtNum});CF.confirmSuggestion(${courtNum})">✓ Confirm — Start Court ${(S.session?.courtOffset||0)+courtNum}</button>
+        <button class="btn bp" style="flex:1 1 100%" onclick="cancelAutoConfirm(${courtNum});CF.confirmSuggestion(${courtNum})">✓ Confirm — Start ${courtLabelEsc(courtNum)}</button>
         <button class="btn bs sm" title="Full reshuffle" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleSuggestion(${courtNum})">↺ Reshuffle</button>
         <button class="btn bs sm adv-only" title="Partial reshuffle — lock some players" onclick="cancelAutoConfirm(${courtNum});CF.openPartialReshuffle(${courtNum})">🔒 Lock+Shuffle</button>
         ${sug.meta?.constraintReason&&['wait-override','outlier-wait','playtime-catch-up'].includes(sug.meta.constraintReason)?`<button class="btn bs sm adv-only" style="color:var(--cy)" title="Regenerate prioritising match quality — ignores wait/fairness pressure this once" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleQualityFirst(${courtNum})">⚖ Quality</button>`:``}
@@ -6156,7 +6251,7 @@ const CF={
     const extTag=ext?`<span style="font-size:.62rem;font-weight:700;color:var(--or);background:rgba(251,147,60,.12);border:1px solid rgba(251,147,60,.3);border-radius:5px;padding:1px 5px">EXTENDED</span>`:'';
     return `<div class="court-card ${ext?'extended':''}">
       <div class="chead">
-        <span class="clbl">COURT ${(S.session?.courtOffset||0)+courtNum}</span>
+        <span class="clbl">${courtLabelEsc(courtNum)}</span>
         <div style="display:flex;align-items:center;gap:8px">
           ${extTag}
           <span data-cf-elapsed="${courtNum}" class="ct-timer">--:--</span>
