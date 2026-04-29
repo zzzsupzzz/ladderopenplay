@@ -891,7 +891,17 @@ const SYNC={
       S.session=remote.session||null;
       S.archive=preservedArchive||(remote.archive||[]);
       if(preservedCfLog&&S.session)S.session.cfLog=preservedCfLog;
-      if(typeof adminPinVal!=='undefined')S.adminPin=adminPinVal;
+      if(typeof adminPinVal!=='undefined'){
+        const pinChanged=S.adminPin!==adminPinVal;
+        S.adminPin=adminPinVal;
+        if(pinChanged){
+          // PIN changed from remote — re-run access check and update UI immediately.
+          // Without this, Setup tab shows "No admin code" even after Firebase has the hash.
+          updatePinStatus();
+          checkAdminAccess();
+          renderRoster();
+        }
+      }
 
       if(S.session){
         if(S.session.cfMode){
@@ -6372,6 +6382,7 @@ function _backupToLocal(){
       session:S.session?JSON.parse(JSON.stringify(S.session)):null,
       archive:JSON.parse(JSON.stringify(S.archive||[])),
       checkedIn:[...S.checkedIn],
+      adminPin:S.adminPin||'', // include hash so UI is correct before Firebase responds
       savedAt:Date.now(),
       roomId:'main'
     }));
@@ -6481,6 +6492,10 @@ function _autoRestoreFromLocal(){
   S.checkedIn.clear();
   (b.checkedIn||[]).forEach(id=>S.checkedIn.add(id));
   if(S.session?.activePlayers)S.session.activePlayers.forEach(id=>S.checkedIn.add(id));
+  // Restore adminPin from backup so the first render shows the correct state.
+  // Firebase is still authoritative — _applyRemote will overwrite with remote value
+  // once it responds. But this prevents a flash of "No admin code" on every refresh.
+  if(b.adminPin)S.adminPin=b.adminPin;
 
   // Pre-fill courts/extendedMin from session if active or in lobby
   if(S.session?.status==='active'||S.session?.status==='lobby'){
@@ -6491,10 +6506,7 @@ function _autoRestoreFromLocal(){
   // Render immediately with local data — loading overlay stays up while Firebase syncs
   try{
     renderDB();renderRoster();renderHistory();renderArchive();renderStandings();
-    updateHeader();
-    // Do NOT call updatePinStatus() or checkAdminAccess() here.
-    // PIN (S.adminPin) is authoritative from Firebase — local backup may have stale or no PIN.
-    // checkAdminAccess() fires after _applyRemote confirms remote state.
+    updateHeader();updatePinStatus(); // backup now includes adminPin so this is correct
     if(S.session?.status==='active'||S.session?.status==='lobby') renderLive();
   }catch(e){
     // Corrupt backup — clear it and fall through to normal Firebase load
