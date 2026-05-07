@@ -122,13 +122,27 @@ html{overflow-x:hidden}
 .tp{display:none!important}.tp.on{display:block!important}.tp-forced-hide{display:none!important}
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
 @media(max-width:700px){.g2{grid-template-columns:1fr}}
-/* Mobile header: hide non-essential items to prevent header overflow causing full-page zoom-out */
+/* Mobile layout — prevent full-page zoom-out on Android caused by header overflow */
 @media(max-width:520px){
+  /* Hide non-essential header items */
   #observer-btn{display:none!important}
   #save-status{display:none!important}
-  #hdr{padding:8px 10px}
-  #hdr .hlogo h1{font-size:1.2rem}
-  #hdr>div:last-child{gap:5px}
+  /* Timer wrapper: collapse when timer is hidden so it doesn't force 52px */
+  #htimer-wrap{min-width:0!important}
+  /* Timer text smaller so it doesn't push header wide when active */
+  #htimer{font-size:1.05rem!important;letter-spacing:1px}
+  /* Share button: icon only on mobile */
+  .share-txt{display:none!important}
+  /* Compress badge and More button */
+  #hbadge{padding:2px 5px!important;font-size:.6rem!important;letter-spacing:0}
+  #adv-mode-btn{padding:2px 5px!important;font-size:.6rem!important}
+  /* Tighten header layout */
+  #hdr{padding:7px 10px}
+  #hdr .hlogo{gap:5px}
+  #hdr .hlogo h1{font-size:1rem}
+  #hdr>div:last-child{gap:4px}
+  /* Tighter main content padding */
+  #mc{padding:8px 8px 50px}
 }
 
 /* CARD */
@@ -343,11 +357,11 @@ body.observer-mode .qs-row{display:none!important}
     <div><h1>PICKLEBALL LADDER</h1><span id="hsub">No active session</span></div>
   </div>
   <div style="display:flex;align-items:center;gap:7px">
-    <div style="text-align:center;min-width:52px">
+    <div id="htimer-wrap" style="text-align:center;min-width:52px">
       <span id="htimer">00:00</span>
       <div id="elapsed"></div>
     </div>
-    <button id="share-btn" onclick="openShareModal()" style="font-size:.69rem;font-weight:600;padding:4px 9px;border-radius:20px;background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.3);color:var(--pu);cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">📱 Share</button>
+    <button id="share-btn" onclick="openShareModal()" style="font-size:.69rem;font-weight:600;padding:4px 9px;border-radius:20px;background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.3);color:var(--pu);cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">📱<span class="share-txt"> Share</span></button>
     <button id="observer-btn" onclick="copyObserverLink(this)" style="font-size:.69rem;font-weight:600;padding:4px 9px;border-radius:20px;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.3);color:#818cf8;cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">👁 Observer</button>
     <span id="save-status" style="font-size:.63rem;color:var(--mu);white-space:nowrap">—</span>
     <span id="sync-badge" onclick="openSyncModal()" title="Live sync status" style="cursor:pointer">⚪</span>
@@ -387,7 +401,7 @@ body.observer-mode .qs-row{display:none!important}
     <div class="ct">🗓️ Session Setup
       <button class="btn bg2 sm" style="margin-left:auto" onclick="openShareModal()" title="Share read-only player view link">📱 Player Link</button>
     </div>
-    <div style="display:inline-flex;align-items:center;gap:6px;margin-bottom:12px;background:rgba(34,211,238,.07);border:1px solid rgba(34,211,238,.25);border-radius:8px;padding:5px 11px">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:12px;background:rgba(34,211,238,.07);border:1px solid rgba(34,211,238,.25);border-radius:8px;padding:5px 11px">
       <span style="font-size:.8rem;color:var(--cy);font-weight:700">⚡ Continuous Flow</span>
       <span style="font-size:.72rem;color:var(--mu)">each court finishes independently</span>
     </div>
