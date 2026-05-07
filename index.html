@@ -93,6 +93,7 @@
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;overflow-x:hidden}
+html{overflow-x:hidden}
 ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:var(--sf)}::-webkit-scrollbar-thumb{background:var(--bd);border-radius:3px}
 
 /* HEADER */
@@ -120,7 +121,15 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--tx);min-h
 #mc{max-width:1080px;margin:0 auto;padding:12px 12px 50px}
 .tp{display:none!important}.tp.on{display:block!important}.tp-forced-hide{display:none!important}
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
-@media(max-width:600px){.g2{grid-template-columns:1fr}}
+@media(max-width:700px){.g2{grid-template-columns:1fr}}
+/* Mobile header: hide non-essential items to prevent header overflow causing full-page zoom-out */
+@media(max-width:520px){
+  #observer-btn{display:none!important}
+  #save-status{display:none!important}
+  #hdr{padding:8px 10px}
+  #hdr .hlogo h1{font-size:1.2rem}
+  #hdr>div:last-child{gap:5px}
+}
 
 /* CARD */
 .card{background:var(--sf);border:1px solid var(--bd);border-radius:var(--rl);padding:14px;margin-bottom:11px}
