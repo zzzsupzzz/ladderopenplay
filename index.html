@@ -2715,9 +2715,11 @@ function cfAddPermPair(idA,idB){
   const needRegen=[];
   for(const[cs,sug]of Object.entries(S.session.cfSuggestions||{})){
     if(!sug)continue;
-    const allIds=new Set([...(sug.t1||[]),...(sug.t2||[])]);
-    const aIn=allIds.has(idA),bIn=allIds.has(idB);
-    if(aIn!==bIn){S.session.cfSuggestions[Number(cs)]=null;needRegen.push(Number(cs));}
+    const t1s=new Set(sug.t1||[]),t2s=new Set(sug.t2||[]);
+    const aIn=t1s.has(idA)||t2s.has(idA),bIn=t1s.has(idB)||t2s.has(idB);
+    // Clear if: one is missing (split-court), OR both present but on different teams (split-team)
+    const splitTeam=aIn&&bIn&&(t1s.has(idA)!==t1s.has(idB));
+    if(aIn!==bIn||splitTeam){S.session.cfSuggestions[Number(cs)]=null;needRegen.push(Number(cs));}
   }
   if(needRegen.length)CF.batchGenerateSuggestions(needRegen,null);
   STORE.save('session');renderLive();
@@ -5622,11 +5624,12 @@ const CF={
       if(_ppS.length){
         const c=readyCourts[0],sug=S.session.cfSuggestions[c];
         if(sug){
-          const _ids=new Set([...(sug.t1||[]),...(sug.t2||[])]);
+          const _t1=new Set(sug.t1||[]),_t2=new Set(sug.t2||[]);
           for(const[a,b]of _ppS){
-            const aIn=_ids.has(a),bIn=_ids.has(b);
+            const aIn=_t1.has(a)||_t2.has(a),bIn=_t1.has(b)||_t2.has(b);
             const aLeft=gsp(a)?.status==='left',bLeft=gsp(b)?.status==='left';
-            if((aIn&&!bIn&&!bLeft)||(bIn&&!aIn&&!aLeft)){S.session.cfSuggestions[c]=null;break;}
+            const splitTeam=aIn&&bIn&&(_t1.has(a)!==_t1.has(b));
+            if((aIn&&!bIn&&!bLeft)||(bIn&&!aIn&&!aLeft)||splitTeam){S.session.cfSuggestions[c]=null;break;}
           }
         }
       }
@@ -5848,21 +5851,20 @@ const CF={
         this._storeSuggestion(c,item.b,finishedMatchByCourtNum?.[c]);
       });
     }
-    // Safety net: after all suggestions are stored, scan for solo perm pair members.
-    // Any suggestion containing exactly one half of a perm pair is invalid — clear it.
-    // This catches edge cases where individual generateSuggestion calls (e.g. from midAdd)
-    // race or fall back to pass-3 and produce a split group despite the queue filter.
+    // Safety net: after all suggestions are stored, scan for perm pair violations.
+    // Clears any suggestion with: only one member present (split-court), or both present
+    // but on different teams (split-team). Catches stale suggestions and pass-3 fallbacks.
     const _ppCheck=S.session.cfPermPairs||[];
     if(_ppCheck.length){
       readyCourts.forEach(c=>{
         const sug=S.session.cfSuggestions[c];
         if(!sug)return;
-        const ids=new Set([...(sug.t1||[]),...(sug.t2||[])]);
+        const _ct1=new Set(sug.t1||[]),_ct2=new Set(sug.t2||[]);
         for(const[a,b]of _ppCheck){
-          const aIn=ids.has(a),bIn=ids.has(b);
-          // If one is in but their partner is not (and partner hasn't left), wipe suggestion
+          const aIn=_ct1.has(a)||_ct2.has(a),bIn=_ct1.has(b)||_ct2.has(b);
           const aLeft=gsp(a)?.status==='left',bLeft=gsp(b)?.status==='left';
-          if((aIn&&!bIn&&!bLeft)||(bIn&&!aIn&&!aLeft)){
+          const splitTeam=aIn&&bIn&&(_ct1.has(a)!==_ct1.has(b));
+          if((aIn&&!bIn&&!bLeft)||(bIn&&!aIn&&!aLeft)||splitTeam){
             S.session.cfSuggestions[c]=null;
             break;
           }
@@ -6259,16 +6261,16 @@ const CF={
       try{CF.confirmSuggestion(courtNum);}finally{this._confirmDepth--;}
       return;
     }
-    // Perm pair guard: refuse to start a match with exactly one half of a permanent pair.
-    // Belt-and-suspenders over the batchGenerateSuggestions safety net — catches any
-    // suggestion that reached this point via stale-detection cascade, direct assignment,
-    // or any other path that bypasses the post-generation scan.
+    // Perm pair guard: refuse to start a match with a perm pair violation.
+    // Catches: one member missing (split-court), or both present but on different teams (split-team).
+    // Belt-and-suspenders over the batchGenerateSuggestions safety net.
     if(S.session.cfPermPairs?.length){
-      const ids=new Set(sug.allIds);
+      const _gt1=new Set(sug.t1||[]),_gt2=new Set(sug.t2||[]);
       for(const[a,b]of S.session.cfPermPairs){
-        const aIn=ids.has(a),bIn=ids.has(b);
+        const aIn=_gt1.has(a)||_gt2.has(a),bIn=_gt1.has(b)||_gt2.has(b);
         const aLeft=gsp(a)?.status==='left',bLeft=gsp(b)?.status==='left';
-        if((aIn&&!bIn&&!bLeft)||(bIn&&!aIn&&!aLeft)){
+        const splitTeam=aIn&&bIn&&(_gt1.has(a)!==_gt1.has(b));
+        if((aIn&&!bIn&&!bLeft)||(bIn&&!aIn&&!aLeft)||splitTeam){
           if(this._confirmDepth>=2){renderLive();return;}
           const prevSug=S.session.cfSuggestions[courtNum]||null;
           delete S.session.cfSuggestions[courtNum];
