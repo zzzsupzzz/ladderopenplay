@@ -3512,8 +3512,9 @@ function renderArchive(){
         <table class="stbl" style="margin-bottom:14px"><thead><tr><th>#</th><th>PLAYER</th><th>W/L</th><th>PD</th><th>+/−</th><th>FINAL</th></tr></thead><tbody>${stdRows}</tbody></table>
         <div class="ct" style="margin-bottom:8px">📜 Match Log</div>
         ${matchHistory}
-        <div style="margin-top:14px;border-top:1px solid var(--bd);padding-top:10px">
-          <button class="btn bd2 sm" onclick="deleteArchiveSess('${sess.id}')">🗑 Delete This Session Record</button>
+        <div style="margin-top:14px;border-top:1px solid var(--bd);padding-top:10px;display:flex;gap:6px">
+          <button class="btn bg2 sm" onclick="exportSession('${sess.id}')">📤 Export Session</button>
+          <button class="btn bd2 sm" onclick="deleteArchiveSess('${sess.id}')">🗑 Delete</button>
         </div>
       </div>
     </div>`;
@@ -3899,6 +3900,13 @@ function openImportModal(){
         <div id="imp-csv-preview" style="font-size:.7rem;color:var(--mu);margin-top:6px"></div>
         <button id="imp-csv-btn" class="btn bc" style="width:100%;margin-top:8px;display:none" onclick="runCsvImport()">📊 Add Players</button>
       </div>
+      <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:12px">
+        <div style="font-weight:700;font-size:.8rem;margin-bottom:5px">🏓 Import Single Session</div>
+        <div style="font-size:.72rem;color:var(--mu);margin-bottom:8px">Adds one session to history. Missing players are created automatically. ELO is recalculated from match results.</div>
+        <input type="file" id="imp-sess-file" accept=".json" class="inp" style="font-size:.72rem;padding:4px" onchange="previewSessionImport(this)"/>
+        <div id="imp-sess-preview" style="font-size:.7rem;color:var(--mu);margin-top:6px"></div>
+        <button id="imp-sess-btn" class="btn" style="width:100%;margin-top:8px;display:none;background:rgba(52,211,153,.15);color:var(--gr);border:1px solid rgba(52,211,153,.3)" onclick="runSessionImport()">🏓 Import Session</button>
+      </div>
     </div>
     <button class="btn bg2 sm" style="width:100%" onclick="closeModal()">Close</button>`);
 }
@@ -3992,11 +4000,22 @@ function runCsvImport(){
 }
 
 function openExportModal(){
+  const sessions=[...(S.session&&S.session.status==='active'?[{id:null,name:'Current session (active)',date:S.session.date}]:[]),...[...S.archive].reverse()];
+  const sessRows=sessions.length
+    ?sessions.map(s=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--bd)">
+        <span style="font-size:.76rem">${esc(s.name)}</span>
+        <button class="btn bg2 sm" style="font-size:.67rem" onclick="exportSession(${s.id?`'${s.id}'`:null})">📤 Export</button>
+      </div>`).join('')
+    :'<div style="font-size:.72rem;color:var(--mu)">No sessions yet</div>';
   openModal(`<div class="modal-title">📤 Export Data</div>
-    <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
-      <button class="btn bp sm" style="flex:1" onclick="runExport('json')">📦 JSON (Full backup)</button>
-      <button class="btn bc sm" style="flex:1" onclick="runExport('csv')">📊 CSV (Players)</button>
-      <button class="btn" style="flex:1;background:rgba(167,139,250,.15);color:var(--pu);border:1px solid rgba(167,139,250,.3)" onclick="runExport('pdf')">📋 Session Report (TXT)</button>
+    <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
+      <button class="btn bp sm" style="flex:1" onclick="runExport('json')">📦 Full backup (JSON)</button>
+      <button class="btn bc sm" style="flex:1" onclick="runExport('csv')">📊 Players (CSV)</button>
+      <button class="btn" style="flex:1;background:rgba(167,139,250,.15);color:var(--pu);border:1px solid rgba(167,139,250,.3)" onclick="runExport('pdf')">📋 Report (TXT)</button>
+    </div>
+    <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:10px;margin-bottom:10px">
+      <div style="font-weight:700;font-size:.78rem;margin-bottom:6px">🏓 Export Single Session</div>
+      ${sessRows}
     </div>
     <div id="exp-area"></div>
     <div class="dv"></div>
@@ -4024,6 +4043,121 @@ function runExport(fmt){
     setTimeout(()=>URL.revokeObjectURL(url),600);
   }catch(e){}
   showExportText(content);
+}
+
+// ── Single-session export ─────────────────────────────────────────────────────
+function exportSession(sessId){
+  const sess=sessId?S.archive.find(a=>a.id===sessId):S.session;
+  if(!sess){toast('Session not found','err');return;}
+  const exp={
+    exportVersion:1,
+    type:'pb-session',
+    name:sess.name||'Session',
+    date:sess.date||new Date().toISOString(),
+    courts:sess.courts||1,
+    players:(sess.players||[]).map(sp=>({
+      id:sp.id,
+      name:sp.name||gp(sp.id)?.name||'?',
+      startRating:Math.round(sp.startRating||sp.sRating||1000)
+    })),
+    matches:(sess.cfLog||[]).map(m=>({
+      t1:m.t1,t2:m.t2,s1:m.s1,s2:m.s2,court:m.courtNum||1
+    }))
+  };
+  const slug=(sess.name||'session').replace(/[^a-z0-9]/gi,'-').toLowerCase().replace(/-+/g,'-');
+  const filename=`pb-session-${slug}-${Date.now()}.json`;
+  try{
+    const blob=new Blob(['﻿'+JSON.stringify(exp,null,2)],{type:'application/json;charset=utf-8'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=filename;
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),600);
+  }catch(e){}
+  toast(`"${exp.name}" exported ✓`,'ok');
+}
+
+// ── Single-session import ─────────────────────────────────────────────────────
+let _importSessionData=null;
+
+function previewSessionImport(input){
+  const f=input.files[0];if(!f)return;
+  const prev=document.getElementById('imp-sess-preview');
+  const btn=document.getElementById('imp-sess-btn');
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const data=JSON.parse(e.target.result);
+      if(data.type!=='pb-session')throw new Error('wrong type');
+      const pCount=(data.players||[]).length,mCount=(data.matches||[]).length;
+      prev.textContent=`"${data.name}" — ${pCount} players · ${mCount} matches`;
+      prev.style.color='var(--gr)';
+      _importSessionData=data;btn.style.display='block';
+    }catch(err){
+      prev.textContent='⚠ Invalid session file — must be exported with 📤 Export Session.';
+      prev.style.color='var(--re)';
+      _importSessionData=null;btn.style.display='none';
+    }
+  };
+  reader.readAsText(f);
+}
+
+function runSessionImport(){
+  if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
+  if(!_importSessionData)return;
+  const data=_importSessionData;
+  // Map exported player IDs → local S.db IDs; create missing players
+  const idMap={};let added=0;
+  (data.players||[]).forEach(ep=>{
+    const existing=S.db.find(p=>p.name.toLowerCase()===(ep.name||'').toLowerCase().trim());
+    if(existing){
+      idMap[ep.id]=existing.id;
+    }else{
+      const newId=uid();
+      const r=ep.startRating||1000;
+      S.db.push({id:newId,name:ep.name,tag:'',rating:r,baseRating:r,
+                 wins:0,losses:0,ties:0,gamesPlayed:0});
+      idMap[ep.id]=newId;added++;
+    }
+  });
+  // Build session players
+  const sessPlayers=(data.players||[]).map(ep=>{
+    const localId=idMap[ep.id];
+    const dbP=gp(localId);
+    return{id:localId,name:dbP?.name||ep.name,tag:dbP?.tag||'',
+           startRating:ep.startRating||1000,sRating:ep.startRating||1000,
+           wins:0,losses:0,ties:0,ties:0,matchesPlayed:0,ptsFor:0,ptsAgainst:0,status:'active'};
+  });
+  // Build cfLog with remapped IDs
+  const cfLog=(data.matches||[]).map((m,i)=>({
+    id:uid(),
+    t1:(m.t1||[]).map(id=>idMap[id]||id),
+    t2:(m.t2||[]).map(id=>idMap[id]||id),
+    s1:m.s1||0,s2:m.s2||0,
+    courtNum:m.court||1,matchIdx:i,eloDeltas:[0,0,0,0]
+  }));
+  // Build archive-compatible session object
+  const importedSess={
+    id:uid(),name:data.name||'Imported Session',
+    date:data.date||new Date().toISOString(),
+    courts:data.courts||1,cfMode:true,status:'ended',
+    players:sessPlayers,cfLog,cfMatchCount:cfLog.length,
+    activePlayers:sessPlayers.map(sp=>sp.id),
+    partnerHx:{},oppHx:{},oppHxTime:{},cfRanks:{},cfPairSessionCount:{},cfPairLastAt:{}
+  };
+  // Recalculate ELO by temporarily swapping S.session so recalcSessionCFELO() works
+  const origSession=S.session;
+  S.session=importedSess;
+  recalcSessionCFELO();
+  _initSessionRanks(); // seed session ranks from ELO for completeness
+  S.session=origSession;
+  // Add to archive (sorted by date)
+  S.archive.push(importedSess);
+  S.archive.sort((a,b)=>new Date(a.date)-new Date(b.date));
+  recalcAllTimeRatings();
+  STORE.save();renderDB();renderHistory();renderStandings();
+  _importSessionData=null;
+  closeModal();
+  toast(`✅ Session imported: ${cfLog.length} match${cfLog.length!==1?'es':''}, ${added} new player${added!==1?'s':''} added`,'ok',4000);
 }
 
 function buildSessionReport(){
