@@ -763,14 +763,21 @@ const SIM = (() => {
         else if (!paused.has(id)) { _waitTrack[id].cur++; if (_waitTrack[id].cur > _waitTrack[id].max) _waitTrack[id].max = _waitTrack[id].cur; }
       }
       if (permA && permB) {
-        const aP = all.has(permA), bP = all.has(permB);
-        const aLeft = gsp(permA)?.status === 'left', bLeft = gsp(permB)?.status === 'left';
-        if (aP && bP) {
-          _permMatches++;
-          if (t1.includes(permA) !== t1.includes(permB)) { err(`PERM PAIR SPLIT-TEAM C${c} M${matchNum}`); _permViolations++; }
-        } else if ((aP && !bP && !bLeft) || (bP && !aP && !aLeft)) {
-          err(`PERM PAIR VIOLATION C${c} M${matchNum}: ${gp(permA)?.name}(in=${aP}) ${gp(permB)?.name}(in=${bP})`);
-          _permViolations++;
+        // Only enforce while the pair is still registered — after cfRemovePermPair the
+        // players are independent and may appear on separate courts without violation.
+        const _pk = (a, b) => [a, b].sort().join('|');
+        const _key = _pk(permA, permB);
+        const _stillActive = (S.session?.cfPermPairs || []).some(p => _pk(p[0], p[1]) === _key);
+        if (_stillActive) {
+          const aP = all.has(permA), bP = all.has(permB);
+          const aLeft = gsp(permA)?.status === 'left', bLeft = gsp(permB)?.status === 'left';
+          if (aP && bP) {
+            _permMatches++;
+            if (t1.includes(permA) !== t1.includes(permB)) { err(`PERM PAIR SPLIT-TEAM C${c} M${matchNum}`); _permViolations++; }
+          } else if ((aP && !bP && !bLeft) || (bP && !aP && !aLeft)) {
+            err(`PERM PAIR VIOLATION C${c} M${matchNum}: ${gp(permA)?.name}(in=${aP}) ${gp(permB)?.name}(in=${bP})`);
+            _permViolations++;
+          }
         }
       }
     };

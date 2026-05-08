@@ -6245,6 +6245,29 @@ const CF={
       try{CF.confirmSuggestion(courtNum);}finally{this._confirmDepth--;}
       return;
     }
+    // Perm pair guard: refuse to start a match with exactly one half of a permanent pair.
+    // Belt-and-suspenders over the batchGenerateSuggestions safety net — catches any
+    // suggestion that reached this point via stale-detection cascade, direct assignment,
+    // or any other path that bypasses the post-generation scan.
+    if(S.session.cfPermPairs?.length){
+      const ids=new Set(sug.allIds);
+      for(const[a,b]of S.session.cfPermPairs){
+        const aIn=ids.has(a),bIn=ids.has(b);
+        const aLeft=gsp(a)?.status==='left',bLeft=gsp(b)?.status==='left';
+        if((aIn&&!bIn&&!bLeft)||(bIn&&!aIn&&!aLeft)){
+          if(this._confirmDepth>=2){renderLive();return;}
+          const prevSug=S.session.cfSuggestions[courtNum]||null;
+          delete S.session.cfSuggestions[courtNum];
+          try{CF.generateSuggestion(courtNum,null);}
+          catch(e){if(prevSug)S.session.cfSuggestions[courtNum]=prevSug;renderLive();return;}
+          const fresh=S.session.cfSuggestions[courtNum];
+          if(!fresh){renderLive();return;}
+          this._confirmDepth++;
+          try{CF.confirmSuggestion(courtNum);}finally{this._confirmDepth--;}
+          return;
+        }
+      }
+    }
     // Track time in queue for each player + capture original since BEFORE dequeue
     const now=Date.now();
     const queueSinceMap={}; // must be captured before dequeue removes entries
