@@ -348,7 +348,10 @@ body.observer-mode .qs-row{display:none!important}
       onkeydown="if(event.key==='Enter')_submitAdminCode()"
       autocomplete="current-password"/>
     <button class="btn bp" style="width:100%;max-width:240px;margin-bottom:8px" onclick="_submitAdminCode()">Unlock →</button>
-    <div style="margin-top:10px;font-size:.7rem;color:var(--mu)">Player? Use the <strong>Player Link</strong> shared by your organiser.</div>
+    <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;align-items:center">
+      <div style="font-size:.7rem;color:var(--mu)">Player? Use the <strong>Player Link</strong> shared by your organiser.</div>
+      <button onclick="location.href=location.href.split('?')[0]+'?view=observer'" style="background:none;border:none;color:#818cf8;font-size:.7rem;cursor:pointer;font-family:'DM Sans',sans-serif;text-decoration:underline;padding:0">👁 View live session as Observer (no code needed)</button>
+    </div>
   </div>
 </div>
 
@@ -3362,9 +3365,18 @@ function recalcAllTimeRatings(){
     });
   }
 
-  // Reset ALL db players — fixes stale data when only session is deleted
+  // Reset ALL db players' stats.
+  // Rating reset rule:
+  //   • Player appeared in a remaining session → reset to their startRating for that session
+  //   • Player in sessions but all sessions deleted (playerBase empty) → KEEP current rating
+  //     (resetting to baseRating=1000 here would wipe all earned progress and look like
+  //     the database was erased — preserve ratings when there's nothing left to replay)
+  const hasSessions=sessions.length>0||(S.session?.status==='active');
   S.db.forEach(p=>{
-    p.rating=(p.id in playerBase)?playerBase[p.id]:(p.baseRating??p.rating);
+    if(hasSessions){
+      p.rating=(p.id in playerBase)?playerBase[p.id]:(p.baseRating??p.rating);
+    }
+    // Always zero out aggregate stats — they'll be rebuilt from the replay below
     p.wins=0;p.losses=0;p.ties=0;p.gamesPlayed=0;
   });
 
@@ -3405,7 +3417,7 @@ function deleteArchiveSess(sessId){
       S.archive=S.archive.filter(a=>a.id!==sessId);
       recalcAllTimeRatings();
       STORE.save();
-      renderArchive();renderStandings();updatePvSessFilter();
+      renderDB();renderArchive();renderStandings();updatePvSessFilter();
       if(S.session)renderLive();
       toast(`"${sess.name}" deleted — ratings recalculated ✓`,'ok');
     });
