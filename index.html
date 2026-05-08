@@ -1586,20 +1586,8 @@ function _rankBadge(id){
   return `<span style="font-size:.58rem;font-weight:800;padding:1px 5px;border-radius:8px;background:rgba(148,163,184,.15);color:var(--mu);border:1px solid rgba(148,163,184,.25);margin-left:2px">#${rank}</span>`;
 }
 
-// ── Matchmaking thresholds (scale to player count) ────────────────────────────
-
-function _rankThresholds(waitMatches=0){
-  const n=_totalRanked()||S.session?.activePlayers?.length||20;
-  const small=(S.session?.courts||1)<=2;
-  // Small sessions: fewer players per band so widen thresholds to avoid carry matches.
-  const base=small
-    ?{partner:Math.round(n*0.45),teamAvg:Math.round(n*0.30)}
-    :{partner:Math.round(n*0.35),teamAvg:Math.round(n*0.20)};
-  // Progressive relaxation as player waits longer
-  if(waitMatches>=3)return{partner:Math.round(n*0.55),teamAvg:Math.round(n*0.35)};
-  if(waitMatches>=2)return{partner:Math.round(n*0.45),teamAvg:Math.round(n*0.27)};
-  return base;
-}
+// ── Matchmaking thresholds ────────────────────────────────────────────────────
+// Team balance and band constraints are applied inline in _ranksCompatible.
 
 // ── Rank compatibility check ──────────────────────────────────────────────────
 
@@ -1644,8 +1632,9 @@ function _ranksCompatible(t1ids,t2ids,waitMatches=0){
   const t1avg=(r(t1ids[0])+r(t1ids[1]))/2;
   const t2avg=(r(t2ids[0])+r(t2ids[1]))/2;
 
-  // 25% of pool = ~1 band width. Blocks 2-band gaps, allows adjacent bands.
-  let thresh=Math.round(n*0.25);
+  // Small sessions have fewer players per band so widen team balance tolerance.
+  const _small=(S.session?.courts||1)<=2;
+  let thresh=Math.round(_small?n*0.30:n*0.25);
   if(waitMatches>=3)thresh=Math.round(n*0.40);
   else if(waitMatches>=2)thresh=Math.round(n*0.32);
 
@@ -5918,13 +5907,15 @@ const CF={
     return phases[1]||'B';
   },
 
-  // Phase-aware gap cap for _withinTeamGapOk
-  // Small sessions (≤2 courts): wider caps since fewer valid groups exist.
-  // Large sessions — A(warm-up)=280, B(settling)=320, C(competitive)=360.
+  // Phase-aware gap cap for _withinTeamGapOk (within-team partner ELO gap).
+  // Small sessions (≤2 courts): slightly wider since fewer valid groups exist,
+  // but capped below the 🔴 Avoid threshold (220) to avoid flooding avoid chips.
+  // Large sessions — A=280, B=320, C=360.
+  // Small sessions — A=300, B=330, C=360.
   _phaseGapCap(groupIds){
     const phase=this._sessionPhase(groupIds);
     const small=(S.session?.courts||1)<=2;
-    if(small)return phase==='A'?360:phase==='B'?400:440;
+    if(small)return phase==='A'?300:phase==='B'?330:360;
     return phase==='A'?280:phase==='B'?320:360;
   },
 
@@ -7132,12 +7123,16 @@ const CF={
     const gn=id=>{const p=gp(id);return p?esc(p.name)+(p.tag?` <span class="ptag">${esc(p.tag)}</span>`:''):'?';};
     const gr=id=>{const sp=gsp(id);return sp?.isNR?'<span class="nr-badge">NR</span>':`${Math.round(this.cfRating(id))}`;};
     const meta=sug.meta||{};
+    // ELO ratings — used only for win probability (ELO formula requires raw ratings).
     const t1r0=this.cfRating(sug.t1[0]),t1r1=this.cfRating(sug.t1[1]);
     const t2r0=this.cfRating(sug.t2[0]),t2r1=this.cfRating(sug.t2[1]);
     const t1Avg=Math.round((t1r0+t1r1)/2);
     const t2Avg=Math.round((t2r0+t2r1)/2);
-    const t1pgap=Math.round(Math.abs(t1r0-t1r1));
-    const t2pgap=Math.round(Math.abs(t2r0-t2r1));
+    // Session rank SR — used for partner gap and avoid chip (reflects tonight's performance).
+    const t1sr0=this._rankSr(sug.t1[0]),t1sr1=this._rankSr(sug.t1[1]);
+    const t2sr0=this._rankSr(sug.t2[0]),t2sr1=this._rankSr(sug.t2[1]);
+    const t1pgap=Math.round(Math.abs(t1sr0-t1sr1));
+    const t2pgap=Math.round(Math.abs(t2sr0-t2sr1));
     const staleMin=sug.ts?Math.floor((Date.now()-sug.ts)/60000):0;
     const staleWarn=staleMin>=3;
     // Cooldown status chip — show how fresh each pair is, or how close to cooldown
