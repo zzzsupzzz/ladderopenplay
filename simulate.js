@@ -723,7 +723,7 @@ const SIM = (() => {
     return { log: _log, errors: _errs, passed: _errs.length === 0 };
   }
 
-  // ── Organizer 12p/2c simulation ──────────────────────────────────────────
+  // ── Organizer 14p/2c simulation ──────────────────────────────────────────
 
   async function runOrganizer12(opts = {}) {
     if (_running) { console.warn('[SIM] Already running. SIM.stop() first.'); return; }
@@ -736,59 +736,45 @@ const SIM = (() => {
 
     // Per-run quality accumulators
     let permA = null, permB = null;
-    let _matchSnaps = [];      // {round, court, gap, t1Avg, t2Avg}
+    let _matchSnaps = [];      // {matchNum, court, gap, t1Avg, t2Avg}
     let _waitTrack = {};       // {id: {cur, max}}
     let _partnerTrack = {};    // {id: Set<partnerId>}
     let _permViolations = 0, _permMatches = 0, _permHeldRounds = 0;
 
-    // Snapshot court teams right after confirm (before score submit clears them)
-    const snapCourt = (c, round) => {
+    // Snapshot court teams right after confirm
+    const snapCourt = (c, matchNum) => {
       const ct = S.session.cfCourts?.[c];
       if (!ct?.match || ct.status !== 'playing') return;
       const { t1, t2 } = ct.match;
       const all = new Set([...t1, ...t2]);
       const avgR = ids => ids.reduce((s, id) => s + (gsp(id)?.sRating || gp(id)?.rating || 1000), 0) / ids.length;
       const t1a = avgR(t1), t2a = avgR(t2);
-      _matchSnaps.push({ round, court: c, gap: Math.abs(t1a - t2a), t1Avg: Math.round(t1a), t2Avg: Math.round(t2a) });
-
-      // Partner variety
+      _matchSnaps.push({ matchNum, court: c, gap: Math.abs(t1a - t2a), t1Avg: Math.round(t1a), t2Avg: Math.round(t2a) });
       for (const id of all) {
         if (!_partnerTrack[id]) _partnerTrack[id] = new Set();
         const myTeam = t1.includes(id) ? t1 : t2;
         myTeam.forEach(pid => { if (pid !== id) _partnerTrack[id].add(pid); });
       }
-
-      // Wait streaks — anyone active not playing increments streak
       const paused = new Set((S.session.cfPaused || []).map(q => q.id));
       for (const id of (S.session.activePlayers || [])) {
         const sp = gsp(id); if (!sp || sp.status === 'left') continue;
         if (!_waitTrack[id]) _waitTrack[id] = { cur: 0, max: 0 };
-        if (all.has(id)) {
-          _waitTrack[id].cur = 0;
-        } else if (!paused.has(id)) {
-          _waitTrack[id].cur++;
-          if (_waitTrack[id].cur > _waitTrack[id].max) _waitTrack[id].max = _waitTrack[id].cur;
-        }
+        if (all.has(id)) { _waitTrack[id].cur = 0; }
+        else if (!paused.has(id)) { _waitTrack[id].cur++; if (_waitTrack[id].cur > _waitTrack[id].max) _waitTrack[id].max = _waitTrack[id].cur; }
       }
-
-      // Permanent pair verification
       if (permA && permB) {
         const aP = all.has(permA), bP = all.has(permB);
         const aLeft = gsp(permA)?.status === 'left', bLeft = gsp(permB)?.status === 'left';
         if (aP && bP) {
           _permMatches++;
-          if (t1.includes(permA) !== t1.includes(permB)) {
-            err(`PERM PAIR SPLIT-TEAM on C${c} R${round}: ${gp(permA)?.name} & ${gp(permB)?.name} on opposite teams`);
-            _permViolations++;
-          }
+          if (t1.includes(permA) !== t1.includes(permB)) { err(`PERM PAIR SPLIT-TEAM C${c} M${matchNum}`); _permViolations++; }
         } else if ((aP && !bP && !bLeft) || (bP && !aP && !aLeft)) {
-          err(`PERM PAIR VIOLATION on C${c} R${round}: ${gp(permA)?.name}(playing=${aP}) & ${gp(permB)?.name}(playing=${bP}) split`);
+          err(`PERM PAIR VIOLATION C${c} M${matchNum}: ${gp(permA)?.name}(in=${aP}) ${gp(permB)?.name}(in=${bP})`);
           _permViolations++;
         }
       }
     };
 
-    // Check if one perm partner is in queue but the other is not (held-waiting state)
     const checkPermHeld = () => {
       if (!permA || !permB) return;
       const qIds = new Set((S.session.cfQueue || []).map(q => q.id));
@@ -797,8 +783,69 @@ const SIM = (() => {
       if ((aQ && !bQ && !bLeft) || (bQ && !aQ && !aLeft)) _permHeldRounds++;
     };
 
-    log('=== ORGANIZER SIM: 14 players / 2 courts / ~3h ===');
-    log('Scenarios: late arrivals, pause/resume, leave-soon, mid-remove, permanent partners');
+    // ── DOM-free helpers for non-happy-path scenarios ─────────────────────
+
+    // Swap one player in a pending suggestion (replicates CF.confirmSwap without modal)
+    const simSwapPreview = (c, outId, inId) => {
+      const sug = S.session?.cfSuggestions[c];
+      if (!sug || !sug.allIds.includes(outId)) return false;
+      if (!S.session.cfQueue.some(q => q.id === inId)) return false;
+      if (!S.session.cfQueue.find(q => q.id === outId))
+        S.session.cfQueue.push({ id: outId, since: Date.now(), consec: 0 });
+      const newIds = sug.allIds.map(id => id === outId ? inId : id);
+      const players = newIds.map(id => ({ id, sr: CF._rankSr(id), waitMin: 0 }));
+      const { t1, t2 } = MM.bestPair(players);
+      const gap = Math.abs((t1[0].sr + t1[1].sr) / 2 - (t2[0].sr + t2[1].sr) / 2);
+      S.session.cfSuggestions[c] = { ...sug, t1: t1.map(p => p.id), t2: t2.map(p => p.id), allIds: newIds,
+        meta: { ...sug.meta, gap: Math.round(gap), gapWarn: gap > 80 } };
+      CF._reserveAndRefreshOtherCourts(c, newIds);
+      return true;
+    };
+
+    // Swap one player mid-match (replicates CF.confirmActiveMatchSwap without modal)
+    const simSwapActive = (c, outId, inId) => {
+      const ct = S.session.cfCourts[c];
+      if (!ct?.match) return false;
+      const m = ct.match;
+      if (![...m.t1, ...m.t2].includes(outId)) return false;
+      const avail = [...(S.session.cfQueue || []), ...(S.session.cfPaused || [])];
+      if (!avail.some(q => q.id === inId)) return false;
+      const inQEntry = avail.find(q => q.id === inId);
+      const updatedQS = { ...(m.queueSince || {}) };
+      updatedQS[inId] = inQEntry?.since || m.startTime || Date.now();
+      delete updatedQS[outId];
+      ct.match = { ...m, t1: m.t1.map(id => id === outId ? inId : id), t2: m.t2.map(id => id === outId ? inId : id), queueSince: updatedQS };
+      S.session.cfQueue = S.session.cfQueue.filter(q => q.id !== inId);
+      if (S.session.cfPaused) S.session.cfPaused = S.session.cfPaused.filter(q => q.id !== inId);
+      if (!S.session.cfQueue.find(q => q.id === outId))
+        S.session.cfQueue.push({ id: outId, since: Date.now(), consec: 0 });
+      AUDIT.log('swap_active', `Sim swap: ${gp(outId)?.name||'?'} → ${gp(inId)?.name||'?'}`, c);
+      rebuildCFDerivedState();
+      if (!S.session.cfCourts[c])
+        S.session.cfCourts[c] = { status: 'playing', match: ct.match, idleStart: 0, totalIdleMs: 0, matchCount: 0 };
+      return true;
+    };
+
+    // Edit a logged match score (replicates _saveCFScore without modal)
+    const simEditScore = (matchIdx, newS1, newS2) => {
+      const m = S.session?.cfLog?.[matchIdx];
+      if (!m) return false;
+      const old = `${m.s1}-${m.s2}`;
+      m.s1 = newS1; m.s2 = newS2;
+      const _target = S.session.targetScore || 11;
+      const _hi = Math.max(newS1, newS2), _lo = Math.min(newS1, newS2);
+      m.noElo = (newS1 === newS2) || (_hi < _target) || (newS1 !== newS2 && !isValidFinal(_hi, _lo, _target));
+      AUDIT.log('score_edit', `Sim score edit M${matchIdx}: ${old} → ${newS1}-${newS2}`);
+      recalcSessionCFELO();
+      rebuildCFDerivedState();
+      recalcAllTimeRatings();
+      return true;
+    };
+
+    log('=== ORGANIZER SIM: 14 players / 2 courts ===');
+    log('Scenarios: staggered court finishes · swap in preview · swap mid-match · score edit');
+    log('           quality-first reshuffle · late arrivals · pause/resume · leave-soon');
+    log('           mid-remove · permanent partners + pause/resume perm pair member');
     log('');
 
     saveRealState();
@@ -806,7 +853,6 @@ const SIM = (() => {
     try {
       resetState();
 
-      // Fixed-rating players so results are deterministic and readable
       //   0=Alex(1350-A)  1=Jordan(1250-A)  2=Sam(1100-B+)  3=Morgan(1050-B)
       //   4=Taylor(960-B) 5=Casey(910-B-)   6=Riley(860-C+) 7=Quinn(810-C)
       //   8=Avery(760-C)  9=Charlie(700-C-) 10=Drew(650-D)  11=Frankie(600-D)
@@ -823,11 +869,10 @@ const SIM = (() => {
       S.db.forEach(p => S.checkedIn.add(p.id));
       log(`Players: ${S.db.map((p,i)=>p.name+(p.isNR?'(NR)':'('+fixedRatings[i]+')')).join(' | ')}`);
 
-      // Build session (mirrors startSim but explicit for organizer scenario)
       const arr = [...S.checkedIn];
       S.courts = 2; S.adminPin = 'simtest';
       S.session = {
-        id: uid(), name: 'Organizer 12p/2c', date: new Date().toISOString(), courts: 2,
+        id: uid(), name: 'Organizer 14p/2c', date: new Date().toISOString(), courts: 2,
         targetScore: 11, courtGroupSize: 4, cfMode: true, extendedMin: 16, sessionStart: null,
         activePlayers: [...arr],
         players: arr.map(id => {
@@ -848,156 +893,156 @@ const SIM = (() => {
       _initSessionRanks(); _invalidateMatchmakingCaches();
       CF._confirmAllBusy = false; CF._confirmAllLastTs = 0;
       CF.initQueue();
-      log('Play started. Initial queue: ' + S.session.cfQueue.map(q => gp(q.id)?.name).join(', '));
+      log('Play started. Queue: ' + S.session.cfQueue.map(q => gp(q.id)?.name).join(', '));
 
-      // Generate initial suggestions for both courts
       try { CF.batchGenerateSuggestions([1, 2], null); } catch(e) { log('Initial suggest error: ' + e.message); }
-      assert(S.session.cfSuggestions[1] || S.session.cfSuggestions[2], 'At least one suggestion generated at start');
+      assert(S.session.cfSuggestions[1] || S.session.cfSuggestions[2], 'At least one suggestion at start');
       if (doRender) render();
       if (live) await STORE.save();
       await delay(ms);
 
-      let pausedId = null, leaveSoonDone = false, removeDone = false;
-      let permPauseId = null, permPauseResumed = false;
+      // ── Event state flags ─────────────────────────────────────────────────
+      let permPairDone = false;
+      let swapPreviewDone = false, swapActiveDone = false, editScoreDone = false, qualityFirstDone = false;
+      let lateArrivalsDone = false, lateStrongDone = false;
+      let pauseDone = false, pauseId = null, resumeDone = false;
+      let leaveSoonDone = false, removeDone = false;
+      let permPauseDone = false, permPauseId = null, permResumedDone = false;
       let lateIds = [];
-      const ROUNDS = 18;
 
-      for (let r = 0; r < ROUNDS && !_aborted; r++) {
-        const rl = `R${r+1}`;
+      // ── Main loop ──────────────────────────────────────────────────────────
+      // courtGameLen[c]: ticks remaining before court c finishes its current game.
+      // Round 1 gets gameLen=0 (both courts finish simultaneously — organizer confirms all at once).
+      // After that each court gets 1–2 tick stagger, so they rarely finish together.
+      const courtGameLen = { 1: 0, 2: 0 };
+      let firstRoundDone = false;
+      const TARGET_MATCHES = 40;
+      const MAX_TICKS = 90;
 
-        // Regenerate suggestions for idle ready courts
-        const dead = [];
-        for (let c = 1; c <= 2; c++) {
-          const ct = S.session.cfCourts?.[c];
-          if (ct?.status === 'ready' && !S.session.cfSuggestions?.[c] && S.session.cfQueue.length >= 4) dead.push(c);
-        }
-        if (dead.length) {
-          try { CF.batchGenerateSuggestions(dead, null); } catch(e) { log(`${rl} regen err: ${e.message}`); }
-        }
+      for (let tick = 0; tick < MAX_TICKS && S.session.cfMatchCount < TARGET_MATCHES && !_aborted; tick++) {
 
-        // Confirm all ready suggestions
-        let confirmed = 0;
-        for (let c = 1; c <= 2; c++) {
-          if (_aborted) break;
-          if (S.session.cfSuggestions[c]) {
-            CF.confirmSuggestion(c);
-            confirmed++;
-            snapCourt(c, r + 1);
-            verifyNoDuplicates();
-            if (doRender) render();
-            if (live) await STORE.save();
-            await delay(ms);
-          }
-        }
-
-        // Submit all playing courts
-        let submitted = 0;
+        // ── STEP 1: Submit courts whose game has ended ──────────────────────
         for (let c = 1; c <= 2; c++) {
           if (_aborted) break;
           const ct = S.session.cfCourts?.[c];
-          if (ct?.status === 'playing' && ct.match) {
-            const [s1, s2] = randomScore();
-            CF._doSubmitScore(c, s1, s2);
-            submitted++;
-            log(`${rl} C${c}: ${s1}-${s2}  queue=${S.session.cfQueue.length}`);
-            verifyNoGhosts(); verifyStats(); verifyPlayCountBalance();
-            if (doRender) render();
-            if (live) await STORE.save();
-            await delay(ms);
+          if (ct?.status !== 'playing' || !ct.match) continue;
+          if (courtGameLen[c] > 0) { courtGameLen[c]--; continue; }
+          const [s1, s2] = randomScore();
+          CF._doSubmitScore(c, s1, s2);
+          const mc = S.session.cfMatchCount;
+          log(`T${tick+1} C${c} M${mc}: ${s1}-${s2}  q=${S.session.cfQueue.length}`);
+          verifyNoGhosts(); verifyStats(); verifyPlayCountBalance();
+          if (doRender) render();
+          if (live) await STORE.save();
+          await delay(ms);
+        }
+
+        const mc = S.session.cfMatchCount;
+
+        // ── STEP 2: Score edit — correct the previous match after it was logged ──
+        // Simulates organiser noticing a typo and fixing it via the ✏️ button.
+        if (!editScoreDone && mc >= 16) {
+          const logLen = S.session.cfLog?.length || 0;
+          if (logLen >= 2) {
+            const idx = logLen - 2;
+            const m = S.session.cfLog[idx];
+            // "Correction": keep same winner but bump loser score by 2 (common typo fix)
+            const winner = Math.max(m.s1, m.s2), loser = Math.min(m.s1, m.s2);
+            const fixedLoser = Math.min(loser + 2, winner - 1);
+            const newS1 = m.s1 >= m.s2 ? winner : fixedLoser;
+            const newS2 = m.s1 >= m.s2 ? fixedLoser : winner;
+            log(`T${tick+1}: ✏️  SCORE EDIT M${idx} — was ${m.s1}-${m.s2}, corrected to ${newS1}-${newS2}`);
+            const ok = simEditScore(idx, newS1, newS2);
+            if (ok) { verifyStats(); editScoreDone = true; }
+            if (doRender) render(); if (live) await STORE.save(); await delay(ms);
           }
         }
 
-        checkPermHeld();
+        // ── STEP 3: State-changing events (no pending suggestion needed) ────
 
-        if (!confirmed && !submitted && S.session.cfQueue.length < 4) {
-          log(`${rl}: insufficient players — court idle`); continue;
-        }
-
-        // ── Timeline events ──────────────────────────────────────
-
-        // After R2: Set up permanent partners (Taylor + Casey)
-        if (r === 1 && !permA) {
+        // mc≥4: Set permanent partners (Taylor + Casey)
+        if (!permPairDone && mc >= 4) {
           permA = S.db[4].id; permB = S.db[5].id;
           cfAddPermPair(permA, permB);
-          log(`${rl}: ⛓️  PERMANENT PAIR — ${S.db[4].name}(${fixedRatings[4]}) & ${S.db[5].name}(${fixedRatings[5]})`);
-          // Verify no existing suggestion already splits them
+          log(`T${tick+1}: ⛓️  PERM PAIR — ${S.db[4].name} & ${S.db[5].name}`);
           for (let c = 1; c <= 2; c++) {
             const sug = S.session.cfSuggestions?.[c];
             if (sug) {
               const inSug = new Set([...(sug.t1||[]),...(sug.t2||[])]);
-              const aIn = inSug.has(permA), bIn = inSug.has(permB);
-              if (aIn !== bIn) err(`${rl}: existing C${c} suggestion has solo perm pair member after lock!`);
+              if (inSug.has(permA) !== inSug.has(permB))
+                err(`T${tick+1}: C${c} suggestion splits perm pair after lock!`);
             }
           }
-          if (doRender) render();
-          await delay(ms);
+          permPairDone = true;
+          if (doRender) render(); await delay(ms);
         }
 
-        // R4: Two late arrivals (mid-strength players)
-        if (r === 3 && lateIds.length === 0) {
-          const lateRatings = [1000, 820];
-          for (let i = 0; i < 2; i++) {
-            const ni = S.db.length, lr = lateRatings[i], lId = uid();
+        // mc≥8: Two mid-strength late arrivals
+        if (!lateArrivalsDone && mc >= 8) {
+          for (const lr of [1000, 820]) {
+            const ni = S.db.length, lId = uid();
             S.db.push({ id:lId, name:NAMES[ni]||`Late${ni}`, tag:'LATE', rating:lr, baseRating:lr,
               isNR:false, nrLevelHint:null, dupr:null, isSeeding:false,
               gamesPlayed:0, wins:0, losses:0, ties:0, createdAt:new Date().toISOString() });
             S.checkedIn.add(lId); midAdd(lId);
             lateIds.push(lId);
-            _disruptedAt[lId] = S.session.cfMatchCount||0; _disruptedType[lId] = 'midadd';
-            log(`${rl}: Late arrival — ${NAMES[ni]}(${lr}): joined mid-session with 0 games`);
+            _disruptedAt[lId] = mc; _disruptedType[lId] = 'midadd';
+            log(`T${tick+1}: 🚶 Late arrival — ${NAMES[ni]}(${lr})`);
             verifyNoGhosts();
             if (doRender) render(); if (live) await STORE.save(); await delay(ms);
           }
+          lateArrivalsDone = true;
         }
 
-        // R5: Pause a regular player (not perm pair member)
-        if (r === 4 && !pausedId) {
+        // mc≥12: Pause a regular player (bathroom break)
+        if (!pauseDone && mc >= 12) {
           const cand = S.session.cfQueue.find(q => q.id !== permA && q.id !== permB);
           if (cand) {
-            cfPausePlayer(cand.id); pausedId = cand.id;
-            log(`${rl}: Pause — ${gp(cand.id)?.name} (bathroom break)`);
+            cfPausePlayer(cand.id); pauseId = cand.id; pauseDone = true;
+            log(`T${tick+1}: ⏸  Pause — ${gp(cand.id)?.name}`);
             if (doRender) render(); if (live) await STORE.save(); await delay(ms);
           }
         }
 
-        // R6: Strong late arrival (A-level player runs late)
-        if (r === 5 && lateIds.length === 2) {
+        // mc≥16: Strong A-level late arrival
+        if (!lateStrongDone && mc >= 16) {
           const ni = S.db.length, lr = 1180, lId = uid();
           S.db.push({ id:lId, name:NAMES[ni]||`Late${ni}`, tag:'LATE', rating:lr, baseRating:lr,
             isNR:false, nrLevelHint:null, dupr:null, isSeeding:false,
             gamesPlayed:0, wins:0, losses:0, ties:0, createdAt:new Date().toISOString() });
           S.checkedIn.add(lId); midAdd(lId);
           lateIds.push(lId);
-          _disruptedAt[lId] = S.session.cfMatchCount||0; _disruptedType[lId] = 'midadd';
-          log(`${rl}: Late arrival #3 — ${NAMES[ni]}(${lr}) strong A-level, 0 games — hunger priority kicks in`);
+          _disruptedAt[lId] = mc; _disruptedType[lId] = 'midadd';
+          log(`T${tick+1}: 🚶 Late #3 — ${NAMES[ni]}(${lr}) A-level, hunger boost applies`);
+          lateStrongDone = true;
           verifyNoGhosts();
           if (doRender) render(); if (live) await STORE.save(); await delay(ms);
         }
 
-        // R8: Resume paused player
-        if (r === 7 && pausedId) {
-          const e = (S.session.cfPaused||[]).find(q=>q.id===pausedId);
+        // mc≥20: Resume paused player
+        if (!resumeDone && pauseId && mc >= 20) {
+          const e = (S.session.cfPaused||[]).find(q => q.id === pauseId);
           if (e) {
-            cfResumePlayer(pausedId);
-            _disruptedAt[pausedId] = S.session.cfMatchCount||0; _disruptedType[pausedId] = 'resume';
-            log(`${rl}: Resumed — ${gp(pausedId)?.name}`);
-            pausedId = null;
+            cfResumePlayer(pauseId);
+            _disruptedAt[pauseId] = mc; _disruptedType[pauseId] = 'resume';
+            log(`T${tick+1}: ▶  Resume — ${gp(pauseId)?.name}`);
+            pauseId = null; resumeDone = true;
             if (doRender) render(); if (live) await STORE.save(); await delay(ms);
           }
         }
 
-        // R9: Leave-soon for one regular player
-        if (r === 8 && !leaveSoonDone) {
+        // mc≥22: Leave-soon
+        if (!leaveSoonDone && mc >= 22) {
           const cand = S.session.cfQueue.find(q => q.id!==permA && q.id!==permB && !lateIds.includes(q.id));
           if (cand) {
             cfLeaveSoon(cand.id); leaveSoonDone = true;
-            log(`${rl}: Leave-soon flagged — ${gp(cand.id)?.name} (has to go after current game)`);
+            log(`T${tick+1}: 🚪 Leave-soon — ${gp(cand.id)?.name}`);
             if (doRender) render(); if (live) await STORE.save(); await delay(ms);
           }
         }
 
-        // R11: Sudden mid-remove (late arrival gets a phone call, has to leave NOW)
-        if (r === 10 && !removeDone && lateIds.length > 0) {
+        // mc≥26: Mid-remove late arrival (sudden departure)
+        if (!removeDone && mc >= 26 && lateIds.length > 0) {
           const rmId = lateIds[0];
           const sp = gsp(rmId);
           if (sp && sp.status !== 'left') {
@@ -1005,53 +1050,153 @@ const SIM = (() => {
               ct => ct?.status==='playing' && ct.match && [...ct.match.t1,...ct.match.t2].includes(rmId));
             if (!onCourt) {
               midRemove(rmId); removeDone = true;
-              log(`${rl}: Mid-remove — ${gp(rmId)?.name} sudden departure from queue`);
-              assert(!S.session.cfRanks[rmId], `${rl}: cfRanks cleared immediately on midRemove`);
+              log(`T${tick+1}: ❌ Mid-remove — ${gp(rmId)?.name} sudden departure`);
+              assert(!S.session.cfRanks[rmId], `T${tick+1}: cfRanks cleared on midRemove`);
               verifyNoGhosts();
               if (doRender) render(); if (live) await STORE.save(); await delay(ms);
             }
           }
         }
 
-        // R14: CRITICAL TEST — pause one permanent pair member
-        // Expected: partner is automatically held, cannot be assigned while other is paused
-        if (r === 13 && !permPauseId && permA) {
-          const target = S.session.cfQueue.find(q=>q.id===permA||q.id===permB);
+        // mc≥30: Pause one permanent pair member
+        if (!permPauseDone && permA && mc >= 30) {
+          const target = S.session.cfQueue.find(q => q.id===permA || q.id===permB);
           if (target) {
-            cfPausePlayer(target.id); permPauseId = target.id;
+            cfPausePlayer(target.id); permPauseId = target.id; permPauseDone = true;
             const other = target.id===permA ? permB : permA;
-            log(`${rl}: ⛓️  PERM PAIR TEST — paused ${gp(target.id)?.name}`);
-            log(`${rl}:   → ${gp(other)?.name} should now be HELD in queue (not assigned to any court)`);
-            // Immediately verify the free partner is not already on court from a suggestion
-            for (let c=1;c<=2;c++) {
+            log(`T${tick+1}: ⛓️⏸  PERM PAIR PAUSE — ${gp(target.id)?.name} paused`);
+            log(`T${tick+1}:   → ${gp(other)?.name} should be held from suggestions`);
+            for (let c = 1; c <= 2; c++) {
               const sug = S.session.cfSuggestions?.[c];
               if (sug && [...(sug.t1||[]),...(sug.t2||[])].includes(other))
-                err(`${rl}: free perm pair partner ${gp(other)?.name} in pending suggestion while partner is paused!`);
+                err(`T${tick+1}: ${gp(other)?.name} in suggestion while partner is paused!`);
             }
             if (doRender) render(); if (live) await STORE.save(); await delay(ms);
           }
         }
 
-        // R16: Resume paused perm pair member — both should play together next round
-        if (r === 15 && permPauseId && !permPauseResumed) {
-          const e = (S.session.cfPaused||[]).find(q=>q.id===permPauseId);
+        // mc≥34: Resume paused perm pair member
+        if (!permResumedDone && permPauseId && mc >= 34) {
+          const e = (S.session.cfPaused||[]).find(q => q.id === permPauseId);
           if (e) {
-            cfResumePlayer(permPauseId);
-            permPauseResumed = true;
-            _disruptedAt[permPauseId] = S.session.cfMatchCount||0; _disruptedType[permPauseId] = 'resume';
-            log(`${rl}: ⛓️  Resumed paused perm pair member — ${gp(permPauseId)?.name}`);
-            log(`${rl}:   → Both partners back in queue — should play together in next suggestion`);
+            cfResumePlayer(permPauseId); permResumedDone = true;
+            _disruptedAt[permPauseId] = mc; _disruptedType[permPauseId] = 'resume';
+            log(`T${tick+1}: ⛓️▶  Resumed perm pair member — ${gp(permPauseId)?.name}`);
             if (doRender) render(); if (live) await STORE.save(); await delay(ms);
           }
         }
+
+        // ── STEP 4: Regenerate suggestions for idle ready courts ────────────
+        const dead = [];
+        for (let c = 1; c <= 2; c++) {
+          const ct = S.session.cfCourts?.[c];
+          if ((!ct || ct.status === 'ready') && !S.session.cfSuggestions?.[c] && S.session.cfQueue.length >= 4)
+            dead.push(c);
+        }
+        if (dead.length) {
+          try { CF.batchGenerateSuggestions(dead, null); } catch(e) { log(`T${tick+1} regen err: ${e.message}`); }
+        }
+
+        // ── STEP 5: Pre-confirm scenarios (need a pending suggestion) ────────
+
+        // mc≥6: Swap one player in a preview suggestion before confirming.
+        // Simulates organiser saying "actually put Riley on court instead of Quinn".
+        if (!swapPreviewDone && mc >= 6) {
+          for (let c = 1; c <= 2; c++) {
+            const sug = S.session.cfSuggestions?.[c];
+            if (!sug) continue;
+            const outId = sug.allIds.find(id => id !== permA && id !== permB);
+            const inId = (S.session.cfQueue||[]).find(q =>
+              !sug.allIds.includes(q.id) && q.id !== permA && q.id !== permB)?.id;
+            if (!outId || !inId) continue;
+            log(`T${tick+1}: ⇄  SWAP PREVIEW C${c} — ${gp(outId)?.name} out, ${gp(inId)?.name} in (before confirm)`);
+            const ok = simSwapPreview(c, outId, inId);
+            if (ok) {
+              assert(!S.session.cfSuggestions[c]?.allIds.includes(outId), `swap preview: ${gp(outId)?.name} still in suggestion`);
+              assert(S.session.cfSuggestions[c]?.allIds.includes(inId),   `swap preview: ${gp(inId)?.name} missing from suggestion`);
+              verifyNoDuplicates();
+              swapPreviewDone = true;
+              if (doRender) render(); await delay(ms);
+            }
+            if (swapPreviewDone) break;
+          }
+        }
+
+        // mc≥14: Quality-first reshuffle — discard suggestion, re-generate ignoring fairness pressure.
+        // Simulates organiser overriding a "fairness" suggestion for a closer match.
+        if (!qualityFirstDone && mc >= 14) {
+          for (let c = 1; c <= 2; c++) {
+            if (!S.session.cfSuggestions?.[c]) continue;
+            const prevGap = S.session.cfSuggestions[c]?.meta?.gap || '?';
+            log(`T${tick+1}: 🔀  QUALITY-FIRST RESHUFFLE C${c} — gap before: ${prevGap}`);
+            CF.reshuffleQualityFirst(c);
+            const newGap = S.session.cfSuggestions[c]?.meta?.gap || '?';
+            log(`T${tick+1}:   gap after: ${newGap}`);
+            qualityFirstDone = true;
+            if (doRender) render(); await delay(ms);
+            break;
+          }
+        }
+
+        // ── STEP 6: Confirm pending suggestions ─────────────────────────────
+        for (let c = 1; c <= 2; c++) {
+          if (_aborted || !S.session.cfSuggestions[c]) continue;
+          CF.confirmSuggestion(c);
+          snapCourt(c, S.session.cfMatchCount);
+          verifyNoDuplicates();
+          // Round 1: both courts start simultaneously (gameLen=0 → submit next tick).
+          // All subsequent rounds: 1–2 tick stagger so courts finish independently.
+          courtGameLen[c] = firstRoundDone ? (1 + Math.floor(Math.random() * 2)) : 0;
+          if (doRender) render();
+          if (live) await STORE.save();
+          await delay(ms);
+        }
+        if (!firstRoundDone) firstRoundDone = true;
+
+        // ── STEP 7: Mid-match swap (court now playing) ───────────────────────
+        // Simulates organiser swapping an injured/tired player off a live court.
+        if (!swapActiveDone && mc >= 10) {
+          for (let c = 1; c <= 2; c++) {
+            const ct = S.session.cfCourts?.[c];
+            if (ct?.status !== 'playing' || !ct.match) continue;
+            const allOnCourt = [...ct.match.t1, ...ct.match.t2];
+            const outId = allOnCourt.find(id => id !== permA && id !== permB);
+            const inId = (S.session.cfQueue||[]).find(q => q.id !== permA && q.id !== permB)?.id;
+            if (!outId || !inId) continue;
+            log(`T${tick+1}: ⇄  SWAP MID-MATCH C${c} — ${gp(outId)?.name} off, ${gp(inId)?.name} on`);
+            const ok = simSwapActive(c, outId, inId);
+            if (ok) {
+              const nowOnCourt = [...S.session.cfCourts[c].match.t1,...S.session.cfCourts[c].match.t2];
+              assert(nowOnCourt.includes(inId),  `swap active: ${gp(inId)?.name} not on court after swap`);
+              assert(!nowOnCourt.includes(outId),`swap active: ${gp(outId)?.name} still on court after swap`);
+              assert(S.session.cfQueue.some(q=>q.id===outId), `swap active: ${gp(outId)?.name} not back in queue`);
+              verifyNoDuplicates(); verifyNoGhosts();
+              swapActiveDone = true;
+              if (doRender) render(); await delay(ms);
+            }
+            if (swapActiveDone) break;
+          }
+        }
+
+        checkPermHeld();
       }
 
-      // ── Final leave-soon ghost check ──
+      // ── Final ghost check ──────────────────────────────────────────────────
       const leftIds = (S.session.players||[]).filter(sp=>sp.status==='left').map(sp=>sp.id);
-      const qIds = new Set((S.session.cfQueue||[]).map(q=>q.id));
-      leftIds.forEach(id => { assert(!qIds.has(id), `Ghost check: ${gp(id)?.name} left but in queue`); });
+      const finalQIds = new Set((S.session.cfQueue||[]).map(q=>q.id));
+      leftIds.forEach(id => { assert(!finalQIds.has(id), `Ghost: ${gp(id)?.name} left but in queue`); });
 
-      // ── Archive session ──
+      // Verify all non-happy-path scenarios actually ran
+      assert(swapPreviewDone,  'Scenario ran: swap in preview');
+      assert(swapActiveDone,   'Scenario ran: swap mid-match');
+      assert(editScoreDone,    'Scenario ran: score edit');
+      assert(qualityFirstDone, 'Scenario ran: quality-first reshuffle');
+      assert(lateArrivalsDone, 'Scenario ran: late arrivals');
+      assert(leaveSoonDone,    'Scenario ran: leave-soon');
+      assert(removeDone,       'Scenario ran: mid-remove');
+      assert(pauseDone,        'Scenario ran: pause/resume');
+
+      // ── Archive session ────────────────────────────────────────────────────
       const arch = {
         id: S.session.id, name: S.session.name, date: S.session.date, cfMode: true,
         players: (S.session.players||[]).map(sp => ({
@@ -1066,10 +1211,10 @@ const SIM = (() => {
       S.checkedIn.clear(); S.session = null;
       recalcAllTimeRatings();
 
-      // ══ QUALITY REPORT ════════════════════════════════════════════
+      // ══ QUALITY REPORT ════════════════════════════════════════════════════
       log('');
       log('╔══════════════════════════════════════════════════╗');
-      log('║   ORGANIZER QUALITY REPORT — 12p / 2 Courts     ║');
+      log('║   ORGANIZER QUALITY REPORT — 14p / 2 Courts     ║');
       log('╚══════════════════════════════════════════════════╝');
 
       const active = arch.players.filter(sp=>sp.matchesPlayed>0||sp.status!=='left');
@@ -1096,8 +1241,8 @@ const SIM = (() => {
         log(`MATCH BALANCE (${_matchSnaps.length} matches):`);
         log(`  Avg team gap: ${avgGap}pts  Max: ${maxGap}pts`);
         log(`  ${p50}% excellent (≤50pt gap)   ${p100}% acceptable (≤100pt gap)`);
-        if (avgGap > 120) log('  ⚠️  High avg gap — rating spread may be too wide for 2 courts');
-        else if (avgGap <= 60) log('  ✅ Excellent balance — matchmaking working well');
+        if (avgGap > 120) log('  ⚠️  High avg gap — rating spread too wide for 2 courts');
+        else if (avgGap <= 60) log('  ✅ Excellent balance');
       }
 
       log('');
@@ -1112,9 +1257,23 @@ const SIM = (() => {
         const gapPP = Math.abs((spA?.matchesPlayed||0)-(spB?.matchesPlayed||0));
         if (gapPP > 0) log(`  ⚠️  Game count gap between partners: ${gapPP} (should be 0)`);
         else log(`  ✅ Partners always played same number of games`);
-      } else {
-        log('  (No permanent pair set in this run)');
       }
+
+      log('');
+      log(`SCENARIOS COVERED:`);
+      log(`  R1: Both courts confirmed simultaneously (happy-path start)`);
+      log(`  M4+: Permanent partners locked (Taylor & Casey)`);
+      log(`  M6+: ⇄ Swap in preview (player swapped before confirming)`);
+      log(`  M8+: Two mid-session late arrivals`);
+      log(`  M10+: ⇄ Swap mid-match (live court player substitution)`);
+      log(`  M12+: Player paused (bathroom break)`);
+      log(`  M14+: 🔀 Quality-first reshuffle`);
+      log(`  M16+: Strong A-level late arrival + score edit (typo correction)`);
+      log(`  M20+: Paused player resumed`);
+      log(`  M22+: Player flagged leave-soon`);
+      log(`  M26+: Mid-remove (sudden departure)`);
+      log(`  M30+: Perm pair member paused → partner held`);
+      log(`  M34+: Perm pair member resumed`);
 
       log('');
       log(`TOTAL ERRORS: ${_errs.length}`);
