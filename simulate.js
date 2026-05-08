@@ -292,8 +292,12 @@ const SIM = (() => {
     const paused = new Set((S.session.cfPaused || []).map(q => q.id));
     const active = S.session.players.filter(sp => sp.status !== 'left' && !paused.has(sp.id));
     if (active.length < 2) return true;
+    const permPairIds = new Set((S.session.cfPermPairs || []).flat());
     const settled = active.filter(sp => {
       if ((sp.matchesPlayed || 0) < nc) return false;
+      // Perm pair members structurally wait for each other and accumulate a game-count
+      // deficit vs solo players — exclude them like mid-add players.
+      if (permPairIds.has(sp.id)) return false;
       const da = _disruptedAt[sp.id];
       if (da != null) {
         if (_disruptedType[sp.id] === 'midadd') return false;

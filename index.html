@@ -2710,6 +2710,16 @@ function cfAddPermPair(idA,idB){
   if(S.session.cfPermPairs.some(p=>pk(p[0],p[1])===key)){toast('Already permanent partners','warn');return;}
   if(S.session.cfPermPairs.length>=3){toast('Max 3 permanent pairs per session','warn');return;}
   S.session.cfPermPairs.push([idA,idB]);
+  // Invalidate any pending suggestion that contains only one of the new pair members.
+  // Suggestions generated before the pair was added may split them; regenerate those courts.
+  const needRegen=[];
+  for(const[cs,sug]of Object.entries(S.session.cfSuggestions||{})){
+    if(!sug)continue;
+    const allIds=new Set([...(sug.t1||[]),...(sug.t2||[])]);
+    const aIn=allIds.has(idA),bIn=allIds.has(idB);
+    if(aIn!==bIn){S.session.cfSuggestions[Number(cs)]=null;needRegen.push(Number(cs));}
+  }
+  if(needRegen.length)CF.batchGenerateSuggestions(needRegen,null);
   STORE.save('session');renderLive();
   toast(`${gp(idA)?.name||'?'} & ${gp(idB)?.name||'?'} — permanent partners ⛓️`,'ok');
 }
