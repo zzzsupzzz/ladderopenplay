@@ -907,7 +907,7 @@ const SIM = (() => {
       let lateArrivalsDone = false, lateStrongDone = false;
       let pauseDone = false, pauseId = null, resumeDone = false;
       let leaveSoonDone = false, removeDone = false;
-      let permPauseDone = false, permPauseId = null, permResumedDone = false;
+      let permPauseDone = false, permPauseId = null, permResumedDone = false, permRemovedDone = false;
       let lateIds = [];
 
       // ── Main loop ──────────────────────────────────────────────────────────
@@ -916,7 +916,7 @@ const SIM = (() => {
       // After that each court gets 1–2 tick stagger, so they rarely finish together.
       const courtGameLen = { 1: 0, 2: 0 };
       let firstRoundDone = false;
-      const TARGET_MATCHES = 40;
+      const TARGET_MATCHES = 46;
       const MAX_TICKS = 90;
 
       for (let tick = 0; tick < MAX_TICKS && S.session.cfMatchCount < TARGET_MATCHES && !_aborted; tick++) {
@@ -1086,6 +1086,20 @@ const SIM = (() => {
           }
         }
 
+        // mc≥38: Admin dissolves the permanent partnership.
+        // Both players re-enter the regular pool and can be assigned independently.
+        if (!permRemovedDone && permA && permResumedDone && mc >= 38) {
+          cfRemovePermPair(permA, permB);
+          log(`T${tick+1}: ✂️  PERM PAIR DISSOLVED — ${gp(permA)?.name} & ${gp(permB)?.name} back in regular pool`);
+          // Verify pair is gone from cfPermPairs
+          const pk = (a,b) => [a,b].sort().join('|');
+          const key = pk(permA, permB);
+          assert(!(S.session.cfPermPairs||[]).some(p=>pk(p[0],p[1])===key), 'Perm pair removed from cfPermPairs');
+          // After removal permA/permB tracking still works but no longer enforced
+          permRemovedDone = true;
+          if (doRender) render(); if (live) await STORE.save(); await delay(ms);
+        }
+
         // ── STEP 4: Regenerate suggestions for idle ready courts ────────────
         const dead = [];
         for (let c = 1; c <= 2; c++) {
@@ -1195,6 +1209,7 @@ const SIM = (() => {
       assert(leaveSoonDone,    'Scenario ran: leave-soon');
       assert(removeDone,       'Scenario ran: mid-remove');
       assert(pauseDone,        'Scenario ran: pause/resume');
+      assert(permRemovedDone,  'Scenario ran: perm pair dissolved');
 
       // ── Archive session ────────────────────────────────────────────────────
       const arch = {
@@ -1274,6 +1289,7 @@ const SIM = (() => {
       log(`  M26+: Mid-remove (sudden departure)`);
       log(`  M30+: Perm pair member paused → partner held`);
       log(`  M34+: Perm pair member resumed`);
+      log(`  M38+: ✂️  Permanent partnership dissolved — both back in regular pool`);
 
       log('');
       log(`TOTAL ERRORS: ${_errs.length}`);
