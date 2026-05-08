@@ -797,7 +797,7 @@ const SIM = (() => {
       if ((aQ && !bQ && !bLeft) || (bQ && !aQ && !aLeft)) _permHeldRounds++;
     };
 
-    log('=== ORGANIZER SIM: 12 players / 2 courts / ~3h ===');
+    log('=== ORGANIZER SIM: 14 players / 2 courts / ~3h ===');
     log('Scenarios: late arrivals, pause/resume, leave-soon, mid-remove, permanent partners');
     log('');
 
@@ -809,10 +809,11 @@ const SIM = (() => {
       // Fixed-rating players so results are deterministic and readable
       //   0=Alex(1350-A)  1=Jordan(1250-A)  2=Sam(1100-B+)  3=Morgan(1050-B)
       //   4=Taylor(960-B) 5=Casey(910-B-)   6=Riley(860-C+) 7=Quinn(810-C)
-      //   8=Avery(760-C)  9=Charlie(700-C-) 10=Drew(NR)     11=Frankie(NR)
-      const fixedRatings = [1350,1250,1100,1050,960,910,860,810,760,700,0,0];
-      for (let i = 0; i < 12; i++) {
-        const isNR = i >= 10;
+      //   8=Avery(760-C)  9=Charlie(700-C-) 10=Drew(650-D)  11=Frankie(600-D)
+      //   12=Jamie(NR)    13=Kai(NR)
+      const fixedRatings = [1350,1250,1100,1050,960,910,860,810,760,700,650,600,0,0];
+      for (let i = 0; i < 14; i++) {
+        const isNR = i >= 12;
         const r = isNR ? 1000 : fixedRatings[i];
         const id = uid();
         S.db.push({ id, name: NAMES[i] || `P${i}`, tag: '', rating: r, baseRating: r,

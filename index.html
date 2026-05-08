@@ -5834,6 +5834,27 @@ const CF={
         this._storeSuggestion(c,item.b,finishedMatchByCourtNum?.[c]);
       });
     }
+    // Safety net: after all suggestions are stored, scan for solo perm pair members.
+    // Any suggestion containing exactly one half of a perm pair is invalid — clear it.
+    // This catches edge cases where individual generateSuggestion calls (e.g. from midAdd)
+    // race or fall back to pass-3 and produce a split group despite the queue filter.
+    const _ppCheck=S.session.cfPermPairs||[];
+    if(_ppCheck.length){
+      readyCourts.forEach(c=>{
+        const sug=S.session.cfSuggestions[c];
+        if(!sug)return;
+        const ids=new Set([...(sug.t1||[]),...(sug.t2||[])]);
+        for(const[a,b]of _ppCheck){
+          const aIn=ids.has(a),bIn=ids.has(b);
+          // If one is in but their partner is not (and partner hasn't left), wipe suggestion
+          const aLeft=gsp(a)?.status==='left',bLeft=gsp(b)?.status==='left';
+          if((aIn&&!bIn&&!bLeft)||(bIn&&!aIn&&!aLeft)){
+            S.session.cfSuggestions[c]=null;
+            break;
+          }
+        }
+      });
+    }
     readyCourts.forEach(c=>setTimeout(()=>cfMaybeAutoConfirm(c),500));
   },
 
