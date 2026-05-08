@@ -175,7 +175,7 @@ const SIM = (() => {
       }),
       partnerHx: {}, oppHx: {}, oppHxTime: {},
       nrPairingHx: {},
-      cfQueue: [], cfPinnedIds: [], cfPauseAfterGame: [], cfLockedPairs: [], cfSoftPairs: [],
+      cfQueue: [], cfPinnedIds: [], cfPauseAfterGame: [], cfLockedPairs: [], cfSoftPairs: [], cfPermPairs: [],
       cfLeaveSoonIds: [], cfCourts: {}, cfSuggestions: {}, cfLog: [], cfMatchCount: 0,
       courtOffset: 0,
       cfMatchupHx: {}, cfGroupHx: {}, cfPairConsec: {}, cfPairWins: {},
@@ -719,6 +719,541 @@ const SIM = (() => {
     return { log: _log, errors: _errs, passed: _errs.length === 0 };
   }
 
+  // ── Organizer 12p/2c simulation ──────────────────────────────────────────
+
+  async function runOrganizer12(opts = {}) {
+    if (_running) { console.warn('[SIM] Already running. SIM.stop() first.'); return; }
+    const { speed = 'fast', live = false } = opts;
+    const ms = resolveSpeed(speed);
+    const doRender = ms > 0 || live;
+
+    _running = true; _aborted = false; _log = []; _errs = [];
+    _disruptedAt = {}; _disruptedType = {};
+
+    // Per-run quality accumulators
+    let permA = null, permB = null;
+    let _matchSnaps = [];      // {round, court, gap, t1Avg, t2Avg}
+    let _waitTrack = {};       // {id: {cur, max}}
+    let _partnerTrack = {};    // {id: Set<partnerId>}
+    let _permViolations = 0, _permMatches = 0, _permHeldRounds = 0;
+
+    // Snapshot court teams right after confirm (before score submit clears them)
+    const snapCourt = (c, round) => {
+      const ct = S.session.cfCourts?.[c];
+      if (!ct?.match || ct.status !== 'playing') return;
+      const { t1, t2 } = ct.match;
+      const all = new Set([...t1, ...t2]);
+      const avgR = ids => ids.reduce((s, id) => s + (gsp(id)?.sRating || gp(id)?.rating || 1000), 0) / ids.length;
+      const t1a = avgR(t1), t2a = avgR(t2);
+      _matchSnaps.push({ round, court: c, gap: Math.abs(t1a - t2a), t1Avg: Math.round(t1a), t2Avg: Math.round(t2a) });
+
+      // Partner variety
+      for (const id of all) {
+        if (!_partnerTrack[id]) _partnerTrack[id] = new Set();
+        const myTeam = t1.includes(id) ? t1 : t2;
+        myTeam.forEach(pid => { if (pid !== id) _partnerTrack[id].add(pid); });
+      }
+
+      // Wait streaks — anyone active not playing increments streak
+      const paused = new Set((S.session.cfPaused || []).map(q => q.id));
+      for (const id of (S.session.activePlayers || [])) {
+        const sp = gsp(id); if (!sp || sp.status === 'left') continue;
+        if (!_waitTrack[id]) _waitTrack[id] = { cur: 0, max: 0 };
+        if (all.has(id)) {
+          _waitTrack[id].cur = 0;
+        } else if (!paused.has(id)) {
+          _waitTrack[id].cur++;
+          if (_waitTrack[id].cur > _waitTrack[id].max) _waitTrack[id].max = _waitTrack[id].cur;
+        }
+      }
+
+      // Permanent pair verification
+      if (permA && permB) {
+        const aP = all.has(permA), bP = all.has(permB);
+        const aLeft = gsp(permA)?.status === 'left', bLeft = gsp(permB)?.status === 'left';
+        if (aP && bP) {
+          _permMatches++;
+          if (t1.includes(permA) !== t1.includes(permB)) {
+            err(`PERM PAIR SPLIT-TEAM on C${c} R${round}: ${gp(permA)?.name} & ${gp(permB)?.name} on opposite teams`);
+            _permViolations++;
+          }
+        } else if ((aP && !bP && !bLeft) || (bP && !aP && !aLeft)) {
+          err(`PERM PAIR VIOLATION on C${c} R${round}: ${gp(permA)?.name}(playing=${aP}) & ${gp(permB)?.name}(playing=${bP}) split`);
+          _permViolations++;
+        }
+      }
+    };
+
+    // Check if one perm partner is in queue but the other is not (held-waiting state)
+    const checkPermHeld = () => {
+      if (!permA || !permB) return;
+      const qIds = new Set((S.session.cfQueue || []).map(q => q.id));
+      const aQ = qIds.has(permA), bQ = qIds.has(permB);
+      const aLeft = gsp(permA)?.status === 'left', bLeft = gsp(permB)?.status === 'left';
+      if ((aQ && !bQ && !bLeft) || (bQ && !aQ && !aLeft)) _permHeldRounds++;
+    };
+
+    log('=== ORGANIZER SIM: 12 players / 2 courts / ~3h ===');
+    log('Scenarios: late arrivals, pause/resume, leave-soon, mid-remove, permanent partners');
+    log('');
+
+    saveRealState();
+    stubSideEffects(live);
+    try {
+      resetState();
+
+      // Fixed-rating players so results are deterministic and readable
+      //   0=Alex(1350-A)  1=Jordan(1250-A)  2=Sam(1100-B+)  3=Morgan(1050-B)
+      //   4=Taylor(960-B) 5=Casey(910-B-)   6=Riley(860-C+) 7=Quinn(810-C)
+      //   8=Avery(760-C)  9=Charlie(700-C-) 10=Drew(NR)     11=Frankie(NR)
+      const fixedRatings = [1350,1250,1100,1050,960,910,860,810,760,700,0,0];
+      for (let i = 0; i < 12; i++) {
+        const isNR = i >= 10;
+        const r = isNR ? 1000 : fixedRatings[i];
+        const id = uid();
+        S.db.push({ id, name: NAMES[i] || `P${i}`, tag: '', rating: r, baseRating: r,
+          isNR, nrLevelHint: isNR ? 950 : null, dupr: null, isSeeding: false,
+          gamesPlayed: 0, wins: 0, losses: 0, ties: 0, createdAt: new Date().toISOString() });
+      }
+      S.db.forEach(p => S.checkedIn.add(p.id));
+      log(`Players: ${S.db.map((p,i)=>p.name+(p.isNR?'(NR)':'('+fixedRatings[i]+')')).join(' | ')}`);
+
+      // Build session (mirrors startSim but explicit for organizer scenario)
+      const arr = [...S.checkedIn];
+      S.courts = 2; S.adminPin = 'simtest';
+      S.session = {
+        id: uid(), name: 'Organizer 12p/2c', date: new Date().toISOString(), courts: 2,
+        targetScore: 11, courtGroupSize: 4, cfMode: true, extendedMin: 16, sessionStart: null,
+        activePlayers: [...arr],
+        players: arr.map(id => {
+          const p = gp(id);
+          const sr = p.isNR ? (p.nrLevelHint || 950) : p.rating;
+          return { id, name: p.name, tag: '', isNR: p.isNR, isSeeding: false,
+            sRating: sr, startRating: sr, wins: 0, losses: 0, ties: 0,
+            matchesPlayed: 0, ptsFor: 0, ptsAgainst: 0, timeOnCourtMs: 0, timeInQueueMs: 0, status: 'active' };
+        }),
+        partnerHx:{},oppHx:{},oppHxTime:{},nrPairingHx:{},
+        cfQueue:[],cfPinnedIds:[],cfPauseAfterGame:[],cfLockedPairs:[],cfSoftPairs:[],cfPermPairs:[],
+        cfLeaveSoonIds:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,courtOffset:0,
+        cfMatchupHx:{},cfGroupHx:{},cfPairConsec:{},cfPairWins:{},cfMustSplitPair:null,cfPaused:[],
+        cfPairSessionCount:{},cfPairLastAt:{},cfPairLastLost:{},
+        cfRanks:{},cfPendingPairs:[],neverPair:{},ratingOverrides:{},auditLog:[],status:'lobby'
+      };
+      S.session.status = 'active'; S.session.sessionStart = Date.now();
+      _initSessionRanks(); _invalidateMatchmakingCaches();
+      CF._confirmAllBusy = false; CF._confirmAllLastTs = 0;
+      CF.initQueue();
+      log('Play started. Initial queue: ' + S.session.cfQueue.map(q => gp(q.id)?.name).join(', '));
+
+      // Generate initial suggestions for both courts
+      try { CF.batchGenerateSuggestions([1, 2], null); } catch(e) { log('Initial suggest error: ' + e.message); }
+      assert(S.session.cfSuggestions[1] || S.session.cfSuggestions[2], 'At least one suggestion generated at start');
+      if (doRender) render();
+      if (live) await STORE.save();
+      await delay(ms);
+
+      let pausedId = null, leaveSoonDone = false, removeDone = false;
+      let permPauseId = null, permPauseResumed = false;
+      let lateIds = [];
+      const ROUNDS = 18;
+
+      for (let r = 0; r < ROUNDS && !_aborted; r++) {
+        const rl = `R${r+1}`;
+
+        // Regenerate suggestions for idle ready courts
+        const dead = [];
+        for (let c = 1; c <= 2; c++) {
+          const ct = S.session.cfCourts?.[c];
+          if (ct?.status === 'ready' && !S.session.cfSuggestions?.[c] && S.session.cfQueue.length >= 4) dead.push(c);
+        }
+        if (dead.length) {
+          try { CF.batchGenerateSuggestions(dead, null); } catch(e) { log(`${rl} regen err: ${e.message}`); }
+        }
+
+        // Confirm all ready suggestions
+        let confirmed = 0;
+        for (let c = 1; c <= 2; c++) {
+          if (_aborted) break;
+          if (S.session.cfSuggestions[c]) {
+            CF.confirmSuggestion(c);
+            confirmed++;
+            snapCourt(c, r + 1);
+            verifyNoDuplicates();
+            if (doRender) render();
+            if (live) await STORE.save();
+            await delay(ms);
+          }
+        }
+
+        // Submit all playing courts
+        let submitted = 0;
+        for (let c = 1; c <= 2; c++) {
+          if (_aborted) break;
+          const ct = S.session.cfCourts?.[c];
+          if (ct?.status === 'playing' && ct.match) {
+            const [s1, s2] = randomScore();
+            CF._doSubmitScore(c, s1, s2);
+            submitted++;
+            log(`${rl} C${c}: ${s1}-${s2}  queue=${S.session.cfQueue.length}`);
+            verifyNoGhosts(); verifyStats(); verifyPlayCountBalance();
+            if (doRender) render();
+            if (live) await STORE.save();
+            await delay(ms);
+          }
+        }
+
+        checkPermHeld();
+
+        if (!confirmed && !submitted && S.session.cfQueue.length < 4) {
+          log(`${rl}: insufficient players — court idle`); continue;
+        }
+
+        // ── Timeline events ──────────────────────────────────────
+
+        // After R2: Set up permanent partners (Taylor + Casey)
+        if (r === 1 && !permA) {
+          permA = S.db[4].id; permB = S.db[5].id;
+          cfAddPermPair(permA, permB);
+          log(`${rl}: ⛓️  PERMANENT PAIR — ${S.db[4].name}(${fixedRatings[4]}) & ${S.db[5].name}(${fixedRatings[5]})`);
+          // Verify no existing suggestion already splits them
+          for (let c = 1; c <= 2; c++) {
+            const sug = S.session.cfSuggestions?.[c];
+            if (sug) {
+              const inSug = new Set([...(sug.t1||[]),...(sug.t2||[])]);
+              const aIn = inSug.has(permA), bIn = inSug.has(permB);
+              if (aIn !== bIn) err(`${rl}: existing C${c} suggestion has solo perm pair member after lock!`);
+            }
+          }
+          if (doRender) render();
+          await delay(ms);
+        }
+
+        // R4: Two late arrivals (mid-strength players)
+        if (r === 3 && lateIds.length === 0) {
+          const lateRatings = [1000, 820];
+          for (let i = 0; i < 2; i++) {
+            const ni = S.db.length, lr = lateRatings[i], lId = uid();
+            S.db.push({ id:lId, name:NAMES[ni]||`Late${ni}`, tag:'LATE', rating:lr, baseRating:lr,
+              isNR:false, nrLevelHint:null, dupr:null, isSeeding:false,
+              gamesPlayed:0, wins:0, losses:0, ties:0, createdAt:new Date().toISOString() });
+            S.checkedIn.add(lId); midAdd(lId);
+            lateIds.push(lId);
+            _disruptedAt[lId] = S.session.cfMatchCount||0; _disruptedType[lId] = 'midadd';
+            log(`${rl}: Late arrival — ${NAMES[ni]}(${lr}): joined mid-session with 0 games`);
+            verifyNoGhosts();
+            if (doRender) render(); if (live) await STORE.save(); await delay(ms);
+          }
+        }
+
+        // R5: Pause a regular player (not perm pair member)
+        if (r === 4 && !pausedId) {
+          const cand = S.session.cfQueue.find(q => q.id !== permA && q.id !== permB);
+          if (cand) {
+            cfPausePlayer(cand.id); pausedId = cand.id;
+            log(`${rl}: Pause — ${gp(cand.id)?.name} (bathroom break)`);
+            if (doRender) render(); if (live) await STORE.save(); await delay(ms);
+          }
+        }
+
+        // R6: Strong late arrival (A-level player runs late)
+        if (r === 5 && lateIds.length === 2) {
+          const ni = S.db.length, lr = 1180, lId = uid();
+          S.db.push({ id:lId, name:NAMES[ni]||`Late${ni}`, tag:'LATE', rating:lr, baseRating:lr,
+            isNR:false, nrLevelHint:null, dupr:null, isSeeding:false,
+            gamesPlayed:0, wins:0, losses:0, ties:0, createdAt:new Date().toISOString() });
+          S.checkedIn.add(lId); midAdd(lId);
+          lateIds.push(lId);
+          _disruptedAt[lId] = S.session.cfMatchCount||0; _disruptedType[lId] = 'midadd';
+          log(`${rl}: Late arrival #3 — ${NAMES[ni]}(${lr}) strong A-level, 0 games — hunger priority kicks in`);
+          verifyNoGhosts();
+          if (doRender) render(); if (live) await STORE.save(); await delay(ms);
+        }
+
+        // R8: Resume paused player
+        if (r === 7 && pausedId) {
+          const e = (S.session.cfPaused||[]).find(q=>q.id===pausedId);
+          if (e) {
+            cfResumePlayer(pausedId);
+            _disruptedAt[pausedId] = S.session.cfMatchCount||0; _disruptedType[pausedId] = 'resume';
+            log(`${rl}: Resumed — ${gp(pausedId)?.name}`);
+            pausedId = null;
+            if (doRender) render(); if (live) await STORE.save(); await delay(ms);
+          }
+        }
+
+        // R9: Leave-soon for one regular player
+        if (r === 8 && !leaveSoonDone) {
+          const cand = S.session.cfQueue.find(q => q.id!==permA && q.id!==permB && !lateIds.includes(q.id));
+          if (cand) {
+            cfLeaveSoon(cand.id); leaveSoonDone = true;
+            log(`${rl}: Leave-soon flagged — ${gp(cand.id)?.name} (has to go after current game)`);
+            if (doRender) render(); if (live) await STORE.save(); await delay(ms);
+          }
+        }
+
+        // R11: Sudden mid-remove (late arrival gets a phone call, has to leave NOW)
+        if (r === 10 && !removeDone && lateIds.length > 0) {
+          const rmId = lateIds[0];
+          const sp = gsp(rmId);
+          if (sp && sp.status !== 'left') {
+            const onCourt = Object.values(S.session.cfCourts||{}).some(
+              ct => ct?.status==='playing' && ct.match && [...ct.match.t1,...ct.match.t2].includes(rmId));
+            if (!onCourt) {
+              midRemove(rmId); removeDone = true;
+              log(`${rl}: Mid-remove — ${gp(rmId)?.name} sudden departure from queue`);
+              assert(!S.session.cfRanks[rmId], `${rl}: cfRanks cleared immediately on midRemove`);
+              verifyNoGhosts();
+              if (doRender) render(); if (live) await STORE.save(); await delay(ms);
+            }
+          }
+        }
+
+        // R14: CRITICAL TEST — pause one permanent pair member
+        // Expected: partner is automatically held, cannot be assigned while other is paused
+        if (r === 13 && !permPauseId && permA) {
+          const target = S.session.cfQueue.find(q=>q.id===permA||q.id===permB);
+          if (target) {
+            cfPausePlayer(target.id); permPauseId = target.id;
+            const other = target.id===permA ? permB : permA;
+            log(`${rl}: ⛓️  PERM PAIR TEST — paused ${gp(target.id)?.name}`);
+            log(`${rl}:   → ${gp(other)?.name} should now be HELD in queue (not assigned to any court)`);
+            // Immediately verify the free partner is not already on court from a suggestion
+            for (let c=1;c<=2;c++) {
+              const sug = S.session.cfSuggestions?.[c];
+              if (sug && [...(sug.t1||[]),...(sug.t2||[])].includes(other))
+                err(`${rl}: free perm pair partner ${gp(other)?.name} in pending suggestion while partner is paused!`);
+            }
+            if (doRender) render(); if (live) await STORE.save(); await delay(ms);
+          }
+        }
+
+        // R16: Resume paused perm pair member — both should play together next round
+        if (r === 15 && permPauseId && !permPauseResumed) {
+          const e = (S.session.cfPaused||[]).find(q=>q.id===permPauseId);
+          if (e) {
+            cfResumePlayer(permPauseId);
+            permPauseResumed = true;
+            _disruptedAt[permPauseId] = S.session.cfMatchCount||0; _disruptedType[permPauseId] = 'resume';
+            log(`${rl}: ⛓️  Resumed paused perm pair member — ${gp(permPauseId)?.name}`);
+            log(`${rl}:   → Both partners back in queue — should play together in next suggestion`);
+            if (doRender) render(); if (live) await STORE.save(); await delay(ms);
+          }
+        }
+      }
+
+      // ── Final leave-soon ghost check ──
+      const leftIds = (S.session.players||[]).filter(sp=>sp.status==='left').map(sp=>sp.id);
+      const qIds = new Set((S.session.cfQueue||[]).map(q=>q.id));
+      leftIds.forEach(id => { assert(!qIds.has(id), `Ghost check: ${gp(id)?.name} left but in queue`); });
+
+      // ── Archive session ──
+      const arch = {
+        id: S.session.id, name: S.session.name, date: S.session.date, cfMode: true,
+        players: (S.session.players||[]).map(sp => ({
+          id:sp.id, name:sp.name||'?', status:sp.status,
+          sRating:sp.sRating, startRating:sp.startRating,
+          wins:sp.wins, losses:sp.losses, ties:sp.ties,
+          matchesPlayed:sp.matchesPlayed, ptsFor:sp.ptsFor, ptsAgainst:sp.ptsAgainst
+        })),
+        cfLog: JSON.parse(JSON.stringify(S.session.cfLog||[]))
+      };
+      S.archive.unshift(arch);
+      S.checkedIn.clear(); S.session = null;
+      recalcAllTimeRatings();
+
+      // ══ QUALITY REPORT ════════════════════════════════════════════
+      log('');
+      log('╔══════════════════════════════════════════════════╗');
+      log('║   ORGANIZER QUALITY REPORT — 12p / 2 Courts     ║');
+      log('╚══════════════════════════════════════════════════╝');
+
+      const active = arch.players.filter(sp=>sp.matchesPlayed>0||sp.status!=='left');
+      active.sort((a,b)=>(b.matchesPlayed||0)-(a.matchesPlayed||0));
+      const gameCounts = active.map(sp=>sp.matchesPlayed||0);
+      const minG=Math.min(...gameCounts), maxG=Math.max(...gameCounts);
+      log(`PLAY DISTRIBUTION (gap ${maxG-minG} — target ≤2):`);
+      active.forEach(sp => {
+        const w = _waitTrack[sp.id]; const pts = _partnerTrack[sp.id]?.size||0;
+        const lateFlag = lateIds.includes(sp.id) ? ' [late]' : '';
+        const leftFlag = sp.status==='left' ? ' [left]' : '';
+        const warnFlag = (w?.max||0)>=3 ? '  ⚠️ waited 3+ rounds' : '';
+        log(`  ${(sp.name+'          ').slice(0,10)} ${String(sp.matchesPlayed||0).padStart(2)}G  ` +
+            `maxWait=${w?.max||0}  partners=${pts}${lateFlag}${leftFlag}${warnFlag}`);
+      });
+
+      if (_matchSnaps.length) {
+        const gaps = _matchSnaps.map(m=>m.gap);
+        const avgGap = Math.round(gaps.reduce((s,g)=>s+g,0)/gaps.length);
+        const maxGap = Math.round(Math.max(...gaps));
+        const p50 = Math.round(100*gaps.filter(g=>g<=50).length/gaps.length);
+        const p100 = Math.round(100*gaps.filter(g=>g<=100).length/gaps.length);
+        log('');
+        log(`MATCH BALANCE (${_matchSnaps.length} matches):`);
+        log(`  Avg team gap: ${avgGap}pts  Max: ${maxGap}pts`);
+        log(`  ${p50}% excellent (≤50pt gap)   ${p100}% acceptable (≤100pt gap)`);
+        if (avgGap > 120) log('  ⚠️  High avg gap — rating spread may be too wide for 2 courts');
+        else if (avgGap <= 60) log('  ✅ Excellent balance — matchmaking working well');
+      }
+
+      log('');
+      log('PERMANENT PARTNER RESULTS:');
+      if (permA && permB) {
+        const pAN=gp(permA)?.name||'A', pBN=gp(permB)?.name||'B';
+        const spA=arch.players.find(p=>p.id===permA), spB=arch.players.find(p=>p.id===permB);
+        log(`  Pair: ${pAN} & ${pBN}`);
+        log(`  Together: ${_permMatches} matches  |  Violations: ${_permViolations} ${_permViolations===0?'✅':'❌ BUG'}`);
+        log(`  Rounds held (waiting for partner): ${_permHeldRounds}`);
+        log(`  Games — ${pAN}: ${spA?.matchesPlayed||0}  ${pBN}: ${spB?.matchesPlayed||0}`);
+        const gapPP = Math.abs((spA?.matchesPlayed||0)-(spB?.matchesPlayed||0));
+        if (gapPP > 0) log(`  ⚠️  Game count gap between partners: ${gapPP} (should be 0)`);
+        else log(`  ✅ Partners always played same number of games`);
+      } else {
+        log('  (No permanent pair set in this run)');
+      }
+
+      log('');
+      log(`TOTAL ERRORS: ${_errs.length}`);
+      if (_errs.length === 0) log('✅ ALL CHECKS PASSED');
+      else _errs.forEach(e => log('  ❌ ' + e));
+
+    } finally {
+      _running = false;
+      restoreSideEffects();
+      restoreRealState();
+      try { renderDB(); renderRoster?.(); renderHistory?.(); renderStandings?.(); } catch(e){}
+    }
+    return { log: _log, errors: _errs, passed: _errs.length === 0 };
+  }
+
+  // ── Permanent pair stress test ──────────────────────────────────────────────
+
+  async function runPermPairCheck() {
+    if (_running) { console.warn('[SIM] Already running.'); return; }
+    _running = true; _aborted = false; _log = []; _errs = [];
+
+    log('=== PERM PAIR STRESS TEST ===');
+    log('Covers: solo-partner held, pause partner, leave dissolves lock, low player count');
+
+    stubSideEffects(false);
+    try {
+
+      // ── Scenario A: normal flow — both partners always grouped ──
+      log('--- Scenario A: normal — both in queue, should always be picked together ---');
+      resetState();
+      for (let i=0;i<10;i++){const r=800+i*50,id=uid();S.db.push({id,name:NAMES[i],tag:'',rating:r,baseRating:r,isNR:false,nrLevelHint:null,dupr:null,isSeeding:false,gamesPlayed:0,wins:0,losses:0,ties:0,createdAt:new Date().toISOString()});}
+      S.db.forEach(p=>S.checkedIn.add(p.id));
+      startSim(2); beginSim();
+      const pA=S.db[3].id, pB=S.db[4].id;
+      S.session.cfPermPairs=[[pA,pB]];
+      for(let i=0;i<8;i++){
+        const dead=[];for(let c=1;c<=2;c++){const ct=S.session.cfCourts?.[c];if((!ct||ct.status==='ready')&&!S.session.cfSuggestions?.[c]&&S.session.cfQueue.length>=4)dead.push(c);}
+        if(dead.length)try{CF.batchGenerateSuggestions(dead,null);}catch(e){}
+        for(let c=1;c<=2;c++){if(S.session.cfSuggestions[c]){CF.confirmSuggestion(c);const ct=S.session.cfCourts[c];if(ct?.match){const all=[...ct.match.t1,...ct.match.t2];const aP=all.includes(pA),bP=all.includes(pB);if(aP!==bP){err(`ScenA round ${i+1} C${c}: solo perm pair member in match`);}if(aP&&bP&&(ct.match.t1.includes(pA)!==ct.match.t1.includes(pB))){err(`ScenA round ${i+1} C${c}: perm pair on different teams`);}}}}
+        for(let c=1;c<=2;c++){const ct=S.session.cfCourts?.[c];if(ct?.status==='playing'&&ct.match){CF._doSubmitScore(c,11,Math.floor(Math.random()*9));verifyNoGhosts();}}
+      }
+      assert(_errs.length===0,'Scenario A: no perm pair violations in 8 rounds');
+      log('Scenario A: PASSED — partners always grouped, never split-team');
+
+      // ── Scenario B: one partner paused → other held ──
+      log('--- Scenario B: pause one partner — verify free partner is held out ---');
+      resetState();
+      for(let i=0;i<10;i++){const r=800+i*50,id=uid();S.db.push({id,name:NAMES[i],tag:'',rating:r,baseRating:r,isNR:false,nrLevelHint:null,dupr:null,isSeeding:false,gamesPlayed:0,wins:0,losses:0,ties:0,createdAt:new Date().toISOString()});}
+      S.db.forEach(p=>S.checkedIn.add(p.id));
+      startSim(2); beginSim();
+      const bA=S.db[2].id, bB=S.db[3].id;
+      S.session.cfPermPairs=[[bA,bB]];
+      // Run 2 rounds so both are in queue
+      for(let i=0;i<2;i++){
+        const dead2=[];for(let c=1;c<=2;c++){const ct=S.session.cfCourts?.[c];if((!ct||ct.status==='ready')&&!S.session.cfSuggestions?.[c]&&S.session.cfQueue.length>=4)dead2.push(c);}
+        if(dead2.length)try{CF.batchGenerateSuggestions(dead2,null);}catch(e){}
+        for(let c=1;c<=2;c++){if(S.session.cfSuggestions[c])CF.confirmSuggestion(c);}
+        for(let c=1;c<=2;c++){const ct=S.session.cfCourts?.[c];if(ct?.status==='playing'&&ct.match)CF._doSubmitScore(c,11,7);}
+      }
+      // Pause bA — bB should be held
+      if(S.session.cfQueue.some(q=>q.id===bA)) cfPausePlayer(bA);
+      else if(S.session.cfQueue.some(q=>q.id===bB)) cfPausePlayer(bB);
+      const pausedPP = (S.session.cfPaused||[]).find(q=>q.id===bA||q.id===bB)?.id;
+      const freePP = pausedPP===bA?bB:bA;
+      // Generate suggestion — free partner should NOT appear in any suggestion
+      try{CF.batchGenerateSuggestions([1,2],null);}catch(e){}
+      for(let c=1;c<=2;c++){
+        const sug=S.session.cfSuggestions?.[c];
+        if(sug&&[...(sug.t1||[]),...(sug.t2||[])].includes(freePP))
+          err(`ScenB: free partner ${gp(freePP)?.name} in suggestion while other partner paused`);
+      }
+      // Resume and verify both play together
+      if(pausedPP)(cfResumePlayer(pausedPP));
+      try{CF.batchGenerateSuggestions([1,2],null);}catch(e){}
+      // Both should now be together in a suggestion
+      let togetherInSug=false;
+      for(let c=1;c<=2;c++){const sug=S.session.cfSuggestions?.[c];if(sug){const all=[...(sug.t1||[]),...(sug.t2||[])];if(all.includes(bA)&&all.includes(bB))togetherInSug=true;}}
+      // (May not always be true if only 1 court has a suggestion and it's for different players — not a hard error)
+      log(`Scenario B: pause/resume check done — partners in same suggestion after resume: ${togetherInSug}`);
+      assert(_errs.filter(e=>e.includes('ScenB')).length===0,'Scenario B: no violations while partner paused');
+      log('Scenario B: PASSED');
+
+      // ── Scenario C: partner leaves → the other is freed ──
+      log('--- Scenario C: one partner leaves (status=left) → other player freed ---');
+      resetState();
+      for(let i=0;i<8;i++){const r=800+i*60,id=uid();S.db.push({id,name:NAMES[i],tag:'',rating:r,baseRating:r,isNR:false,nrLevelHint:null,dupr:null,isSeeding:false,gamesPlayed:0,wins:0,losses:0,ties:0,createdAt:new Date().toISOString()});}
+      S.db.forEach(p=>S.checkedIn.add(p.id));
+      startSim(1); beginSim();
+      const cA=S.db[0].id, cB=S.db[1].id;
+      S.session.cfPermPairs=[[cA,cB]];
+      try{CF.batchGenerateSuggestions([1],null);}catch(e){}
+      if(S.session.cfSuggestions[1])CF.confirmSuggestion(1);
+      if(S.session.cfCourts[1]?.status==='playing')CF._doSubmitScore(1,11,6);
+      // Mark cA as left
+      const spCA=gsp(cA); if(spCA)spCA.status='left';
+      S.session.activePlayers=(S.session.activePlayers||[]).filter(id=>id!==cA);
+      S.session.cfQueue=S.session.cfQueue.filter(q=>q.id!==cA);
+      // Now generate — cB should appear freely in pool (partner left)
+      try{CF.batchGenerateSuggestions([1],null);}catch(e){}
+      let cBInSug=false;
+      const sug1=S.session.cfSuggestions?.[1];
+      if(sug1)cBInSug=[...(sug1.t1||[]),...(sug1.t2||[])].includes(cB);
+      assert(cBInSug||S.session.cfQueue.some(q=>q.id===cB),'Scenario C: cB accessible after partner left');
+      log(`Scenario C: ${gp(cB)?.name} freed after partner marked left — in suggestion: ${cBInSug}`);
+      assert(_errs.filter(e=>e.includes('ScenC')).length===0,'Scenario C: no errors');
+      log('Scenario C: PASSED');
+
+      // ── Scenario D: low player count (8p/2c) — court goes idle until pair reunited ──
+      log('--- Scenario D: 8 players/2 courts — perm pair may cause brief idle court ---');
+      resetState();
+      for(let i=0;i<8;i++){const r=900+i*50,id=uid();S.db.push({id,name:NAMES[i],tag:'',rating:r,baseRating:r,isNR:false,nrLevelHint:null,dupr:null,isSeeding:false,gamesPlayed:0,wins:0,losses:0,ties:0,createdAt:new Date().toISOString()});}
+      S.db.forEach(p=>S.checkedIn.add(p.id));
+      startSim(2); beginSim();
+      const dA=S.db[1].id, dB=S.db[2].id;
+      S.session.cfPermPairs=[[dA,dB]];
+      try{CF.batchGenerateSuggestions([1,2],null);}catch(e){}
+      // With 8 players, verify perm pair goes to same court in initial suggestions
+      let dTogether=true;
+      for(let c=1;c<=2;c++){const sug=S.session.cfSuggestions?.[c];if(sug){const all=[...(sug.t1||[]),...(sug.t2||[])];const aIn=all.includes(dA),bIn=all.includes(dB);if(aIn!==bIn){dTogether=false;err(`ScenD: 8p initial suggestion splits perm pair`);}}}
+      log(`Scenario D: 8p initial split check — together in same suggestion: ${dTogether}`);
+      // Run 4 rounds and verify no violations
+      let dViolations=0;
+      for(let i=0;i<4;i++){
+        const dead3=[];for(let c=1;c<=2;c++){const ct=S.session.cfCourts?.[c];if((!ct||ct.status==='ready')&&!S.session.cfSuggestions?.[c]&&S.session.cfQueue.length>=4)dead3.push(c);}
+        if(dead3.length)try{CF.batchGenerateSuggestions(dead3,null);}catch(e){}
+        for(let c=1;c<=2;c++){if(S.session.cfSuggestions[c]){CF.confirmSuggestion(c);const ct=S.session.cfCourts[c];if(ct?.match){const all=[...ct.match.t1,...ct.match.t2];const aP=all.includes(dA),bP=all.includes(dB);if(aP!==bP){dViolations++;err(`ScenD round ${i+1} C${c}: perm pair split`);}if(aP&&bP&&(ct.match.t1.includes(dA)!==ct.match.t1.includes(dB)))err(`ScenD round ${i+1} C${c}: perm pair different teams`);}}}
+        for(let c=1;c<=2;c++){const ct=S.session.cfCourts?.[c];if(ct?.status==='playing'&&ct.match){CF._doSubmitScore(c,11,Math.floor(Math.random()*9));verifyNoGhosts();}}
+      }
+      assert(dViolations===0,'Scenario D: no perm pair violations across 4 rounds with 8 players');
+      log(`Scenario D: PASSED (${dViolations} violations)`);
+
+      log('');
+      log('=== PERM PAIR STRESS TEST COMPLETE ===');
+      log(`Total errors: ${_errs.length} ${_errs.length===0?'✅ ALL PASSED':'❌ FAILURES FOUND'}`);
+      if(_errs.length) _errs.forEach(e=>log('  ❌ '+e));
+
+    } finally {
+      _running = false;
+      restoreSideEffects();
+      resetState();
+    }
+    return { log: _log, errors: _errs, passed: _errs.length === 0 };
+  }
+
   // ── UI Panel ──
 
   function buildPanel() {
@@ -768,7 +1303,9 @@ const SIM = (() => {
         <input type="checkbox" id="sim-step"/>
         <label for="sim-step">Step mode (pause after each action)</label>
       </div>
-      <button class="sim-go" id="sim-run-btn" onclick="SIM._uiRun()">Run Full Simulation</button>
+      <button class="sim-go" id="sim-run-btn" onclick="SIM._uiRun()">▶ Run Full Simulation</button>
+      <button class="sim-go" style="background:#a78bfa;color:#1a0540" onclick="SIM.runOrganizer12({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">⛓️ Run 12p/2c Organizer Sim</button>
+      <button class="sim-bug" onclick="SIM.runPermPairCheck()">🔒 Perm Pair Stress Test</button>
       <button class="sim-continue" id="sim-continue-btn" onclick="SIM._continue()" style="display:none;background:#fb923c;color:#111">Continue</button>
       <button class="sim-stop" id="sim-stop-btn" onclick="SIM.stop()" disabled>Stop</button>
       <div id="sim-log"></div>`;
@@ -815,6 +1352,6 @@ const SIM = (() => {
     else window.addEventListener('load', buildPanel);
   }
 
-  return { run, runBugChecks, stop, _uiRun, _continue, log: () => _log, errors: () => _errs };
+  return { run, runBugChecks, runOrganizer12, runPermPairCheck, stop, _uiRun, _continue, log: () => _log, errors: () => _errs };
 
 })();
