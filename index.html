@@ -1697,6 +1697,18 @@ function _initSessionRanks(){
   console.log(`[ranks] ✅ Initialized ${sorted.length} players. Top 5: ${rankSummary}`);
 }
 
+// ── Rank compression after a player leaves ───────────────────────────────────
+// Re-numbers remaining active players 1…N in their current rank order,
+// closing the gap left by the departed player without resetting any positions.
+function _compressRanks(){
+  if(!S.session?.cfRanks)return;
+  const pausedIds=new Set((S.session.cfPaused||[]).map(q=>q.id));
+  const active=Object.entries(S.session.cfRanks)
+    .filter(([id])=>{const sp=gsp(id);return sp&&sp.status!=='left'&&!pausedIds.has(id);})
+    .sort(([,a],[,b])=>a.rank-b.rank);
+  active.forEach(([id,entry],i)=>{entry.rank=i+1;});
+}
+
 // ── Late arrival insertion ────────────────────────────────────────────────────
 
 function _insertLateArrival(id){
@@ -2588,9 +2600,7 @@ function midAdd(id){
     // Assign rank immediately so late joiner gets correct band from the start
     if(S.session.cfRanks){
       if(!S.session.cfRanks[id])_insertLateArrival(id);
-      // Debounced full recalc — n changed, so band quartiles shift for everyone
-      clearTimeout(window._rankRecalcTimer);
-      window._rankRecalcTimer=setTimeout(()=>{if(S.session?.cfRanks){_initSessionRanks();renderLive();}},200);
+      // _insertLateArrival already placed them correctly — no reset needed.
     }
     // Regenerate suggestions for ready courts
     for(let c=1;c<=S.session.courts;c++){
@@ -2635,8 +2645,9 @@ function midRemove(id){
   }
   AUDIT.log('player_leave',`${p.name} left the session`);
   if(S.session.cfRanks)delete S.session.cfRanks[id];
-  clearTimeout(window._rankRecalcTimer);
-  window._rankRecalcTimer=setTimeout(()=>{if(S.session?.cfRanks){_initSessionRanks();renderLive();}},200);
+  // Compress remaining ranks to close the gap — do NOT reinitialise from ELO
+  // which would reset all tonight's performance-based rank movements.
+  if(S.session.cfRanks)_compressRanks();
   STORE.save();toast(`${p.name} marked as left`,'warn');renderLive();renderRosterModal();
 }
 
@@ -2799,9 +2810,8 @@ function cfPausePlayer(id){
   const p=gp(id);if(!p)return;
   const qi=S.session.cfQueue.findIndex(q=>q.id===id);
   if(qi===-1){toast(`${p.name} is not in queue`,'warn');return;}
-  // Rank recalc after pause — debounced, placed AFTER guards so only fires when pause succeeds
-  clearTimeout(window._rankRecalcTimer);
-  window._rankRecalcTimer=setTimeout(()=>{if(S.session?.cfRanks){_initSessionRanks();renderLive();}},200);
+  // Compress ranks after pause — re-numbers active players without resetting tonight's positions.
+  if(S.session?.cfRanks)_compressRanks();
   const [entry]=S.session.cfQueue.splice(qi,1);
   if(!S.session.cfPaused)S.session.cfPaused=[];
   S.session.cfPaused.push({...entry,pausedAt:Date.now()});
@@ -2828,9 +2838,8 @@ function cfResumePlayer(id){
   const p=gp(id);if(!p)return;
   const pi=(S.session.cfPaused||[]).findIndex(q=>q.id===id);
   if(pi===-1)return;
-  // Rank recalc after resume — debounced, placed AFTER guards so only fires when resume succeeds
-  clearTimeout(window._rankRecalcTimer);
-  window._rankRecalcTimer=setTimeout(()=>{if(S.session?.cfRanks){_initSessionRanks();renderLive();}},200);
+  // Compress ranks after resume — re-numbers including the returning player without resetting tonight's positions.
+  if(S.session?.cfRanks)_compressRanks();
   const [entry]=S.session.cfPaused.splice(pi,1);
   // Re-enter queue preserving wait time (since is kept from original)
   S.session.cfQueue.push({id:entry.id,since:entry.since,consec:entry.consec||0});
@@ -2858,9 +2867,8 @@ function midRejoin(id){
     }
   }
   AUDIT.log('player_rejoin',`${p.name} rejoined the session`);
-  // Recalc ranks now that player rejoined
-  clearTimeout(window._rankRecalcTimer);
-  window._rankRecalcTimer=setTimeout(()=>{if(S.session?.cfRanks){_initSessionRanks();renderLive();}},200);
+  // Rank entry was deleted on leave — re-insert at current ELO position like a late arrival.
+  if(S.session?.cfRanks)_insertLateArrival(id);
   STORE.save('session');toast(`${p.name} rejoined! 🏓`,'ok');renderLive();renderRosterModal();
 }
 
