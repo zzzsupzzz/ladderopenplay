@@ -837,13 +837,58 @@ const SYNC={
     if(S.adminPin)updates['meta/adminPin']=S.adminPin;
     if(S._sessionEndedId)updates['meta/sessionEndedId']=S._sessionEndedId;
     else updates['meta/sessionEndedId']=null;
-    if(segment==='all'||segment==='session')
-      updates.session=S.session?JSON.parse(JSON.stringify(S.session)):null;
+    if(segment==='all'||segment==='session'){
+      if(!S.session){
+        updates.session=null; // clear whole session node when ended
+      }else{
+        // Write each session field as an individual Firebase path so two admins working
+        // on different courts can write simultaneously without overwriting each other.
+        const sess=S.session;
+        Object.entries(sess).forEach(([k,v])=>{
+          if(k==='cfLog'||k==='cfQueue'||k==='cfPaused'||k==='players'||k==='cfCourts')return; // handled below
+          updates[`session/${k}`]=v??null;
+        });
+        // players per array-index — two courts scoring simultaneously write different players, no overwrite
+        (sess.players||[]).forEach((p,i)=>{updates[`session/players/${i}`]=p??null;});
+        // cfCourts per court — court 1 and court 2 write different Firebase paths, no collision
+        Object.entries(sess.cfCourts||{}).forEach(([c,ct])=>{updates[`session/cfCourts/${c}`]=ct??null;});
+        // cfLog keyed by match ID — simultaneous submissions go to different Firebase paths
+        (sess.cfLog||[]).forEach(m=>{if(m?.id)updates[`session/cfLog/${m.id}`]=m;});
+        // cfQueue/cfPaused keyed by player ID — per-player writes, no collision between courts
+        const allPlayerIds=new Set([...(sess.activePlayers||[]),...(sess.players||[]).map(p=>p.id)]);
+        const qMap=Object.fromEntries((sess.cfQueue||[]).filter(q=>q?.id).map(q=>[q.id,q]));
+        const pMap=Object.fromEntries((sess.cfPaused||[]).filter(p=>p?.id).map(p=>[p.id,p]));
+        allPlayerIds.forEach(id=>{
+          updates[`session/cfQueue/${id}`]=qMap[id]??null;
+          updates[`session/cfPaused/${id}`]=pMap[id]??null;
+        });
+      }
+    }
     if(segment==='all'||segment==='db')
       updates.db=S.db;
     if(segment==='all'||segment==='archive')
       updates.archive=S.archive;
     _pushWithRetry(updates, 0, onComplete);
+  },
+
+  // Push specific Firebase paths only — for per-court score submissions (dual-admin safe).
+  // Writes only the fields that changed for one court; other courts' data is untouched.
+  pushPaths(pathUpdates,onComplete=null){
+    if(!this.ready||!this.ref){
+      this._pendingWrite={segment:'paths',pathUpdates,onComplete,ts:Date.now()};
+      if(onComplete)onComplete();
+      return;
+    }
+    S._lastSaveTs=Date.now();
+    S._version=(S._version||0)+1;
+    const updates={'meta/_by':DEVICE_ID,'meta/_ts':S._lastSaveTs,'meta/_v':S._version};
+    if(S.adminPin)updates['meta/adminPin']=S.adminPin;
+    if(S._sessionEndedId)updates['meta/sessionEndedId']=S._sessionEndedId;
+    else updates['meta/sessionEndedId']=null;
+    Object.assign(updates,pathUpdates);
+    _backupToLocal();
+    _setSaveStatus('saving');
+    _pushWithRetry(updates,0,onComplete);
   },
 
   _applyRemote(data, isFirstLoad=false){
@@ -908,6 +953,19 @@ const SYNC={
       if(!isFirstLoad&&_vValid(remoteV)&&_vValid(localV)&&remoteV===localV&&(remote.meta?._by||'')!==DEVICE_ID){
         console.warn(`[sync] Simultaneous write at v${remoteV} — auto-merging remote`);
         // Fall through and apply remote — no dialog, no interruption
+      }
+
+      // Normalize Firebase collections stored as keyed objects back to JS arrays.
+      // cfLog is written as {matchId: matchObj} so simultaneous court submissions go to
+      // separate Firebase paths. cfQueue/cfPaused are written as {playerId: entry}.
+      if(remote.session){
+        remote.session.cfLog=_normalizeCfLog(remote.session.cfLog);
+        remote.session.cfQueue=_normalizeQueueMap(remote.session.cfQueue);
+        remote.session.cfPaused=_normalizeQueueMap(remote.session.cfPaused);
+        // players may arrive as a Firebase object (numeric-keyed) if written per-index
+        if(remote.session.players&&!Array.isArray(remote.session.players)){
+          remote.session.players=Object.values(remote.session.players).filter(Boolean);
+        }
       }
 
       // cfLog shrink guard: if remote has fewer log entries than local, the remote
@@ -1063,7 +1121,7 @@ const SYNC={
          // Flush any write queued before connection was ready
          if(SYNC._pendingWrite&&(Date.now()-SYNC._pendingWrite.ts<30000)){
            const pw=SYNC._pendingWrite;SYNC._pendingWrite=null;
-           setTimeout(()=>STORE.push(pw.segment,pw.onComplete),100);
+           setTimeout(()=>pw.segment==='paths'?SYNC.pushPaths(pw.pathUpdates,pw.onComplete):SYNC.push(pw.segment,pw.onComplete),100);
          }else{SYNC._pendingWrite=null;}
          // First-launch PIN prompt for brand-new empty room
          if(!getAdminPin()&&!S.db?.length&&!S.archive?.length&&!PLAYER_MODE&&!localStorage.getItem('pb_pin_prompted')){
@@ -1200,10 +1258,34 @@ const STORE={
     return new Promise(resolve=>{
       SYNC.push(segment, resolve);
     });
+  },
+  // Targeted path write — only writes the specified Firebase paths.
+  // Use for score submissions so two simultaneous admins only touch their own court's paths.
+  savePaths(pathUpdates){
+    _backupToLocal();
+    _setSaveStatus('saving');
+    return new Promise(resolve=>{
+      SYNC.pushPaths(pathUpdates,resolve);
+    });
   }
 };
 
 let _saveStatusTimer=null;
+// Normalize Firebase cfLog: written as {matchId: matchObj} objects, must come back as sorted array.
+// Also handles legacy numeric-keyed arrays from old Firebase format.
+function _normalizeCfLog(raw){
+  if(!raw)return[];
+  if(Array.isArray(raw))return raw.filter(Boolean);
+  const vals=Object.values(raw).filter(Boolean);
+  // Sort by matchIdx (recorded at submit time) to preserve log order; fall back to endTime
+  return vals.sort((a,b)=>(a.matchIdx??a.endTime??0)-(b.matchIdx??b.endTime??0));
+}
+// Normalize Firebase cfQueue/cfPaused: written as {playerId: entry} objects, must come back as array.
+function _normalizeQueueMap(raw){
+  if(!raw)return[];
+  if(Array.isArray(raw))return raw.filter(Boolean);
+  return Object.values(raw).filter(Boolean);
+}
 /* § UTILS
 /* ── UTILS ───────────────────────────────────────── */
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5);}
@@ -6586,7 +6668,28 @@ const CF={
     // Recording it here would capture the pre-game count, making the cooldown expire 1 game early
     MM.recHx([match]);
     delete S.session.cfSuggestions[courtNum];
-    STORE.save('session');renderLive();renderStandings();
+    // Targeted path write — only touches this court's paths.
+    // Two admins confirming different courts simultaneously write different Firebase paths.
+    {
+      const _sp=S.session;
+      const _paths={};
+      _paths[`session/cfCourts/${courtNum}`]=_sp.cfCourts[courtNum]??null;
+      _paths['session/cfPinnedIds']=_sp.cfPinnedIds??null;
+      _paths['session/cfPairConsec']=_sp.cfPairConsec??null;
+      _paths['session/cfPairSessionCount']=_sp.cfPairSessionCount??null;
+      _paths['session/cfPairLastAt']=_sp.cfPairLastAt??null;
+      _paths['session/cfPairLastLost']=_sp.cfPairLastLost??null;
+      _paths['session/partnerHx']=_sp.partnerHx??null;
+      _paths['session/oppHx']=_sp.oppHx??null;
+      _paths[`session/cfSuggestions/${courtNum}`]=null; // cleared above
+      // Queue entries for the 4 players being put on court
+      sug.allIds.forEach(id=>{
+        _paths[`session/cfQueue/${id}`]=null; // dequeued
+        _paths[`session/cfPaused/${id}`]=(_sp.cfPaused||[]).find(p=>p.id===id)??null;
+      });
+      STORE.savePaths(_paths);
+    }
+    renderLive();renderStandings();
     toast(`Court ${courtNum} started 🏓`,'ok');
   },
 
@@ -6675,9 +6778,9 @@ const CF={
     }
     // Check for pending pairs after each match (players now back in queue)
     setTimeout(()=>_checkPendingPairs(),100);
-    // Single batched NR promotion check — one STORE.save() if any promotion happened
+    // Single batched NR promotion check — write db only (session handled by savePaths below)
     const _anyPromo=[...m.t1,...m.t2].map(id=>checkNRPromotion(id)).some(Boolean);
-    if(_anyPromo)STORE.save();
+    if(_anyPromo)STORE.save('db');
     // Track NR pairing history — defined here, not from outer scope
     const hasNR=[...m.t1,...m.t2].some(id=>gp(id)?.isNR);
     if(hasNR){
@@ -6813,7 +6916,41 @@ const CF={
     const _t2n=m.t2.map(id=>gp(id)?.name||'?').join(' & ');
     const _resultStr=tie?`${s1}–${s2} tie`:s1>s2?`${_t1n} won ${s1}–${s2}`:`${_t2n} won ${s2}–${s1}`;
     AUDIT.log('score_submit',`Score: ${_t1n} vs ${_t2n} — ${_resultStr}`,courtNum);
-    STORE.save('session');renderLive();renderHistory();renderStandings();updateHeader();
+    // Targeted path write — only touches paths changed by THIS court.
+    // Two admins scoring simultaneously write different Firebase paths (different courts, players).
+    {
+      const _sp=S.session;
+      const _paths={};
+      _paths[`session/cfLog/${m.id}`]={...m};
+      _paths[`session/cfCourts/${courtNum}`]=_sp.cfCourts[courtNum]??null;
+      _paths['session/cfMatchCount']=_sp.cfMatchCount;
+      _paths['session/cfMatchupHx']=_sp.cfMatchupHx??null;
+      _paths['session/cfGroupHx']=_sp.cfGroupHx??null;
+      _paths['session/cfMustSplitPair']=_sp.cfMustSplitPair??null;
+      _paths['session/cfPairWins']=_sp.cfPairWins??null;
+      _paths['session/cfPairLastLost']=_sp.cfPairLastLost??null;
+      _paths['session/cfPairConsec']=_sp.cfPairConsec??null;
+      _paths['session/cfPairLastAt']=_sp.cfPairLastAt??null;
+      _paths['session/cfPairSessionCount']=_sp.cfPairSessionCount??null;
+      _paths['session/activePlayers']=_sp.activePlayers??null;
+      _paths['session/cfLeaveSoonIds']=_sp.cfLeaveSoonIds??null;
+      _paths['session/cfPauseAfterGame']=_sp.cfPauseAfterGame??null;
+      if(_sp.nrPairingHx)_paths['session/nrPairingHx']=_sp.nrPairingHx;
+      if(_sp.cfRanks)_paths['session/cfRanks']=_sp.cfRanks;
+      // Per-player paths: only the 4 players in this match + any auto-leave players
+      const _affectedIds=new Set([...m.t1,...m.t2]);
+      (_sp.cfLeaveSoonIds||[]).forEach(id=>_affectedIds.add(id));
+      _affectedIds.forEach(id=>{
+        const idx=_sp.players.findIndex(p=>p.id===id);
+        if(idx>=0)_paths[`session/players/${idx}`]=_sp.players[idx];
+        _paths[`session/cfQueue/${id}`]=(_sp.cfQueue||[]).find(q=>q.id===id)??null;
+        _paths[`session/cfPaused/${id}`]=(_sp.cfPaused||[]).find(p=>p.id===id)??null;
+      });
+      // Suggestion for this court (generated synchronously above)
+      _paths[`session/cfSuggestions/${courtNum}`]=_sp.cfSuggestions?.[courtNum]??null;
+      STORE.savePaths(_paths);
+    }
+    renderLive();renderHistory();renderStandings();updateHeader();
 
     // Match quality score and win probability context
     const t1Avg=(this.cfRating(m.t1[0])+this.cfRating(m.t1[1]))/2;
