@@ -5617,6 +5617,20 @@ const CF={
     if(nc===1){
       this._generateSingleSuggestion(readyCourts[0], pool, mustSplit, nrIds,
         finishedMatchByCourtNum?.[readyCourts[0]]);
+      // Safety net: single-court path bypasses the multi-court net below — apply it here.
+      const _ppS=S.session.cfPermPairs||[];
+      if(_ppS.length){
+        const c=readyCourts[0],sug=S.session.cfSuggestions[c];
+        if(sug){
+          const _ids=new Set([...(sug.t1||[]),...(sug.t2||[])]);
+          for(const[a,b]of _ppS){
+            const aIn=_ids.has(a),bIn=_ids.has(b);
+            const aLeft=gsp(a)?.status==='left',bLeft=gsp(b)?.status==='left';
+            if((aIn&&!bIn&&!bLeft)||(bIn&&!aIn&&!aLeft)){S.session.cfSuggestions[c]=null;break;}
+          }
+        }
+      }
+      readyCourts.forEach(c=>setTimeout(()=>cfMaybeAutoConfirm(c),500));
       return;
     }
 

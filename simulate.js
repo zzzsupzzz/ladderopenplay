@@ -290,6 +290,12 @@ const SIM = (() => {
     const nc = S.session.courts || 1;
     const mc = S.session.cfMatchCount || 0;
     const paused = new Set((S.session.cfPaused || []).map(q => q.id));
+    // On-court players have a match in progress — their matchesPlayed hasn't incremented yet.
+    // Add +1 (same as batchGenerateSuggestions floor calc) to avoid transient false positives
+    // when one player is mid-match and another just finished.
+    const onCourt = new Set(Object.values(S.session.cfCourts || {})
+      .filter(ct => ct?.status === 'playing' && ct.match)
+      .flatMap(ct => [...ct.match.t1, ...ct.match.t2]));
     const active = S.session.players.filter(sp => sp.status !== 'left' && !paused.has(sp.id));
     if (active.length < 2) return true;
     const permPairIds = new Set((S.session.cfPermPairs || []).flat());
@@ -306,7 +312,7 @@ const SIM = (() => {
       return true;
     });
     if (settled.length < 2) return true;
-    const counts = settled.map(sp => sp.matchesPlayed || 0);
+    const counts = settled.map(sp => (sp.matchesPlayed || 0) + (onCourt.has(sp.id) ? 1 : 0));
     const min = Math.min(...counts);
     const max = Math.max(...counts);
     if (max - min > 2) {
