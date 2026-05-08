@@ -1590,11 +1590,11 @@ function _rankBadge(id){
 
 function _rankThresholds(waitMatches=0){
   const n=_totalRanked()||S.session?.activePlayers?.length||20;
-  // Partner: max 35% of pool. Team avg: max 20% of pool.
-  const base={
-    partner: Math.round(n*0.35),
-    teamAvg: Math.round(n*0.20)
-  };
+  const small=(S.session?.courts||1)<=2;
+  // Small sessions: fewer players per band so widen thresholds to avoid carry matches.
+  const base=small
+    ?{partner:Math.round(n*0.45),teamAvg:Math.round(n*0.30)}
+    :{partner:Math.round(n*0.35),teamAvg:Math.round(n*0.20)};
   // Progressive relaxation as player waits longer
   if(waitMatches>=3)return{partner:Math.round(n*0.55),teamAvg:Math.round(n*0.35)};
   if(waitMatches>=2)return{partner:Math.round(n*0.45),teamAvg:Math.round(n*0.27)};
@@ -1615,7 +1615,10 @@ function _ranksCompatible(t1ids,t2ids,waitMatches=0){
   const bNum=(id)=>({D:1,C:2,B:3,A:4}[playerBand(id)]||2);
   const bn0=bNum(t1ids[0]),bn1=bNum(t1ids[1]),bn2=bNum(t2ids[0]),bn3=bNum(t2ids[1]);
   const nc=S.session?.courts||1;
-  const bandLimit=waitMatches>=nc*3?2:1;
+  // Small sessions (≤2 courts): always use bandLimit=2 — quartile bands have too few players
+  // per band to reliably find strict ±1 groups. Rank checks (Rules 2+3) still guard quality.
+  // Larger sessions: relax after nc missed matches.
+  const bandLimit=(nc<=2)||waitMatches>=nc?2:1;
   if(Math.abs(bn0-bn1)>bandLimit)return false;
   if(Math.abs(bn2-bn3)>bandLimit)return false;
   if(Math.max(bn0,bn1,bn2,bn3)-Math.min(bn0,bn1,bn2,bn3)>bandLimit)return false;
@@ -4910,8 +4913,9 @@ const CF={
     const gamesA=(spA?.matchesPlayed||0),gamesB=(spB?.matchesPlayed||0);
     const lastA=lastAt[a]||0,lastB=lastAt[b]||0;
     const gamesSinceA=gamesA-lastA,gamesSinceB=gamesB-lastB;
-    // Cooldown active until BOTH have played 3+ more games since last pairing
-    return gamesSinceA<3||gamesSinceB<3;
+    // Cooldown active until BOTH have played nc more games since last pairing.
+    const cdGames=S.session?.courts||1;
+    return gamesSinceA<cdGames||gamesSinceB<cdGames;
   },
 
   // Round mode cooldown check (uses partnerHx count + matchesPlayed)
@@ -5096,9 +5100,9 @@ const CF={
 
     return effectiveElo;
   },
-  /* Match-Gap: how many session matches have run since this player last played.
-     Pure game-count — not affected by how fast/slow the organizer confirms scores.
-     Gap of 0 = just played. Gap of NC*3 = missed ~3 full "waves" = force-include. */
+  /* Match-Gap: how many session matches have completed since this player last played.
+     Each court match confirmed = +1 gap. Gap of 0 = just played.
+     Gap of nc*2 = sat out while 2 matches per court finished = band constraints relax. */
   matchGap(id){
     const sp=gsp(id);if(!sp)return 0;
     const current=S.session?.cfMatchCount||0;
@@ -5143,11 +5147,11 @@ const CF={
     const skillFit=Math.max(0,5-Math.abs(er-courtAvg)*0.02);
     const gap=this.matchGap(qEntry.id);
     const nc=S.session?.courts||1;
-    // Graduated matchGap bonus — mirrors tier thresholds:
-    //   missed 1 round (gap=nc*1): small boost, stays in normal rotation
-    //   missed 2 rounds (gap=nc*2): mild boost — clearly waiting
-    //   missed 3 rounds (gap=nc*3): strong boost — starting to feel it
-    //   missed 4+ rounds (gap≥nc*4): maximum — must-play, override everything
+    // Graduated matchGap bonus — each threshold = nc missed matches (1 per court):
+    //   nc*1 missed: small boost, still in normal rotation
+    //   nc*2 missed: mild boost — clearly sitting out
+    //   nc*3 missed: strong boost — been waiting a long time
+    //   nc*4+ missed: maximum — must-play, override everything
     const gapBonus=
       gap>=nc*4 ? 200 :          // must-play tier
       gap>=nc*3 ? 120 :          // strong boost
@@ -5740,11 +5744,10 @@ const CF={
     // TIER 1: Players who haven't played any game yet — first-game guarantee
     const tier1=pool.filter(p=>!tier0Ids.has(p.id)&&(gsp(p.id)?.matchesPlayed||0)===0);
     const tier1Ids=new Set(tier1.map(p=>p.id));
-    // TIER 2: Graduated matchGap tiers
-    //   missed 1 round → normal (handled by queuePriority gapBonus)
-    //   missed 2 rounds → mild boost (tier 2c, scoring bonus only)
-    //   missed 3 rounds → strong boost (tier 2b, anchor position)
-    //   missed 4+ rounds → must-play (tier 2a, hard force-include)
+    // TIER 2: Graduated matchGap tiers (absolute match counts, not scaled by nc)
+    //   gap>=2 missed matches → mild boost (tier 2c, scoring bonus only)
+    //   gap>=3 missed matches → strong boost (tier 2b, anchor position)
+    //   gap>=4 missed matches → must-play (tier 2a, hard force-include)
     const tier2a=pool.filter(p=>!tier1Ids.has(p.id)&&this.matchGap(p.id)>=4);  // must-play
     const tier2b=pool.filter(p=>!tier1Ids.has(p.id)&&!tier2a.some(t=>t.id===p.id)&&this.matchGap(p.id)>=3); // strong boost
     const tier2c=pool.filter(p=>!tier1Ids.has(p.id)&&!tier2a.some(t=>t.id===p.id)&&!tier2b.some(t=>t.id===p.id)&&this.matchGap(p.id)>=2); // mild boost
@@ -5916,11 +5919,12 @@ const CF={
   },
 
   // Phase-aware gap cap for _withinTeamGapOk
-  // A(warm-up)=280, B(settling)=320, C(competitive)=360
-  // Tighter than the old time-based 250/300/380 in warm-up and competitive phases.
-  // Max extra wait from relaxed Phase A: ~1 queue skip (~3-5 min). Never 10-15 min.
+  // Small sessions (≤2 courts): wider caps since fewer valid groups exist.
+  // Large sessions — A(warm-up)=280, B(settling)=320, C(competitive)=360.
   _phaseGapCap(groupIds){
     const phase=this._sessionPhase(groupIds);
+    const small=(S.session?.courts||1)<=2;
+    if(small)return phase==='A'?360:phase==='B'?400:440;
     return phase==='A'?280:phase==='B'?320:360;
   },
 
@@ -6691,8 +6695,9 @@ const CF={
       const key=[...prev.allIds].sort().join(',');
       if(!S.session.cfShownCombos[courtNum].includes(key))
         S.session.cfShownCombos[courtNum].push(key);
-      // Keep only last 6 combos so pool doesn't get exhausted
-      if(S.session.cfShownCombos[courtNum].length>6)
+      // Keep history proportional to pool size — smaller sessions exhaust combos faster
+      const _maxShown=Math.max(2,Math.floor((S.session.activePlayers||[]).length/5));
+      if(S.session.cfShownCombos[courtNum].length>_maxShown)
         S.session.cfShownCombos[courtNum].shift();
     }
     const excluded=prev?new Set(prev.allIds):new Set();
