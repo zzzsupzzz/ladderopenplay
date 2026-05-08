@@ -9,6 +9,7 @@
 <title>🏓 Pickleball Ladder</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
 /* ── Base styles ── */
 #prog-wrap{height:3px;background:var(--s2,#112236);position:sticky;top:87px;z-index:190}
@@ -3513,7 +3514,7 @@ function renderArchive(){
         <div class="ct" style="margin-bottom:8px">📜 Match Log</div>
         ${matchHistory}
         <div style="margin-top:14px;border-top:1px solid var(--bd);padding-top:10px;display:flex;gap:6px">
-          <button class="btn bg2 sm" onclick="exportSession('${sess.id}')">📤 Export Session</button>
+          <button class="btn bg2 sm" onclick="exportSession('${sess.id}')">📤 Export Session (.xlsx)</button>
           <button class="btn bd2 sm" onclick="deleteArchiveSess('${sess.id}')">🗑 Delete</button>
         </div>
       </div>
@@ -3902,8 +3903,9 @@ function openImportModal(){
       </div>
       <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:12px">
         <div style="font-weight:700;font-size:.8rem;margin-bottom:5px">🏓 Import Single Session</div>
-        <div style="font-size:.72rem;color:var(--mu);margin-bottom:8px">Adds one session to history. Missing players are created automatically. ELO is recalculated from match results.</div>
-        <input type="file" id="imp-sess-file" accept=".json" class="inp" style="font-size:.72rem;padding:4px" onchange="previewSessionImport(this)"/>
+        <div style="font-size:.72rem;color:var(--mu);margin-bottom:8px">Adds one session to history. Missing players are created automatically. ELO is recalculated from match results. Accepts <strong>.xlsx</strong> (Excel) or .json.</div>
+        <button class="btn bg2 sm" style="width:100%;margin-bottom:6px;font-size:.72rem" onclick="downloadSessionTemplate()">📥 Download Blank Template (.xlsx)</button>
+        <input type="file" id="imp-sess-file" accept=".xlsx,.xls,.json" class="inp" style="font-size:.72rem;padding:4px" onchange="previewSessionImport(this)"/>
         <div id="imp-sess-preview" style="font-size:.7rem;color:var(--mu);margin-top:6px"></div>
         <button id="imp-sess-btn" class="btn" style="width:100%;margin-top:8px;display:none;background:rgba(52,211,153,.15);color:var(--gr);border:1px solid rgba(52,211,153,.3)" onclick="runSessionImport()">🏓 Import Session</button>
       </div>
@@ -4004,7 +4006,7 @@ function openExportModal(){
   const sessRows=sessions.length
     ?sessions.map(s=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--bd)">
         <span style="font-size:.76rem">${esc(s.name)}</span>
-        <button class="btn bg2 sm" style="font-size:.67rem" onclick="exportSession(${s.id?`'${s.id}'`:null})">📤 Export</button>
+        <button class="btn bg2 sm" style="font-size:.67rem" onclick="exportSession(${s.id?`'${s.id}'`:null})">📤 Export (.xlsx)</button>
       </div>`).join('')
     :'<div style="font-size:.72rem;color:var(--mu)">No sessions yet</div>';
   openModal(`<div class="modal-title">📤 Export Data</div>
@@ -4045,35 +4047,133 @@ function runExport(fmt){
   showExportText(content);
 }
 
-// ── Single-session export ─────────────────────────────────────────────────────
+// ── Single-session export (Excel .xlsx) ──────────────────────────────────────
 function exportSession(sessId){
   const sess=sessId?S.archive.find(a=>a.id===sessId):S.session;
   if(!sess){toast('Session not found','err');return;}
-  const exp={
-    exportVersion:1,
-    type:'pb-session',
-    name:sess.name||'Session',
-    date:sess.date||new Date().toISOString(),
-    courts:sess.courts||1,
-    players:(sess.players||[]).map(sp=>({
-      id:sp.id,
-      name:sp.name||gp(sp.id)?.name||'?',
-      startRating:Math.round(sp.startRating||sp.sRating||1000)
-    })),
-    matches:(sess.cfLog||[]).map(m=>({
-      t1:m.t1,t2:m.t2,s1:m.s1,s2:m.s2,court:m.courtNum||1
-    }))
-  };
+  if(typeof XLSX==='undefined'){toast('Excel library not loaded — check your internet connection','err');return;}
+  // Build name lookup
+  const idToName={};
+  (sess.players||[]).forEach(sp=>{idToName[sp.id]=sp.name||gp(sp.id)?.name||sp.id;});
+  // Players: name + startRating (no IDs — user-friendly for manual editing)
+  const players=(sess.players||[]).map(sp=>({
+    name:sp.name||gp(sp.id)?.name||'?',
+    startRating:Math.round(sp.startRating||sp.sRating||1000)
+  }));
+  // Matches: player names (not IDs) so the file is human-readable and editable
+  const matches=(sess.cfLog||[]).map(m=>({
+    t1_p1:idToName[m.t1[0]]||m.t1[0],
+    t1_p2:idToName[m.t1[1]]||m.t1[1],
+    t2_p1:idToName[m.t2[0]]||m.t2[0],
+    t2_p2:idToName[m.t2[1]]||m.t2[1],
+    score_t1:m.s1,score_t2:m.s2,
+    court:m.courtNum||1
+  }));
+  const wb=XLSX.utils.book_new();
+  // Sheet 1 — Session info (key / value)
+  const wsSession=XLSX.utils.aoa_to_sheet([
+    ['field','value'],
+    ['name',sess.name||'Session'],
+    ['date',(sess.date||new Date().toISOString()).substring(0,10)],
+    ['courts',sess.courts||1]
+  ]);
+  wsSession['!cols']=[{wch:10},{wch:30}];
+  XLSX.utils.book_append_sheet(wb,wsSession,'Session');
+  // Sheet 2 — Players
+  const wsPlayers=XLSX.utils.json_to_sheet(players);
+  wsPlayers['!cols']=[{wch:22},{wch:13}];
+  XLSX.utils.book_append_sheet(wb,wsPlayers,'Players');
+  // Sheet 3 — Matches
+  const wsMatches=matches.length
+    ?XLSX.utils.json_to_sheet(matches)
+    :XLSX.utils.aoa_to_sheet([['t1_p1','t1_p2','t2_p1','t2_p2','score_t1','score_t2','court']]);
+  wsMatches['!cols']=[{wch:18},{wch:18},{wch:18},{wch:18},{wch:9},{wch:9},{wch:6}];
+  XLSX.utils.book_append_sheet(wb,wsMatches,'Matches');
   const slug=(sess.name||'session').replace(/[^a-z0-9]/gi,'-').toLowerCase().replace(/-+/g,'-');
-  const filename=`pb-session-${slug}-${Date.now()}.json`;
-  try{
-    const blob=new Blob(['﻿'+JSON.stringify(exp,null,2)],{type:'application/json;charset=utf-8'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=filename;
-    document.body.appendChild(a);a.click();document.body.removeChild(a);
-    setTimeout(()=>URL.revokeObjectURL(url),600);
-  }catch(e){}
-  toast(`"${exp.name}" exported ✓`,'ok');
+  XLSX.writeFile(wb,`pb-session-${slug}-${Date.now()}.xlsx`);
+  toast(`"${sess.name||'Session'}" exported ✓`,'ok');
+}
+
+// ── Session template download ─────────────────────────────────────────────────
+function downloadSessionTemplate(){
+  if(typeof XLSX==='undefined'){toast('Excel library not loaded','err');return;}
+  const today=new Date().toISOString().substring(0,10);
+  const wb=XLSX.utils.book_new();
+  // Sheet 1 — Session
+  const wsSession=XLSX.utils.aoa_to_sheet([
+    ['field','value'],
+    ['name','Friday Open Play'],
+    ['date',today],
+    ['courts',2]
+  ]);
+  wsSession['!cols']=[{wch:10},{wch:30}];
+  XLSX.utils.book_append_sheet(wb,wsSession,'Session');
+  // Sheet 2 — Players
+  const wsPlayers=XLSX.utils.aoa_to_sheet([
+    ['name','startRating'],
+    ['Player A',1200],
+    ['Player B',1100],
+    ['Player C',1050],
+    ['Player D',1000],
+    ['Player E',980],
+    ['Player F',950]
+  ]);
+  wsPlayers['!cols']=[{wch:22},{wch:13}];
+  XLSX.utils.book_append_sheet(wb,wsPlayers,'Players');
+  // Sheet 3 — Matches (sample rows so user can see the format)
+  const wsMatches=XLSX.utils.aoa_to_sheet([
+    ['t1_p1','t1_p2','t2_p1','t2_p2','score_t1','score_t2','court'],
+    ['Player A','Player B','Player C','Player D',11,7,1],
+    ['Player E','Player C','Player A','Player F',8,11,1]
+  ]);
+  wsMatches['!cols']=[{wch:18},{wch:18},{wch:18},{wch:18},{wch:9},{wch:9},{wch:6}];
+  XLSX.utils.book_append_sheet(wb,wsMatches,'Matches');
+  XLSX.writeFile(wb,'pb-session-template.xlsx');
+  toast('Template downloaded ✓','ok');
+}
+
+// ── Parse xlsx file into internal session data format ─────────────────────────
+function _parseXlsxSession(arrayBuffer){
+  const wb=XLSX.read(new Uint8Array(arrayBuffer),{type:'array'});
+  // Session sheet
+  const wsS=wb.Sheets['Session'];
+  if(!wsS)throw new Error('Missing "Session" sheet');
+  const sessRows=XLSX.utils.sheet_to_json(wsS,{header:1,defval:''});
+  const sessInfo={};
+  sessRows.forEach(r=>{if(r[0])sessInfo[String(r[0]).toLowerCase().trim()]=r[1];});
+  // Players sheet
+  const wsP=wb.Sheets['Players'];
+  if(!wsP)throw new Error('Missing "Players" sheet');
+  const players=XLSX.utils.sheet_to_json(wsP,{defval:''})
+    .map((r,i)=>({
+      id:`xlp${i}`,
+      name:String(r.name||r.Name||'').trim(),
+      startRating:Number(r.startRating||r.StartRating||r['Start Rating']||1000)||1000
+    }))
+    .filter(p=>p.name);
+  // Build name→tempId map for match lookup
+  const nameToId={};
+  players.forEach(p=>{nameToId[p.name.toLowerCase()]=p.id;});
+  // Matches sheet
+  const wsM=wb.Sheets['Matches'];
+  const matches=wsM?XLSX.utils.sheet_to_json(wsM,{defval:''}).map(r=>{
+    const n=k=>String(r[k]||r[k.toUpperCase()]||'').trim();
+    const resolve=name=>nameToId[name.toLowerCase()]||name;
+    return{
+      t1:[resolve(n('t1_p1')),resolve(n('t1_p2'))],
+      t2:[resolve(n('t2_p1')),resolve(n('t2_p2'))],
+      s1:Number(r.score_t1||r.Score_T1||0),
+      s2:Number(r.score_t2||r.Score_T2||0),
+      court:Number(r.court||r.Court||1)
+    };
+  }).filter(m=>m.t1[0]&&m.t2[0]):[];
+  return{
+    type:'pb-session',exportVersion:1,
+    name:String(sessInfo.name||'Imported Session'),
+    date:String(sessInfo.date||new Date().toISOString()),
+    courts:Number(sessInfo.courts)||1,
+    players,matches
+  };
 }
 
 // ── Single-session import ─────────────────────────────────────────────────────
@@ -4083,22 +4183,29 @@ function previewSessionImport(input){
   const f=input.files[0];if(!f)return;
   const prev=document.getElementById('imp-sess-preview');
   const btn=document.getElementById('imp-sess-btn');
+  const isXlsx=/\.(xlsx|xls)$/i.test(f.name);
   const reader=new FileReader();
   reader.onload=e=>{
     try{
-      const data=JSON.parse(e.target.result);
-      if(data.type!=='pb-session')throw new Error('wrong type');
+      let data;
+      if(isXlsx){
+        data=_parseXlsxSession(e.target.result);
+      }else{
+        data=JSON.parse(e.target.result);
+        if(data.type!=='pb-session')throw new Error('wrong type');
+      }
       const pCount=(data.players||[]).length,mCount=(data.matches||[]).length;
       prev.textContent=`"${data.name}" — ${pCount} players · ${mCount} matches`;
       prev.style.color='var(--gr)';
       _importSessionData=data;btn.style.display='block';
     }catch(err){
-      prev.textContent='⚠ Invalid session file — must be exported with 📤 Export Session.';
+      prev.textContent='⚠ Invalid file — use 📤 Export Session or download the template below.';
       prev.style.color='var(--re)';
       _importSessionData=null;btn.style.display='none';
     }
   };
-  reader.readAsText(f);
+  if(isXlsx)reader.readAsArrayBuffer(f);
+  else reader.readAsText(f);
 }
 
 function runSessionImport(){
