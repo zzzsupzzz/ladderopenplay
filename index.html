@@ -531,7 +531,7 @@ body.observer-mode .qs-row{display:none!important}
     <div class="card">
       <div class="ct">⏳ Queue <span id="cf-queue-badge" style="font-size:.66rem;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(34,211,238,.1);color:var(--cy)">0</span>
         <button onclick="openQueueRulesModal()" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;align-items:center;gap:1px" title="How the queue works"><span style="font-size:.75rem">ℹ️</span><span>Rules</span></button>
-        <button onclick="openLockPairModal()" class="adv-only" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;flex-direction:column;align-items:center;gap:1px" title="Lock two players as permanent partners this session"><span style="font-size:.75rem">🔒</span><span>Lock</span></button>
+        <button onclick="openLockPairModal()" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;align-items:center;gap:1px" title="Partner settings — permanent, locked, or soft preference"><span style="font-size:.75rem">⛓️</span><span>Pair</span></button>
         <button onclick="changeCourtsMidSession()" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;align-items:center;gap:1px" title="Change court count or court start number"><span style="font-size:.75rem">⚙</span><span>Courts</span></button>
         <button onclick="AUDIT.open()" class="adv-only" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;flex-direction:column;align-items:center;gap:1px" title="Audit log — organiser actions this session"><span style="font-size:.75rem">📋</span><span>Log</span></button>
       </div>
@@ -2395,7 +2395,7 @@ function startSession(){
     }),
     partnerHx:{},oppHx:{},oppHxTime:{},
     nrPairingHx:{},
-    cfQueue:[],cfPinnedIds:[],cfPauseAfterGame:[],cfLockedPairs:[],cfSoftPairs:[],cfLeaveSoonIds:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,
+    cfQueue:[],cfPinnedIds:[],cfPauseAfterGame:[],cfLockedPairs:[],cfSoftPairs:[],cfPermPairs:[],cfLeaveSoonIds:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,
     courtOffset:0,
     cfMatchupHx:{},cfGroupHx:{},cfPairConsec:{},cfPairWins:{},cfMustSplitPair:null,cfPaused:[],
     cfPairSessionCount:{},cfPairLastAt:{},cfPairLastLost:{},
@@ -2700,6 +2700,27 @@ function cfClearLockedPairs(){
   S.session.cfLockedPairs=[];
   STORE.save('session');renderLive();
   toast('All partner locks cleared','ok');
+}
+function cfAddPermPair(idA,idB){
+  if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
+  if(!S.session)return;
+  if(!Array.isArray(S.session.cfPermPairs))S.session.cfPermPairs=[];
+  const pk=(a,b)=>[a,b].sort().join('|');
+  const key=pk(idA,idB);
+  if(S.session.cfPermPairs.some(p=>pk(p[0],p[1])===key)){toast('Already permanent partners','warn');return;}
+  if(S.session.cfPermPairs.length>=3){toast('Max 3 permanent pairs per session','warn');return;}
+  S.session.cfPermPairs.push([idA,idB]);
+  STORE.save('session');renderLive();
+  toast(`${gp(idA)?.name||'?'} & ${gp(idB)?.name||'?'} — permanent partners ⛓️`,'ok');
+}
+function cfRemovePermPair(idA,idB){
+  if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
+  if(!S.session)return;
+  const pk=(a,b)=>[a,b].sort().join('|');
+  const key=pk(idA,idB);
+  S.session.cfPermPairs=(S.session.cfPermPairs||[]).filter(p=>pk(p[0],p[1])!==key);
+  STORE.save('session');renderLive();
+  toast(`${gp(idA)?.name||'?'} & ${gp(idB)?.name||'?'} — permanent partnership removed`,'ok');
 }
 function cfAddSoftPair(idA,idB){
   if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
@@ -5209,6 +5230,25 @@ const CF={
         break; // only apply first matching lock
       }
     }
+    // Permanent pairs: identical same-team enforcement (always together + always same team).
+    // Pool filter guarantees both are present, this handles the split assignment.
+    const permPairs=S.session?.cfPermPairs||[];
+    if(permPairs.length){
+      const pids=group.map(p=>p.id);
+      for(const[a,b]of permPairs){
+        if(!pids.includes(a)||!pids.includes(b))continue;
+        const aInT1=t1.some(p=>p.id===a),bInT1=t1.some(p=>p.id===b);
+        if(aInT1!==bInT1){
+          const pa=group.find(p=>p.id===a),pb=group.find(p=>p.id===b);
+          const others=group.filter(p=>p.id!==a&&p.id!==b);
+          const optA={t1:[pa,pb],t2:others},optB={t1:others,t2:[pa,pb]};
+          const gapA=Math.abs(optA.t1.reduce((s,p)=>s+p.sr,0)/2-optA.t2.reduce((s,p)=>s+p.sr,0)/2);
+          const gapB=Math.abs(optB.t1.reduce((s,p)=>s+p.sr,0)/2-optB.t2.reduce((s,p)=>s+p.sr,0)/2);
+          ({t1,t2}=gapA<=gapB?optA:optB);
+        }
+        break;
+      }
+    }
     const avg=arr=>arr.reduce((s,p)=>s+p.sr,0)/arr.length;
     const crossImb=Math.abs(avg(t1)-avg(t2));
     const rawT1gap=Math.abs(t1[0].sr-t1[1].sr);
@@ -5337,12 +5377,19 @@ const CF={
       else if(aheadOfMin>=2)overplayPen+=80;
     });
 
-    const total=p1+p2+p3+p4+softPairBonus+overplayPen;
+    // Safety net: massive penalty if a permanent pair member is in the group without their partner.
+    // Pool filter (batchGenerateSuggestions) should prevent this; this catches any edge cases.
+    let permPairViolation=0;
+    if(permPairs.length){
+      const gids=new Set(group.map(p=>p.id));
+      for(const[a,b]of permPairs){if(gids.has(a)!==gids.has(b))permPairViolation+=99999;}
+    }
+    const total=p1+p2+p3+p4+softPairBonus+overplayPen+permPairViolation;
     const meta={splitOverride:splitPen>0&&splitPen<200,repeatMatchup:gamesSince!==null&&gamesSince<=5,
       rawT1gap,rawT2gap,
       _dbg:{p1:Math.round(p1),p2_pcFair:Math.round(p2),p3_rpt:Math.round(p3),
             p4_wait:Math.round(p4),soft:Math.round(softPairBonus),overplay:Math.round(overplayPen),
-            total:Math.round(total)}};
+            permV:Math.round(permPairViolation),total:Math.round(total)}};
     // NR protection:
     // a) Soft penalty for 2+ NR in same group when rated alternatives exist.
     //    Gentle enough that NR pairs are chosen when queue is mostly NR.
@@ -5506,6 +5553,20 @@ const CF={
       else{
         const capped=queue.filter(q=>(gsp(q.id)?.matchesPlayed||0)<=minGames+2);
         if(capped.length>=4)queue=capped;
+      }
+    }
+
+    // Permanent pairs: both partners must be in queue together or neither plays.
+    // If one partner is on court / paused / left, their queued partner sits out until
+    // the partner re-queues. Dissolves the restriction only when the partner has left.
+    const _permPairs=S.session.cfPermPairs||[];
+    if(_permPairs.length){
+      const qIds=new Set(queue.map(q=>q.id));
+      for(const[a,b]of _permPairs){
+        const aQ=qIds.has(a),bQ=qIds.has(b);
+        const aLeft=gsp(a)?.status==='left',bLeft=gsp(b)?.status==='left';
+        if(aQ&&!bQ&&!bLeft){queue=queue.filter(q=>q.id!==a);qIds.delete(a);}
+        if(bQ&&!aQ&&!aLeft){queue=queue.filter(q=>q.id!==b);qIds.delete(b);}
       }
     }
 
@@ -7291,13 +7352,16 @@ const CF={
         ?`<div style="display:flex;flex-wrap:wrap;gap:4px;padding:2px 0 6px">`
           +pins.map(id=>`<span style="font-size:.62rem;background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.3);border-radius:20px;padding:2px 8px;color:var(--pu);cursor:pointer" onclick="cfUnpinPlayer('${id}')" title="Tap to unpin">📌 ${esc(gp(id)?.name?.split(' ')[0]||'?')} ✕</span>`).join('')+'</div>'
         :'';}
-    // Locked pairs display
+    // Locked pairs + permanent pairs display
     const lpEl=document.getElementById('cf-locked-pairs-display');
     if(lpEl){
       const lp=S.session.cfLockedPairs||[];
-      lpEl.innerHTML=lp.length?`<div style="display:flex;flex-wrap:wrap;gap:4px;padding:2px 0 6px">`
-        +lp.map(([a,b])=>`<span style="font-size:.62rem;background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.3);border-radius:20px;padding:2px 8px;color:var(--cy);cursor:pointer" onclick="openLockPairModal()" title="Click 🔒 to manage partner locks">🔒 ${esc(gp(a)?.name?.split(' ')[0]||'?')} & ${esc(gp(b)?.name?.split(' ')[0]||'?')}</span>`).join('')+'</div>'
-        :'';
+      const pp=S.session.cfPermPairs||[];
+      const chips=[
+        ...lp.map(([a,b])=>`<span style="font-size:.62rem;background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.3);border-radius:20px;padding:2px 8px;color:var(--cy);cursor:pointer" onclick="openLockPairModal()" title="Hard lock — same team when grouped together">🔒 ${esc(gp(a)?.name?.split(' ')[0]||'?')} & ${esc(gp(b)?.name?.split(' ')[0]||'?')}</span>`),
+        ...pp.map(([a,b])=>`<span style="font-size:.62rem;background:rgba(167,139,250,.1);border:1px solid rgba(167,139,250,.3);border-radius:20px;padding:2px 8px;color:var(--pu);cursor:pointer" onclick="openLockPairModal()" title="Permanent partners — always play together on same team">⛓️ ${esc(gp(a)?.name?.split(' ')[0]||'?')} & ${esc(gp(b)?.name?.split(' ')[0]||'?')}</span>`)
+      ];
+      lpEl.innerHTML=chips.length?`<div style="display:flex;flex-wrap:wrap;gap:4px;padding:2px 0 6px">${chips.join('')}</div>`:'';
     }
     const el=document.getElementById('cf-queue-list');
     if(el){
@@ -7336,6 +7400,20 @@ const CF={
           // P5: Pending pair label
           const _pendingPartner=_getPendingPartner(q.id);
           if(_pendingPartner){const _ppName=gp(_pendingPartner)?.name?.split(' ')[0]||'?';reasons.push(`<span style="font-size:.59rem;color:var(--cy);font-weight:700">🔒 Reserved with ${_ppName} — waiting for compatible court</span>`);}
+          // Permanent pair: show who they're waiting for if partner isn't in queue
+          const _permPairsQ=S.session.cfPermPairs||[];
+          for(const[_pa,_pb]of _permPairsQ){
+            if(q.id!==_pa&&q.id!==_pb)continue;
+            const _partnerId=q.id===_pa?_pb:_pa;
+            const _partnerInQueue=queue.some(x=>x.id===_partnerId);
+            const _partnerSp=gsp(_partnerId);
+            if(!_partnerInQueue&&_partnerSp?.status!=='left'){
+              const _partnerName=gp(_partnerId)?.name?.split(' ')[0]||'?';
+              const _onCourt=Object.values(S.session.cfCourts||{}).some(ct=>ct?.status==='playing'&&ct.match&&[...ct.match.t1,...ct.match.t2].includes(_partnerId));
+              reasons.push(`<span style="font-size:.59rem;color:var(--pu);font-weight:700">⛓️ ${_onCourt?`Partner ${_partnerName} on court — will play together when they finish`:`Waiting for partner ${_partnerName}`}</span>`);
+            }
+            break;
+          }
           if(gap2>=4){const _bandIssue=S.session?.cfRanks&&_compatibleQueuePartners(q.id).length===0;reasons.push(_bandIssue?`<span style="font-size:.59rem;color:var(--re);font-weight:700">🔴 Sat out 4+ matches — no Band ${playerBand(q.id)} match yet</span>`:`<span style="font-size:.59rem;color:var(--re);font-weight:700">🔴 Sat out 4+ matches — MUST PLAY</span>`);}
           else if(gap2===3){const _bandIssue2=S.session?.cfRanks&&_compatibleQueuePartners(q.id).length===0;reasons.push(_bandIssue2?`<span style="font-size:.59rem;color:var(--or);font-weight:700">🟠 Sat out 3 matches — waiting for Band ${playerBand(q.id)} match</span>`:`<span style="font-size:.59rem;color:var(--or);font-weight:700">🟠 Sat out 3 matches — high priority</span>`);}
           else if(gap2===2)reasons.push(`<span style="font-size:.59rem;color:var(--go)">🟡 Sat out 2 matches — boosted</span>`);
@@ -7766,42 +7844,66 @@ function _setSaveStatus(state){
 /* ── Item 4: Queue rules modal ──────────────────────────────────── */
 function openLockPairModal(){
   if(!S.session){toast('No active session','err');return;}
-  // Include both queued and paused players, sorted alphabetically
-  const queueIds=[...(S.session.cfQueue||[]).map(q=>q.id),...(S.session.cfPaused||[]).map(q=>q.id)]
-    .filter((id,i,a)=>a.indexOf(id)===i)
+  // Include queue + paused + on-court players so you can set perm pairs for anyone active
+  const onCourtIds=Object.values(S.session.cfCourts||{})
+    .filter(ct=>ct?.status==='playing'&&ct.match)
+    .flatMap(ct=>[...ct.match.t1,...ct.match.t2]);
+  const allActiveIds=[...(S.session.cfQueue||[]).map(q=>q.id),
+                      ...(S.session.cfPaused||[]).map(q=>q.id),
+                      ...onCourtIds]
+    .filter((id,i,a)=>a.indexOf(id)===i&&gsp(id)?.status!=='left')
     .sort((a,b)=>(gp(a)?.name||'').localeCompare(gp(b)?.name||''));
-  const opts=queueIds.map(id=>`<option value="${id}">${esc(gp(id)?.name||'?')} (${Math.round(CF.cfRating(id))})</option>`).join('');
+  const opts=allActiveIds.map(id=>`<option value="${id}">${esc(gp(id)?.name||'?')} (${Math.round(CF.cfRating(id))})</option>`).join('');
   const locked=S.session.cfLockedPairs||[];
-  const lockedHtml=locked.length?`<div style="margin-top:10px"><div style="font-size:.68rem;font-weight:700;color:var(--mu);margin-bottom:4px">ACTIVE LOCKS</div>`
+  const perm=S.session.cfPermPairs||[];
+  const hasAny=locked.length||perm.length;
+  const lockedHtml=hasAny?`<div style="margin-top:10px"><div style="font-size:.68rem;font-weight:700;color:var(--mu);margin-bottom:4px">ACTIVE PAIR SETTINGS</div>`
     +locked.map(([a,b])=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:.77rem">
-      <span>🔒 ${esc(gp(a)?.name||'?')} & ${esc(gp(b)?.name||'?')}</span>
+      <span>🔒 ${esc(gp(a)?.name||'?')} & ${esc(gp(b)?.name||'?')} <span style="font-size:.65rem;color:var(--mu)">(hard lock)</span></span>
       <button class="btn bd2 sm" style="padding:1px 8px" onclick="cfUnlockPair('${a}','${b}');closeModal();openLockPairModal()">✕</button></div>`).join('')
+    +perm.map(([a,b])=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:.77rem">
+      <span>⛓️ ${esc(gp(a)?.name||'?')} & ${esc(gp(b)?.name||'?')} <span style="font-size:.65rem;color:var(--mu)">(permanent)</span></span>
+      <button class="btn bd2 sm" style="padding:1px 8px" onclick="cfRemovePermPair('${a}','${b}');closeModal();openLockPairModal()">✕</button></div>`).join('')
     +`</div>`:'';
-  openModal(`<div class="modal-title">🔒 Partner Lock</div>
-    <p style="font-size:.74rem;color:var(--mu);margin-bottom:10px;line-height:1.55">Lock two players as permanent partners. When both are in the same suggested match, they'll always be on the same team.</p>
+  openModal(`<div class="modal-title">🔒 Partner Settings</div>
+    <p style="font-size:.74rem;color:var(--mu);margin-bottom:10px;line-height:1.55">Set how two players pair up during this session.</p>
     <label>PLAYER 1</label>
     <select id="lp-a" class="inp" style="margin-bottom:8px"><option value="">— select —</option>${opts}</select>
     <label>PLAYER 2</label>
     <select id="lp-b" class="inp" style="margin-bottom:12px"><option value="">— select —</option>${opts}</select>
-    <label>LOCK STRENGTH</label>
-    <select id="lp-mode" class="inp" style="margin-bottom:12px">
-      <option value="hard">🔒 Hard lock — always same team when grouped</option>
+    <label>PAIRING MODE</label>
+    <select id="lp-mode" class="inp" style="margin-bottom:4px">
+      <option value="perm">⛓️ Permanent — always picked and teamed together every match</option>
+      <option value="hard">🔒 Hard lock — same team only when both happen to be in same match</option>
       <option value="soft">🤝 Soft preference — engine prefers to group together</option>
     </select>
+    <p id="lp-mode-hint" style="font-size:.68rem;color:var(--mu);margin-bottom:12px;line-height:1.5">Both players sit out until their partner is also free, then always play together on the same team.</p>
     <div style="display:flex;gap:7px">
       <button class="btn bp" style="flex:1" onclick="_confirmLockPair()">Apply</button>
       <button class="btn bg2" onclick="closeModal()">Cancel</button>
     </div>
-    ${locked.length?`<button class="btn bd2 sm" style="width:100%;margin-top:8px" onclick="cfClearLockedPairs();closeModal()">Clear All Locks</button>`:''}
+    ${hasAny?`<button class="btn bd2 sm" style="width:100%;margin-top:8px" onclick="cfClearLockedPairs();S.session.cfPermPairs=[];STORE.save('session');renderLive();closeModal()">Clear All Pair Settings</button>`:''}
     ${lockedHtml}`);
+  // Live hint update when mode dropdown changes
+  const mSel=document.getElementById('lp-mode');
+  const mHint=document.getElementById('lp-mode-hint');
+  if(mSel&&mHint){
+    const hints={
+      perm:'Both players sit out until their partner is also free, then always play together on the same team.',
+      hard:'When both happen to be drawn into the same suggested match, they\'re placed on the same team.',
+      soft:'The matchmaking engine scores groups with these two together slightly higher — not guaranteed.'
+    };
+    mSel.onchange=()=>{mHint.textContent=hints[mSel.value]||'';};
+  }
 }
 function _confirmLockPair(){
   const a=document.getElementById('lp-a')?.value;
   const b=document.getElementById('lp-b')?.value;
-  const mode=document.getElementById('lp-mode')?.value||'hard';
+  const mode=document.getElementById('lp-mode')?.value||'perm';
   if(!a||!b){toast('Select two players','err');return;}
   if(a===b){toast('Select two different players','err');return;}
-  if(mode==='soft')cfAddSoftPair(a,b);
+  if(mode==='perm')cfAddPermPair(a,b);
+  else if(mode==='soft')cfAddSoftPair(a,b);
   else cfLockPair(a,b);
   closeModal();
 }
