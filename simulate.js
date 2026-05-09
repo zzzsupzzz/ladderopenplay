@@ -447,7 +447,9 @@ const SIM = (() => {
 
         // ── Mid-session events ──
 
-        if (r === 5 && !midAddDone && nPlayers < NAMES.length) {
+        // Late arrival: 30-60 min in (~30% of rounds with 10 min/game avg)
+        const _lateRound = Math.max(4, Math.round(rounds * 0.30));
+        if (r === _lateRound && !midAddDone && nPlayers < NAMES.length) {
           const newId = uid();
           const newRating = 700 + Math.floor(Math.random() * 600);
           S.db.push({
@@ -929,7 +931,7 @@ const SIM = (() => {
       // After that each court gets 1–2 tick stagger, so they rarely finish together.
       const courtGameLen = { 1: 0, 2: 0 };
       let firstRoundDone = false;
-      const TARGET_MATCHES = 46;
+      const TARGET_MATCHES = 54; // bumped to ensure all late-arrival scenarios complete
       const MAX_TICKS = 90;
 
       for (let tick = 0; tick < MAX_TICKS && S.session.cfMatchCount < TARGET_MATCHES && !_aborted; tick++) {
@@ -990,8 +992,8 @@ const SIM = (() => {
           if (doRender) render(); await delay(ms);
         }
 
-        // mc≥8: Two mid-strength late arrivals
-        if (!lateArrivalsDone && mc >= 8) {
+        // mc≥14: Two mid-strength late arrivals (~7 games/court ≈ 60-70 min in)
+        if (!lateArrivalsDone && mc >= 14) {
           for (const lr of [1000, 820]) {
             const ni = S.db.length, lId = uid();
             S.db.push({ id:lId, name:NAMES[ni]||`Late${ni}`, tag:'LATE', rating:lr, baseRating:lr,
@@ -1292,7 +1294,7 @@ const SIM = (() => {
       log(`  R1: Both courts confirmed simultaneously (happy-path start)`);
       log(`  M4+: Permanent partners locked (Taylor & Casey)`);
       log(`  M6+: ⇄ Swap in preview (player swapped before confirming)`);
-      log(`  M8+: Two mid-session late arrivals`);
+      log(`  M14+: Two mid-session late arrivals (~60-70 min in, 7 games/court)`);
       log(`  M10+: ⇄ Swap mid-match (live court player substitution)`);
       log(`  M12+: Player paused (bathroom break)`);
       log(`  M14+: 🔀 Quality-first reshuffle`);
@@ -1316,6 +1318,20 @@ const SIM = (() => {
       try { renderDB(); renderRoster?.(); renderHistory?.(); renderStandings?.(); } catch(e){}
     }
     return { log: _log, errors: _errs, passed: _errs.length === 0 };
+  }
+
+  // ── Convenience sims: fixed player/court combos ─────────────────────────────
+  // Each runs the generic run() at the correct ratio (6-7 players/court).
+  // Late arrival joins at round ~30% = ~60 min into a 3-hour session.
+  // Usage: SIM.run14()  SIM.run20()  SIM.run26()
+  function run14(opts = {}) {
+    return run({ players: 14, courts: 2, rounds: 20, speed: 'fast', ...opts });
+  }
+  function run20(opts = {}) {
+    return run({ players: 20, courts: 3, rounds: 20, speed: 'fast', ...opts });
+  }
+  function run26(opts = {}) {
+    return run({ players: 26, courts: 4, rounds: 20, speed: 'fast', ...opts });
   }
 
   // ── Permanent pair stress test ──────────────────────────────────────────────
@@ -1497,7 +1513,10 @@ const SIM = (() => {
         <label for="sim-step">Step mode (pause after each action)</label>
       </div>
       <button class="sim-go" id="sim-run-btn" onclick="SIM._uiRun()">▶ Run Full Simulation</button>
-      <button class="sim-go" style="background:#a78bfa;color:#1a0540" onclick="SIM.runOrganizer12({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">⛓️ Run 12p/2c Organizer Sim</button>
+      <button class="sim-go" style="background:#34d399;color:#052e16" onclick="SIM.run14({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">14p / 2c</button>
+      <button class="sim-go" style="background:#38bdf8;color:#0c1a2e" onclick="SIM.run20({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">20p / 3c</button>
+      <button class="sim-go" style="background:#f59e0b;color:#1c0f00" onclick="SIM.run26({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">26p / 4c</button>
+      <button class="sim-go" style="background:#a78bfa;color:#1a0540" onclick="SIM.runOrganizer12({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">⛓️ Organizer 14p/2c</button>
       <button class="sim-bug" onclick="SIM.runPermPairCheck()">🔒 Perm Pair Stress Test</button>
       <button class="sim-continue" id="sim-continue-btn" onclick="SIM._continue()" style="display:none;background:#fb923c;color:#111">Continue</button>
       <button class="sim-stop" id="sim-stop-btn" onclick="SIM.stop()" disabled>Stop</button>
@@ -1545,6 +1564,6 @@ const SIM = (() => {
     else window.addEventListener('load', buildPanel);
   }
 
-  return { run, runBugChecks, runOrganizer12, runPermPairCheck, stop, _uiRun, _continue, log: () => _log, errors: () => _errs };
+  return { run, run14, run20, run26, runBugChecks, runOrganizer12, runPermPairCheck, stop, _uiRun, _continue, log: () => _log, errors: () => _errs };
 
 })();
