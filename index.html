@@ -1115,6 +1115,19 @@ const SYNC={
          }
          _pageFirstLoad=false;
          HAS_REMOTE_HYDRATED=true;
+         // Merge any players the user added before Firebase data arrived.
+         // Without this, adding a player on a slow connection before hydration is silently lost.
+         if(_preHydrationPlayers?.length){
+           const fbIds=new Set(S.db.map(p=>p.id));
+           const newPlayers=_preHydrationPlayers.filter(p=>p?.id&&!fbIds.has(p.id));
+           if(newPlayers.length){
+             S.db=[...S.db,...newPlayers];
+             console.log(`[store] Merged ${newPlayers.length} pre-hydration player(s) with Firebase db`);
+             toast(`Added ${newPlayers.length} player${newPlayers.length>1?'s':''} synced ✓`,'ok');
+             setTimeout(()=>STORE.save('db'),300);
+           }
+           _preHydrationPlayers=null;
+         }
          // If active session was restored from Firebase but cfRanks is missing/empty
          // (old session from before this build, or build update mid-session),
          // reinitialize ranks AND regenerate all ready-court suggestions now.
@@ -1256,13 +1269,20 @@ const SYNC={
 /* ── STORAGE — Firebase only, no localStorage for app data ── */
 // No BroadcastChannel — Firebase real-time listener covers all tab sync
 
+// Players added before Firebase first-load completes. Merged with remote db on hydration.
+let _preHydrationPlayers=null;
+
 /* § STORE */
 const STORE={
   save(segment='all'){
-    // Safety guard: never write db/archive to Firebase before remote data has been
-    // received. A premature write with empty S.db would wipe the real player database.
-    if(!HAS_REMOTE_HYDRATED&&(segment==='all'||segment==='db')&&(!S.db||S.db.length===0)&&(!S.archive||S.archive.length===0)){
-      console.warn('[store] Blocked empty-DB write before Firebase hydration (segment:',segment,')');
+    // Safety guard: never write db to Firebase before remote data has been received.
+    // A premature write (e.g. user adds a player before Firebase responds) would
+    // overwrite the real player database with a partial local copy.
+    // Instead: snapshot the new players and merge them after hydration.
+    if(!HAS_REMOTE_HYDRATED&&(segment==='all'||segment==='db')){
+      console.warn('[store] Blocked db write before Firebase hydration — queuing new players for post-hydration merge (segment:',segment,')');
+      // Remember any players the user added before Firebase loaded so we can merge them in
+      _preHydrationPlayers=[...(S.db||[])];
       _backupToLocal();
       return Promise.resolve(); // don't block callers, just skip the Firebase write
     }
