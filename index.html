@@ -1912,10 +1912,12 @@ function _updateSessionRank(id,won,pd,opponentIds){
   const absPD=Math.abs(pd||0);
   const pdMult=absPD>=7?1.5:absPD>=4?1.2:0.8;
 
-  // Speed multiplier: faster early (correcting estimate), slower late
+  // Speed multiplier: DAMPEN early games so first-impression mistakes don't cascade.
+  // Games 1-2 → 0.3× (barely moves), game 3 → 0.6×, games 4-5 → 1.0×, 6+ → 0.7×
+  // Late arrivals are inserted at an estimated rank — same dampening applies.
   const isLate=entry.isLateArrival;
   const games=entry.games||0;
-  const speedMult=(games<3||(isLate&&games<3))?1.5:games<6?1.0:0.7;
+  const speedMult=games<2?0.3:games<3?0.6:games<6?1.0:0.7;
 
   const move=Math.round(base*pdMult*speedMult);
   if(move===0){entry.games++;return;}
@@ -5611,7 +5613,19 @@ const CF={
     const[_a,_b,_c,_d]=group;
     const _splits=[{t1:[_a,_b],t2:[_c,_d]},{t1:[_a,_c],t2:[_b,_d]},{t1:[_a,_d],t2:[_b,_c]}];
     const _splitCarry=g=>g>120?Math.pow((g-120)/80,2)*40:0;
+    // Hard-block: just-lost partners must be on opposite teams whenever possible.
+    // Primary sort key — skill balance is secondary to this constraint.
+    const _llMap=S.session?.cfPairLastLost||{};
+    const _splitHasJustLost=sp=>{
+      const k1=this.pairKey(sp.t1[0].id,sp.t1[1].id);
+      const k2=this.pairKey(sp.t2[0].id,sp.t2[1].id);
+      return (_llMap[k1]?1:0)+(_llMap[k2]?1:0);
+    };
     _splits.sort((x,y)=>{
+      // Primary: avoid splits that pair just-lost partners together
+      const lx=_splitHasJustLost(x),ly=_splitHasJustLost(y);
+      if(lx!==ly)return lx-ly;
+      // Secondary: minimize within-team gap + cross-team imbalance
       const maxGapX=Math.max(Math.abs(x.t1[0].sr-x.t1[1].sr),Math.abs(x.t2[0].sr-x.t2[1].sr));
       const maxGapY=Math.max(Math.abs(y.t1[0].sr-y.t1[1].sr),Math.abs(y.t2[0].sr-y.t2[1].sr));
       const gx=Math.abs((x.t1[0].sr+x.t1[1].sr)-(x.t2[0].sr+x.t2[1].sr))+(Math.abs(x.t1[0].sr-x.t1[1].sr)+Math.abs(x.t2[0].sr-x.t2[1].sr))/4+_splitCarry(maxGapX);
@@ -5838,11 +5852,10 @@ const CF={
     const losingPairPen=
       (t1nets[0]<=-2&&t1nets[1]<=-2?Math.min(20,Math.abs(t1nets[0]+t1nets[1])*2):0)+
       (t2nets[0]<=-2&&t2nets[1]<=-2?Math.min(20,Math.abs(t2nets[0]+t2nets[1])*2):0);
-    // "Just lost together" — 60pt soft penalty to discourage immediate re-pairing of
-    // players who were partners in the game they just came off.  Strong enough to
-    // redirect in almost all cases; won't block when the queue is thin (pass 3).
-    const lastLost=S.session?.cfPairLastLost||{};
-    const justLostPen=(lastLost[t1k]?60:0)+(lastLost[t2k]?60:0);
+    // "Just lost together" — now a hard split-selection block (see _splits.sort above).
+    // Soft penalty removed — split is already chosen to avoid just-lost partners.
+    // Locked/perma pair logic may still override; in that case no extra penalty.
+    const justLostPen=0;
 
     // ── Hot / cold protection (uses flags set by cfRating) ───────────────
     // HOT player protection: if a player is on a hot streak, penalise pairing them
@@ -5890,7 +5903,25 @@ const CF={
       if((aq===1&&bq===4)||(aq===4&&bq===1))bandPen+=300;
       else if((aq===1&&bq===3)||(aq===3&&bq===1))bandPen+=80;
     });
-    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+bandPen,meta,t1,t2,group};
+    // ── Rank-band spread penalty (Step 6) ──────────────────────────────
+    // Keep groups within a tight rank band so top and bottom players rarely meet.
+    // Formula: base = round(N / courts×2).  E.g. 14p/2c → base=4 (ranks 1–4 ideal group).
+    // Quadratic penalty kicks in when spread > base×2, capped at 300.
+    // This is soft — fairness overrides (hunger, 0-game, MGL) can still widen the band.
+    let rankBandPen=0;
+    {
+      const _rks=group.map(p=>_sessionRank(p.id)).filter(r=>r>0);
+      if(_rks.length===4){
+        const _rSpread=Math.max(..._rks)-Math.min(..._rks);
+        const _N4=_totalRanked();const _C4=S.session?.courts||1;
+        const _baseSpread=Math.max(2,Math.round(_N4/(_C4*2)));
+        if(_rSpread>_baseSpread*2){
+          const excess=_rSpread-_baseSpread*2;
+          rankBandPen=Math.min(300,excess*excess*5);
+        }
+      }
+    }
+    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+bandPen+rankBandPen,meta,t1,t2,group};
   },
 
   /* Generate a suggestion for a court */
