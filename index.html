@@ -3512,10 +3512,13 @@ function renderSessStd(){
   let oppGreenMax,oppOrangeMax,pGapGreenMax,pGapOrangeMax;
   if(hasCfRanks){
     // Scale with field size: for N=27 → green≤4, orange≤8; for N=14 → green≤2, orange≤4
+    // OPP Δ: green within 15% of N, orange within 30%, red beyond
     oppGreenMax=Math.max(2,Math.round(totalRanked*0.15));
     oppOrangeMax=Math.max(4,Math.round(totalRanked*0.30));
-    pGapGreenMax=Math.max(2,Math.round(totalRanked*0.12));
-    pGapOrangeMax=Math.max(4,Math.round(totalRanked*0.25));
+    // P.GAP: soft band limit is ~35-60% of N, so orange up to ~45%, red beyond
+    // 12%/25% was too tight — everything showed red for normal matches
+    pGapGreenMax=Math.max(2,Math.round(totalRanked*0.20));
+    pGapOrangeMax=Math.max(4,Math.round(totalRanked*0.45));
   }else{
     const sessRatings=allMatches.flatMap(m=>(m.sessionRatings||[]).filter(r=>r!=null));
     const ratingSpread=sessRatings.length>=2?Math.max(...sessRatings)-Math.min(...sessRatings):200;
