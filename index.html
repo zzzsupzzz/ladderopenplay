@@ -8294,9 +8294,17 @@ function _trackConnection(db){
       SYNC._updateBadge();
       const el=document.getElementById('save-status');
       if(el&&el.textContent==='⚡ offline'){
-        // Had pending save — attempt now
-        _setSaveStatus('saving');
-        SYNC.push('all');
+        // Had a pending save while offline — push now that we're back online.
+        // CRITICAL: skip if Firebase hasn't hydrated yet. On initial page load,
+        // .info/connected always fires false→true before _applyRemote runs,
+        // so HAS_REMOTE_HYDRATED is still false and S.db = [].
+        // Pushing here would overwrite the real Firebase database with empty local state.
+        if(HAS_REMOTE_HYDRATED){
+          _setSaveStatus('saving');
+          SYNC.push('all');
+        }else{
+          console.log('[sync] Reconnect push skipped — awaiting first Firebase hydration (S.db would be empty)');
+        }
       }
     }else if(!_fbConnected){
       SYNC._updateBadge();
