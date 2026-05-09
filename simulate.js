@@ -320,8 +320,9 @@ const SIM = (() => {
     // Allow gap = max(2, nc-1): 1–2 courts → ≤2, 3 courts → ≤2, 4 courts → ≤3.
     const maxAllowedGap = Math.max(2, nc - 1);
     if (max - min > maxAllowedGap) {
-      const behind = settled.filter(sp => (sp.matchesPlayed || 0) === min).map(sp => sp.name);
-      const ahead = settled.filter(sp => (sp.matchesPlayed || 0) === max).map(sp => sp.name);
+      // Use same on-court +1 offset as the counts array above so names always resolve.
+      const behind = settled.filter(sp => (sp.matchesPlayed || 0) + (onCourt.has(sp.id) ? 1 : 0) === min).map(sp => sp.name);
+      const ahead  = settled.filter(sp => (sp.matchesPlayed || 0) + (onCourt.has(sp.id) ? 1 : 0) === max).map(sp => sp.name);
       err(`Play count gap: ${max - min} games (min=${min}: ${behind.join(',')} | max=${max}: ${ahead.join(',')})`);
       return false;
     }

@@ -2007,23 +2007,31 @@ function _compatibleQueuePartners(id){
 function _checkPendingPairs(){
   if(!S.session)return;
   if(!S.session.cfPendingPairs)S.session.cfPendingPairs=[];
+  if(!S.session.cfPairCooldown)S.session.cfPairCooldown={};
   const nc=S.session.courts||2;
   const mc=S.session.cfMatchCount||0;
   const queue=S.session.cfQueue||[];
 
   // ── Expiry: release locks held for ≥ nc completed matches without confirming.
-  // Scenario: Riley locked with PartnerX, but ALL of PartnerX's compatible partners
-  // are locked in their own pairs — nobody can confirm, deadlock persists for 7+ waits.
-  // Expiring after nc matches breaks the chain and lets waiting players reform pairs.
-  const _pairTimeout=nc; // one full rotation cycle (e.g. 2 for 2-court, 3 for 3-court)
+  // When a lock expires, apply a cooldown (nc matches) to both players so they are
+  // NOT immediately re-locked in the same call. Without cooldown, the expiry loop and
+  // the lock-creation loop run back-to-back in one function call, causing repeated
+  // nc-cycle deadlocks: Jordan gets [4] → expires → immediately re-locks → expires →
+  // re-locks → total wait grows to [8] (two cycles of nc=2 each).
+  const _pairTimeout=nc; // one full rotation cycle
   const _before=S.session.cfPendingPairs.length;
+  const _expiredIds=[];
   S.session.cfPendingPairs=S.session.cfPendingPairs.filter(p=>{
     const lockedAt=p[2]??null;
-    if(lockedAt===null)return false; // legacy entry without timestamp → treat as stale
-    return (mc-lockedAt)<_pairTimeout;
+    if(lockedAt===null){_expiredIds.push(p[0],p[1]);return false;} // legacy → stale
+    if((mc-lockedAt)>=_pairTimeout){_expiredIds.push(p[0],p[1]);return false;}
+    return true;
   });
-  if(S.session.cfPendingPairs.length<_before){
-    console.log(`[pairs] Expired ${_before-S.session.cfPendingPairs.length} stale lock(s) after ${_pairTimeout} matches`);
+  if(_expiredIds.length){
+    // Cooldown: prevent re-locking the same players for nc more matches
+    _expiredIds.forEach(id=>{S.session.cfPairCooldown[id]=mc;});
+    const names=[...new Set(_expiredIds)].map(id=>gp(id)?.name||id).join(', ');
+    console.log(`[pairs] Expired ${_before-S.session.cfPendingPairs.length} stale lock(s); cooldown → ${names}`);
   }
 
   // ── Create new locks for players who have waited ≥ PENDING_PAIR_THRESHOLD ──
@@ -2032,12 +2040,19 @@ function _checkPendingPairs(){
     if(gap<PENDING_PAIR_THRESHOLD)continue;
     // Already in a (fresh) lock — don't double-lock
     if(S.session.cfPendingPairs.some(p=>p[0]===q.id||p[1]===q.id))continue;
-    // IMPORTANT: use base threshold (no relaxation) when locking pending pairs.
+    // Cooldown: skip re-locking for nc matches after a lock expired (breaks cycle deadlock)
+    const _coolAt=S.session.cfPairCooldown[q.id]??null;
+    if(_coolAt!==null){
+      if((mc-_coolAt)<nc){
+        console.log(`[pairs] ${gp(q.id)?.name} cooling down (${nc-(mc-_coolAt)} left) — hunger priority instead`);
+        continue;
+      }
+      delete S.session.cfPairCooldown[q.id]; // cooldown elapsed, clear it
+    }
     const compat=_compatibleQueuePartners(q.id)
       .filter(pid=>!S.session.cfPendingPairs.some(p=>p[0]===pid||p[1]===pid));
     if(!compat.length){
       // No compatible partner free — don't lock a bad pair.
-      // Player continues waiting; lock will form when a compatible partner is freed.
       console.log(`[pairs] ${gp(q.id)?.name}(#${_sessionRank(q.id)}) waiting — no compatible partner available`);
       continue;
     }
@@ -2609,7 +2624,7 @@ function startSession(){
     courtOffset:0,
     cfMatchupHx:{},cfGroupHx:{},cfPairConsec:{},cfPairWins:{},cfMustSplitPair:null,cfPaused:[],
     cfPairSessionCount:{},cfPairLastAt:{},cfPairLastLost:{},
-    cfRanks:{},cfPendingPairs:[], // session ranking system — populated on beginPlay
+    cfRanks:{},cfPendingPairs:[],cfPairCooldown:{}, // session ranking system — populated on beginPlay
     neverPair:{},ratingOverrides:{},
     auditLog:[],
     status:'lobby'
@@ -7022,6 +7037,7 @@ const CF={
       _paths[`session/cfCourts/${courtNum}`]=_sp.cfCourts[courtNum]??null;
       _paths['session/cfPinnedIds']=_sp.cfPinnedIds??null;
       _paths['session/cfPendingPairs']=_sp.cfPendingPairs??null; // sync pair clears + timestamps
+      _paths['session/cfPairCooldown']=_sp.cfPairCooldown??null; // sync cooldown state
       _paths['session/cfPairConsec']=_sp.cfPairConsec??null;
       _paths['session/cfPairSessionCount']=_sp.cfPairSessionCount??null;
       _paths['session/cfPairLastAt']=_sp.cfPairLastAt??null;
