@@ -2698,6 +2698,15 @@ function saveNeverPair(id){
     if(cb&&!hasIt)S.session.neverPair[oid].push(id);
     else if(!cb&&hasIt)S.session.neverPair[oid]=S.session.neverPair[oid].filter(x=>x!==id);
   });
+  // Regenerate waiting courts so new never-pair restrictions take effect immediately
+  if(S.session?.cfMode){
+    const _npNc=S.session.courts||1,_npCo=S.session.courtOffset||0,_npRegen=[];
+    for(let _ci=1+_npCo;_ci<=_npNc+_npCo;_ci++){
+      if((S.session.cfCourts?.[_ci])?.status==='playing')continue;
+      _npRegen.push(_ci);
+    }
+    if(_npRegen.length)CF.batchGenerateSuggestions(_npRegen,null);
+  }
   STORE.save('session');renderRosterModal();toast('Never-pair list saved ✓','ok');
 }
 
@@ -2829,6 +2838,22 @@ function cfLockPair(idA, idB){
   if(S.session.cfLockedPairs.some(p=>pk(p[0],p[1])===key)){toast('Already locked together','warn');return;}
   if(S.session.cfLockedPairs.length>=3){toast('Max 3 locked pairs per session','warn');return;}
   S.session.cfLockedPairs.push([idA,idB]);
+  // Invalidate suggestions that have this pair on opposite teams + regenerate waiting courts
+  const _lkRegen=[];
+  for(const[cs,sug]of Object.entries(S.session.cfSuggestions||{})){
+    if(!sug)continue;
+    const t1s=new Set(sug.t1||[]),t2s=new Set(sug.t2||[]);
+    const aIn=t1s.has(idA)||t2s.has(idA),bIn=t1s.has(idB)||t2s.has(idB);
+    const splitTeam=aIn&&bIn&&(t1s.has(idA)!==t1s.has(idB));
+    if(splitTeam){S.session.cfSuggestions[Number(cs)]=null;_lkRegen.push(Number(cs));}
+  }
+  const _lkNc=S.session.courts||1,_lkCo=S.session.courtOffset||0;
+  for(let _ci=1+_lkCo;_ci<=_lkNc+_lkCo;_ci++){
+    if(_lkRegen.includes(_ci))continue;
+    if((S.session.cfCourts?.[_ci])?.status==='playing')continue;
+    if(!S.session.cfSuggestions?.[_ci])_lkRegen.push(_ci);
+  }
+  if(_lkRegen.length)CF.batchGenerateSuggestions(_lkRegen,null);
   STORE.save('session');renderLive();
   toast(`${gp(idA)?.name||'?'} & ${gp(idB)?.name||'?'} — locked as partners 🔒`,'ok');
 }
@@ -2838,6 +2863,7 @@ function cfUnlockPair(idA, idB){
   const pk=(a,b)=>([a,b].sort().join('|'));
   const key=pk(idA,idB);
   S.session.cfLockedPairs=(S.session.cfLockedPairs||[]).filter(p=>pk(p[0],p[1])!==key);
+  _cfRegenWaiting();
   STORE.save('session');renderLive();
   toast(`${gp(idA)?.name||'?'} & ${gp(idB)?.name||'?'} — unlocked`,'ok');
 }
@@ -2845,8 +2871,19 @@ function cfClearLockedPairs(){
   if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
   if(!S.session)return;
   S.session.cfLockedPairs=[];
+  _cfRegenWaiting();
   STORE.save('session');renderLive();
   toast('All partner locks cleared','ok');
+}
+// Shared helper: regenerate all non-playing courts with null suggestions
+function _cfRegenWaiting(){
+  if(!S.session?.cfMode||!S.session.cfSuggestions)return;
+  const nc=S.session.courts||1,co=S.session.courtOffset||0,regen=[];
+  for(let c=1+co;c<=nc+co;c++){
+    if((S.session.cfCourts?.[c])?.status==='playing')continue;
+    if(!S.session.cfSuggestions?.[c])regen.push(c);
+  }
+  if(regen.length)CF.batchGenerateSuggestions(regen,null);
 }
 function cfAddPermPair(idA,idB){
   if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
@@ -2887,6 +2924,14 @@ function cfRemovePermPair(idA,idB){
   const pk=(a,b)=>[a,b].sort().join('|');
   const key=pk(idA,idB);
   S.session.cfPermPairs=(S.session.cfPermPairs||[]).filter(p=>pk(p[0],p[1])!==key);
+  // Regenerate waiting courts — removing the pair may free a player who was excluded
+  // from the pool while their partner was on court (one was waiting, other was excluded)
+  const _rpNc=S.session.courts||1,_rpCo=S.session.courtOffset||0,_rpRegen=[];
+  for(let _ci=1+_rpCo;_ci<=_rpNc+_rpCo;_ci++){
+    if((S.session.cfCourts?.[_ci])?.status==='playing')continue;
+    _rpRegen.push(_ci);
+  }
+  if(_rpRegen.length)CF.batchGenerateSuggestions(_rpRegen,null);
   STORE.save('session');renderLive();
   toast(`${gp(idA)?.name||'?'} & ${gp(idB)?.name||'?'} — permanent partnership removed`,'ok');
 }
@@ -2901,6 +2946,15 @@ function cfAddSoftPair(idA,idB){
   S.session.cfSoftPairs.push([idA,idB]);
   STORE.save('session');renderLive();
   toast(`${gp(idA)?.name||'?'} & ${gp(idB)?.name||'?'} — soft partner preference set 🤝`,'ok');
+}
+function cfRemoveSoftPair(idA,idB){
+  if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
+  if(!S.session)return;
+  const pk=(a,b)=>([a,b].sort().join('|'));
+  const key=pk(idA,idB);
+  S.session.cfSoftPairs=(S.session.cfSoftPairs||[]).filter(p=>pk(p[0],p[1])!==key);
+  STORE.save('session');renderLive();
+  toast(`${gp(idA)?.name||'?'} & ${gp(idB)?.name||'?'} — soft preference removed`,'ok');
 }
 // Change 8: schedule pause after current game finishes
 function cfLeaveSoon(id){
@@ -5639,8 +5693,11 @@ const CF={
     const[_a,_b,_c,_d]=group;
     const _splits=[{t1:[_a,_b],t2:[_c,_d]},{t1:[_a,_c],t2:[_b,_d]},{t1:[_a,_d],t2:[_b,_c]}];
     const _splitCarry=g=>g>120?Math.pow((g-120)/80,2)*40:0;
-    // Hard-block: just-lost partners must be on opposite teams whenever possible.
-    // Primary sort key — skill balance is secondary to this constraint.
+    // Hard-block helpers: never-pair and just-lost partners must be on opposite teams.
+    // Applied as primary sort keys so the best valid split is always selected first.
+    const _npMap=S.session?.neverPair||{};
+    const _npPair=(a,b)=>((_npMap[a.id]||[]).includes(b.id)||(_npMap[b.id]||[]).includes(a.id))?1:0;
+    const _splitHasNeverPair=sp=>_npPair(sp.t1[0],sp.t1[1])+_npPair(sp.t2[0],sp.t2[1]);
     const _llMap=S.session?.cfPairLastLost||{};
     const _splitHasJustLost=sp=>{
       const k1=this.pairKey(sp.t1[0].id,sp.t1[1].id);
@@ -5648,7 +5705,10 @@ const CF={
       return (_llMap[k1]?1:0)+(_llMap[k2]?1:0);
     };
     _splits.sort((x,y)=>{
-      // Primary: avoid splits that pair just-lost partners together
+      // Priority 0: never-paired players must not be partners — highest constraint
+      const nx=_splitHasNeverPair(x),ny=_splitHasNeverPair(y);
+      if(nx!==ny)return nx-ny;
+      // Priority 1: avoid splits that pair just-lost partners together
       const lx=_splitHasJustLost(x),ly=_splitHasJustLost(y);
       if(lx!==ly)return lx-ly;
       // Secondary: minimize within-team gap + cross-team imbalance
@@ -5882,6 +5942,9 @@ const CF={
     // Soft penalty removed — split is already chosen to avoid just-lost partners.
     // Locked/perma pair logic may still override; in that case no extra penalty.
     const justLostPen=0;
+    // Never-pair hard penalty: massive score if never-paired players end up as partners.
+    // Split sort already avoids this; this 9999pt penalty catches any override edge cases.
+    const neverPairPen=(_npPair(t1[0],t1[1])+_npPair(t2[0],t2[1]))*9999;
 
     // ── Hot / cold protection (uses flags set by cfRating) ───────────────
     // HOT player protection: if a player is on a hot streak, penalise pairing them
@@ -5947,7 +6010,7 @@ const CF={
         }
       }
     }
-    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+bandPen+rankBandPen,meta,t1,t2,group};
+    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+bandPen+rankBandPen+neverPairPen,meta,t1,t2,group};
   },
 
   /* Generate a suggestion for a court */
@@ -8473,7 +8536,8 @@ function openLockPairModal(){
   const opts=allActiveIds.map(id=>`<option value="${id}">${esc(gp(id)?.name||'?')} (${Math.round(CF.cfRating(id))})</option>`).join('');
   const locked=S.session.cfLockedPairs||[];
   const perm=S.session.cfPermPairs||[];
-  const hasAny=locked.length||perm.length;
+  const soft=S.session.cfSoftPairs||[];
+  const hasAny=locked.length||perm.length||soft.length;
   const lockedHtml=hasAny?`<div style="margin-top:10px"><div style="font-size:.68rem;font-weight:700;color:var(--mu);margin-bottom:4px">ACTIVE PAIR SETTINGS</div>`
     +locked.map(([a,b])=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:.77rem">
       <span>🔒 ${esc(gp(a)?.name||'?')} & ${esc(gp(b)?.name||'?')} <span style="font-size:.65rem;color:var(--mu)">(hard lock)</span></span>
@@ -8481,7 +8545,11 @@ function openLockPairModal(){
     +perm.map(([a,b])=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:.77rem">
       <span>⛓️ ${esc(gp(a)?.name||'?')} & ${esc(gp(b)?.name||'?')} <span style="font-size:.65rem;color:var(--mu)">(permanent)</span></span>
       <button class="btn bd2 sm" style="padding:1px 8px" onclick="cfRemovePermPair('${a}','${b}');closeModal();openLockPairModal()">✕</button></div>`).join('')
+    +soft.map(([a,b])=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:.77rem">
+      <span>🤝 ${esc(gp(a)?.name||'?')} & ${esc(gp(b)?.name||'?')} <span style="font-size:.65rem;color:var(--mu)">(soft pref)</span></span>
+      <button class="btn bd2 sm" style="padding:1px 8px" onclick="cfRemoveSoftPair('${a}','${b}');closeModal();openLockPairModal()">✕</button></div>`).join('')
     +`</div>`:'';
+
   openModal(`<div class="modal-title">🔒 Partner Settings</div>
     <p style="font-size:.74rem;color:var(--mu);margin-bottom:10px;line-height:1.55">Set how two players pair up during this session.</p>
     <label>PLAYER 1</label>
@@ -8499,7 +8567,7 @@ function openLockPairModal(){
       <button class="btn bp" style="flex:1" onclick="_confirmLockPair()">Apply</button>
       <button class="btn bg2" onclick="closeModal()">Cancel</button>
     </div>
-    ${hasAny?`<button class="btn bd2 sm" style="width:100%;margin-top:8px" onclick="cfClearLockedPairs();S.session.cfPermPairs=[];STORE.save('session');renderLive();closeModal()">Clear All Pair Settings</button>`:''}
+    ${hasAny?`<button class="btn bd2 sm" style="width:100%;margin-top:8px" onclick="cfClearLockedPairs();S.session.cfPermPairs=[];S.session.cfSoftPairs=[];STORE.save('session');renderLive();closeModal()">Clear All Pair Settings</button>`:''}
     ${lockedHtml}`);
   // Live hint update when mode dropdown changes
   const mSel=document.getElementById('lp-mode');
