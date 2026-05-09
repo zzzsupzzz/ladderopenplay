@@ -3453,17 +3453,26 @@ function renderSessStd(){
   // Uses session rank ratings (what matchmaking actually uses), NOT ELO
   const allMatches=[...(sess.cfLog||[])];
   const mqMap={};
-  // Helper: get ELO rating for a player in a match (fallback only)
+  // Helper: get match-time session rank for a player (stamped at confirm time).
+  // Falls back to final cfRanks, then 0 if neither available.
+  // sessionRanks order: [t1[0], t1[1], t2[0], t2[1]]
+  function _mRnkAt(m,id){
+    const ids=[...m.t1,...m.t2];
+    const idx=ids.indexOf(id);
+    if(idx>=0&&m.sessionRanks?.[idx]>0)return m.sessionRanks[idx];
+    return sess.cfRanks?.[id]?.rank||0; // fallback to final rank for legacy matches
+  }
+  // Helper: ELO at match time (fallback for non-CF or very old sessions)
   function _mRtg(m,id){
     const ids=[...m.t1,...m.t2];
     const idx=ids.indexOf(id);
     if(idx>=0&&m.sessionRatings?.[idx]!=null)return m.sessionRatings[idx];
     return sess.players.find(p=>p.id===id)?.startRating||1000;
   }
-  // Use session rank (1=best) when available — rank is the primary matchmaking signal
-  const hasCfRanks=!!(sess.cfRanks&&Object.keys(sess.cfRanks).length>0);
-  const totalRanked=hasCfRanks?Object.keys(sess.cfRanks).length:sess.players.length||1;
-  function _mRnk(id){return sess.cfRanks?.[id]?.rank||0;}
+  // Use match-time ranks when any match has them; fall back to ELO for old sessions
+  const hasMatchRanks=allMatches.some(m=>m.sessionRanks?.some(r=>r>0));
+  const hasCfRanks=hasMatchRanks||(sess.cfRanks&&Object.keys(sess.cfRanks).length>0);
+  const totalRanked=(sess.cfRanks?Object.keys(sess.cfRanks).length:null)||sess.players.length||1;
 
   sess.players.forEach(sp=>{
     const myMatches=allMatches.filter(m=>[...m.t1,...m.t2].includes(sp.id));
@@ -3472,7 +3481,6 @@ function renderSessStd(){
     const oppGaps=[];
     let worstPGap=0;
     const partnerSet=new Set();
-    const myRnk=_mRnk(sp.id);
     myMatches.forEach(m=>{
       const inT1=m.t1.includes(sp.id);
       const myTeam=inT1?m.t1:m.t2;
@@ -3480,17 +3488,18 @@ function renderSessStd(){
       const partnerId=myTeam.find(x=>x!==sp.id);
       if(partnerId)partnerSet.add(partnerId);
       if(hasCfRanks){
-        // Rank-based gaps: positive = I'm playing someone weaker (higher rank number)
+        // Rank-based gaps using match-time ranks (accurate) or final ranks (legacy fallback)
+        const myRnk=_mRnkAt(m,sp.id);
         if(partnerId){
-          const pGap=Math.abs(myRnk-_mRnk(partnerId));
-          if(pGap>worstPGap)worstPGap=pGap;
+          const pr=_mRnkAt(m,partnerId);
+          if(myRnk>0&&pr>0){const pGap=Math.abs(myRnk-pr);if(pGap>worstPGap)worstPGap=pGap;}
         }
         oppTeam.forEach(oid=>{
-          const or=_mRnk(oid);
+          const or=_mRnkAt(m,oid);
           if(myRnk>0&&or>0)oppGaps.push(myRnk-or);
         });
       }else{
-        // Fallback to ELO for non-CF or legacy archived sessions
+        // Fallback to ELO for non-CF or legacy archived sessions without any rank data
         const myRtg=_mRtg(m,sp.id);
         if(partnerId){
           const pGap=Math.abs(myRtg-_mRtg(m,partnerId));
@@ -7105,6 +7114,9 @@ const CF={
     if(!S.session.cfLog)S.session.cfLog=[];
     m.matchIdx=S.session.cfLog.length; // 0-based index — kept for backwards compat
     m.sessionRatings=[...m.t1,...m.t2].map(id=>this._rankSr(id));
+    // Stamp match-time session ranks (1=best) so P.GAP/OPP-Δ reflect actual rank gap at game time,
+    // not retrospective final ranks which may have shifted significantly during the session.
+    m.sessionRanks=[...m.t1,...m.t2].map(id=>_sessionRank(id)||0);
     S.session.cfLog.push({...m});
     // Return all 4 to queue. Stagger by 0-12s to break priority ties only.
     // NO short-game boost: we don't want players playing consecutively.
