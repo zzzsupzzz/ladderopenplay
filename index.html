@@ -3445,14 +3445,18 @@ function renderSessStd(){
   // Uses session rank ratings (what matchmaking actually uses), NOT ELO
   const allMatches=[...(sess.cfLog||[])];
   const mqMap={};
-  // Helper: get session rank rating for a player in a match entry
-  // sessionRatings is [t1[0], t1[1], t2[0], t2[1]] stamped at match time
+  // Helper: get ELO rating for a player in a match (fallback only)
   function _mRtg(m,id){
     const ids=[...m.t1,...m.t2];
     const idx=ids.indexOf(id);
     if(idx>=0&&m.sessionRatings?.[idx]!=null)return m.sessionRatings[idx];
     return sess.players.find(p=>p.id===id)?.startRating||1000;
   }
+  // Use session rank (1=best) when available — rank is the primary matchmaking signal
+  const hasCfRanks=!!(sess.cfRanks&&Object.keys(sess.cfRanks).length>0);
+  const totalRanked=hasCfRanks?Object.keys(sess.cfRanks).length:sess.players.length||1;
+  function _mRnk(id){return sess.cfRanks?.[id]?.rank||0;}
+
   sess.players.forEach(sp=>{
     const myMatches=allMatches.filter(m=>[...m.t1,...m.t2].includes(sp.id));
     const mq={avgOpp:null,oppGap:null,worstPGap:null,partners:0,g:myMatches.length};
@@ -3460,34 +3464,58 @@ function renderSessStd(){
     const oppGaps=[];
     let worstPGap=0;
     const partnerSet=new Set();
+    const myRnk=_mRnk(sp.id);
     myMatches.forEach(m=>{
       const inT1=m.t1.includes(sp.id);
       const myTeam=inT1?m.t1:m.t2;
       const oppTeam=inT1?m.t2:m.t1;
-      const myRtg=_mRtg(m,sp.id);
       const partnerId=myTeam.find(x=>x!==sp.id);
       if(partnerId)partnerSet.add(partnerId);
-      if(partnerId){
-        const pGap=Math.abs(myRtg-_mRtg(m,partnerId));
-        if(pGap>worstPGap)worstPGap=pGap;
+      if(hasCfRanks){
+        // Rank-based gaps: positive = I'm playing someone weaker (higher rank number)
+        if(partnerId){
+          const pGap=Math.abs(myRnk-_mRnk(partnerId));
+          if(pGap>worstPGap)worstPGap=pGap;
+        }
+        oppTeam.forEach(oid=>{
+          const or=_mRnk(oid);
+          if(myRnk>0&&or>0)oppGaps.push(myRnk-or);
+        });
+      }else{
+        // Fallback to ELO for non-CF or legacy archived sessions
+        const myRtg=_mRtg(m,sp.id);
+        if(partnerId){
+          const pGap=Math.abs(myRtg-_mRtg(m,partnerId));
+          if(pGap>worstPGap)worstPGap=pGap;
+        }
+        oppTeam.forEach(oid=>{oppGaps.push(_mRtg(m,oid)-myRtg);});
       }
-      oppTeam.forEach(oid=>{oppGaps.push(_mRtg(m,oid)-myRtg);});
     });
-    const avgOppGap=oppGaps.reduce((a,b)=>a+b,0)/oppGaps.length;
-    mq.oppGap=Math.round(avgOppGap);
+    if(oppGaps.length){
+      const avgOppGap=oppGaps.reduce((a,b)=>a+b,0)/oppGaps.length;
+      mq.oppGap=Math.round(avgOppGap);
+    }
     mq.worstPGap=Math.round(worstPGap);
     mq.partners=partnerSet.size;
     mqMap[sp.id]=mq;
   });
 
-  // Compute session rating spread for adaptive thresholds (use session rank ratings)
-  const sessRatings=allMatches.flatMap(m=>(m.sessionRatings||[]).filter(r=>r!=null));
-  const ratingSpread=sessRatings.length>=2?Math.max(...sessRatings)-Math.min(...sessRatings):200;
-  // Thresholds scale with spread: tight pool (200pt) = strict, wide pool (800pt) = lenient
-  const oppGreenMax=Math.round(ratingSpread*0.12);   // ~24 for 200pt, ~96 for 800pt
-  const oppOrangeMax=Math.round(ratingSpread*0.25);   // ~50 for 200pt, ~200 for 800pt
-  const pGapGreenMax=Math.round(ratingSpread*0.35);   // ~70 for 200pt, ~280 for 800pt
-  const pGapOrangeMax=Math.round(ratingSpread*0.55);  // ~110 for 200pt, ~440 for 800pt
+  // Thresholds: rank-based when cfRanks available, ELO-based fallback
+  let oppGreenMax,oppOrangeMax,pGapGreenMax,pGapOrangeMax;
+  if(hasCfRanks){
+    // Scale with field size: for N=27 → green≤4, orange≤8; for N=14 → green≤2, orange≤4
+    oppGreenMax=Math.max(2,Math.round(totalRanked*0.15));
+    oppOrangeMax=Math.max(4,Math.round(totalRanked*0.30));
+    pGapGreenMax=Math.max(2,Math.round(totalRanked*0.12));
+    pGapOrangeMax=Math.max(4,Math.round(totalRanked*0.25));
+  }else{
+    const sessRatings=allMatches.flatMap(m=>(m.sessionRatings||[]).filter(r=>r!=null));
+    const ratingSpread=sessRatings.length>=2?Math.max(...sessRatings)-Math.min(...sessRatings):200;
+    oppGreenMax=Math.round(ratingSpread*0.12);
+    oppOrangeMax=Math.round(ratingSpread*0.25);
+    pGapGreenMax=Math.round(ratingSpread*0.35);
+    pGapOrangeMax=Math.round(ratingSpread*0.55);
+  }
 
   const rows=[...sess.players].sort((a,b)=>{
     if(b.wins!==a.wins)return b.wins-a.wins;
