@@ -2573,9 +2573,14 @@ function beginPlay(){
   _initSessionRanks();
   _invalidateMatchmakingCaches();
   _buildSessionTogetherCache();
-  STORE.save('session');updateHeader();startElapsed();
+  updateHeader();startElapsed();
   CF._confirmAllBusy=false;CF._confirmAllLastTs=0;
-  CF.initQueue();renderLive();renderStandings();renderHistory();
+  // IMPORTANT: initQueue MUST run before STORE.save so cfQueue=[all players] is included in
+  // the Firebase write. If save fires first (queue still empty), other devices see cfQueue=[]
+  // and the queue stays permanently empty for the whole session.
+  CF.initQueue();
+  STORE.save('session');
+  renderLive();renderStandings();renderHistory();
   toast('⚡ Play started!','ok');
 }
 
