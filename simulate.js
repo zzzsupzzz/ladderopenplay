@@ -1644,10 +1644,14 @@ const SIM = (() => {
         <input type="checkbox" id="sim-step"/>
         <label for="sim-step">Step mode (pause after each action)</label>
       </div>
+      <div class="sim-chk">
+        <input type="checkbox" id="sim-nopairlock"/>
+        <label for="sim-nopairlock">No pair lock (free matchmaking, no reserved partner slots)</label>
+      </div>
       <button class="sim-go" id="sim-run-btn" onclick="SIM._uiRun()">▶ Run Full Simulation</button>
-      <button class="sim-go" style="background:#34d399;color:#052e16" onclick="SIM.run14({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">14p / 2c</button>
-      <button class="sim-go" style="background:#38bdf8;color:#0c1a2e" onclick="SIM.run20({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">20p / 3c</button>
-      <button class="sim-go" style="background:#f59e0b;color:#1c0f00" onclick="SIM.run26({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">26p / 4c</button>
+      <button class="sim-go" style="background:#34d399;color:#052e16" onclick="SIM.run14({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,noPairLock:document.getElementById('sim-nopairlock')?.checked??false})">14p / 2c</button>
+      <button class="sim-go" style="background:#38bdf8;color:#0c1a2e" onclick="SIM.run20({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,noPairLock:document.getElementById('sim-nopairlock')?.checked??false})">20p / 3c</button>
+      <button class="sim-go" style="background:#f59e0b;color:#1c0f00" onclick="SIM.run26({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,noPairLock:document.getElementById('sim-nopairlock')?.checked??false})">26p / 4c</button>
       <button class="sim-go" style="background:#a78bfa;color:#1a0540" onclick="SIM.runOrganizer12({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">⛓️ Organizer 14p/2c</button>
       <button class="sim-bug" onclick="SIM.runPermPairCheck()">🔒 Perm Pair Stress Test</button>
       <button class="sim-continue" id="sim-continue-btn" onclick="SIM._continue()" style="display:none;background:#fb923c;color:#111">Continue</button>
@@ -1682,9 +1686,10 @@ const SIM = (() => {
     const rounds = parseInt(document.getElementById('sim-rounds')?.value) || 40;
     const speed = document.getElementById('sim-speed')?.value || 'normal';
     const live = document.getElementById('sim-live')?.checked ?? false;
+    const noPairLock = document.getElementById('sim-nopairlock')?.checked ?? false;
 
     try {
-      await run({ players, courts, rounds, speed, live });
+      await run({ players, courts, rounds, speed, live, noPairLock });
     } finally {
       if (btn) btn.disabled = false;
       if (stopBtn) stopBtn.disabled = true;
