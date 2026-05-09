@@ -2868,6 +2868,15 @@ function cfAddPermPair(idA,idB){
     const splitTeam=aIn&&bIn&&(t1s.has(idA)!==t1s.has(idB));
     if(aIn!==bIn||splitTeam){S.session.cfSuggestions[Number(cs)]=null;needRegen.push(Number(cs));}
   }
+  // Also regenerate courts that are currently "Waiting for players" (null suggestion, not playing).
+  // The new pair changes the eligible pool — courts already waiting were never regenerated after
+  // the pair was set because the loop above skips null suggestions.
+  const _nc=S.session.courts||1,_co=S.session.courtOffset||0;
+  for(let _ci=1+_co;_ci<=_nc+_co;_ci++){
+    if(needRegen.includes(_ci))continue; // already queued
+    if((S.session.cfCourts?.[_ci])?.status==='playing')continue; // court is busy
+    if(!S.session.cfSuggestions?.[_ci])needRegen.push(_ci); // waiting → trigger regen
+  }
   if(needRegen.length)CF.batchGenerateSuggestions(needRegen,null);
   STORE.save('session');renderLive();
   toast(`${gp(idA)?.name||'?'} & ${gp(idB)?.name||'?'} — permanent partners ⛓️`,'ok');
