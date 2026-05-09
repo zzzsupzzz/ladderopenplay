@@ -1716,10 +1716,18 @@ function bandBadge(id){
 }
 
 function _rankBadge(id){
-  // Organiser-only rank number badge
+  // Session rank badge — primary signal for organiser
   const rank=_sessionRank(id);
   if(!rank)return'';
-  return `<span style="font-size:.58rem;font-weight:800;padding:1px 5px;border-radius:8px;background:rgba(148,163,184,.15);color:var(--mu);border:1px solid rgba(148,163,184,.25);margin-left:2px">#${rank}</span>`;
+  const n=_totalRanked()||20;
+  // Top third = gold, middle third = cyan, bottom third = muted
+  const pct=rank/n;
+  const [bg,col,bdr]=pct<=0.33
+    ?['rgba(251,191,36,.18)','#fbbf24','rgba(251,191,36,.45)']
+    :pct<=0.66
+    ?['rgba(34,211,238,.13)','var(--cy)','rgba(34,211,238,.35)']
+    :['rgba(148,163,184,.13)','var(--mu)','rgba(148,163,184,.30)'];
+  return `<span style="font-size:.72rem;font-weight:900;padding:2px 7px;border-radius:8px;background:${bg};color:${col};border:1px solid ${bdr};margin-left:4px">#${rank}</span>`;
 }
 
 // ── Matchmaking thresholds ────────────────────────────────────────────────────
@@ -4631,6 +4639,7 @@ function doEndSession(){
   showCfm(`End <strong>${esc(S.session.name)}</strong>?<br/><span style="font-size:.74rem;color:var(--mu)">Ratings saved to database.</span>`,'🏁 End Session','bp',()=>{
     const arch={id:S.session.id,name:S.session.name,date:S.session.date,cfMode:true,
       players:S.session.players.map(sp=>{const p=gp(sp.id)||{};return{id:sp.id,name:sp.name||p.name||'?',tag:sp.tag||p.tag||'',sRating:sp.sRating,startRating:sp.startRating,wins:sp.wins,losses:sp.losses,ties:sp.ties,matchesPlayed:sp.matchesPlayed,ptsFor:sp.ptsFor,ptsAgainst:sp.ptsAgainst};}),
+      cfRanks:JSON.parse(JSON.stringify(S.session.cfRanks||{})),
       cfLog:JSON.parse(JSON.stringify(S.session.cfLog||[]))};
     S.archive.unshift(arch);
     const topN=arch.players.length>=6?3:1; // show 1 winner for small sessions
@@ -7775,18 +7784,25 @@ const CF={
 
   _renderSug(courtNum,sug){
     const gn=id=>{const p=gp(id);return p?esc(p.name)+(p.tag?` <span class="ptag">${esc(p.tag)}</span>`:''):'?';};
-    const gr=id=>{const sp=gsp(id);return sp?.isNR?'<span class="nr-badge">NR</span>':`${Math.round(this.cfRating(id))}`;};
     const meta=sug.meta||{};
     // ELO ratings — used only for win probability (ELO formula requires raw ratings).
     const t1r0=this.cfRating(sug.t1[0]),t1r1=this.cfRating(sug.t1[1]);
     const t2r0=this.cfRating(sug.t2[0]),t2r1=this.cfRating(sug.t2[1]);
     const t1Avg=Math.round((t1r0+t1r1)/2);
     const t2Avg=Math.round((t2r0+t2r1)/2);
-    // Session rank SR — used for partner gap and avoid chip (reflects tonight's performance).
+    // Session ranks (1=best) — primary signal for quality chips and team display.
+    const t1rk0=_sessionRank(sug.t1[0])||0,t1rk1=_sessionRank(sug.t1[1])||0;
+    const t2rk0=_sessionRank(sug.t2[0])||0,t2rk1=_sessionRank(sug.t2[1])||0;
+    const hasRanks=t1rk0>0&&t1rk1>0&&t2rk0>0&&t2rk1>0;
+    const _N=_totalRanked()||20;
+    // Rank-based partner gap (rank positions apart) — used for quality chips.
+    const t1pgapRk=Math.abs(t1rk0-t1rk1);
+    const t2pgapRk=Math.abs(t2rk0-t2rk1);
+    // SR-based gaps kept for legacy pgap chips (already rank-converted via _rankSr).
     const t1sr0=this._rankSr(sug.t1[0]),t1sr1=this._rankSr(sug.t1[1]);
     const t2sr0=this._rankSr(sug.t2[0]),t2sr1=this._rankSr(sug.t2[1]);
-    const t1pgap=Math.round(Math.abs(t1sr0-t1sr1));
-    const t2pgap=Math.round(Math.abs(t2sr0-t2sr1));
+    const t1pgap=hasRanks?t1pgapRk*Math.round(500/Math.max(_N-1,1)):Math.round(Math.abs(t1sr0-t1sr1));
+    const t2pgap=hasRanks?t2pgapRk*Math.round(500/Math.max(_N-1,1)):Math.round(Math.abs(t2sr0-t2sr1));
     const staleMin=sug.ts?Math.floor((Date.now()-sug.ts)/60000):0;
     const staleWarn=staleMin>=3;
     // Cooldown status chip — show how fresh each pair is, or how close to cooldown
@@ -7808,28 +7824,34 @@ const CF={
     const t2CoolChip=cooldownChip(sug.t2,'P2');
 
     // ── Match quality indicator (primary) ──────────────────────────────
-    // Derived from within-team and team-average gaps — not from ELO probability.
-    // Probability answers "who will win"; quality answers "is this a good game experience".
-    // A 1200+800 vs 1000+1000 match shows 50% probability but is a 🔴 experience.
-    const maxPartnerGap=Math.max(t1pgap,t2pgap);
-    const teamGap=meta.gap;
+    // Uses session rank positions — rank gap is the true measure of mismatch.
+    // Thresholds scale with field size (% of N) so 14p and 26p sessions feel equivalent.
+    const maxPartnerGapRk=hasRanks?Math.max(t1pgapRk,t2pgapRk):null;
+    const teamRkGap=hasRanks?Math.abs((t1rk0+t1rk1)/2-(t2rk0+t2rk1)/2):null;
+    // Avoid: partner >35% of N apart OR teams avg >25% of N apart
+    // Slight mismatch: partner >20% of N apart OR teams >15% of N apart
+    const _avoidPgap=Math.max(2,_N*0.35);
+    const _avoidTeam=Math.max(2,_N*0.25);
+    const _warnPgap=Math.max(2,_N*0.20);
+    const _warnTeam=Math.max(1,_N*0.15);
     let qualityLabel,qualityColor,qualityTitle;
-    // Build form context string for tooltip — shows today's effectiveElo adjustments
-    // so organiser knows whether a large gap is raw skill or being narrowed by session form
+    // Build form context string for tooltip
     const _formCtx=[...sug.t1,...sug.t2].map(id=>{
       const f=gsp(id)?._sessForm;const nm=gp(id)?.name?.split(' ')[0]||'?';
       return f&&f!==0?`${nm}${f>0?'+':''}${f}`:null;
     }).filter(Boolean).join(', ');
-    const _formNote=_formCtx?` · Forms today: ${_formCtx}. Ratings shown are session-adjusted.`:'';
-    if(maxPartnerGap>=220||teamGap>=180){
+    const _formNote=_formCtx?` · Forms today: ${_formCtx}.`:'';
+    const _pgapDesc=maxPartnerGapRk!=null?`partner gap ${maxPartnerGapRk} ranks`:`partner gap ${Math.max(t1pgap,t2pgap)}pts`;
+    const _tgapDesc=teamRkGap!=null?`team gap ${Math.round(teamRkGap)} ranks`:`team gap ${meta.gap}pts`;
+    if((maxPartnerGapRk!=null&&maxPartnerGapRk>=_avoidPgap)||(teamRkGap!=null&&teamRkGap>=_avoidTeam)){
       qualityLabel='🔴 Avoid';qualityColor='var(--re)';
-      qualityTitle=`Poor match — partner gap ${maxPartnerGap}pts, team gap ${teamGap}pts. Consider reshuffling.${_formNote}`;
-    }else if(maxPartnerGap>=150||teamGap>=100){
+      qualityTitle=`Poor match — ${_pgapDesc}, ${_tgapDesc}. Consider reshuffling.${_formNote}`;
+    }else if((maxPartnerGapRk!=null&&maxPartnerGapRk>=_warnPgap)||(teamRkGap!=null&&teamRkGap>=_warnTeam)){
       qualityLabel='🟡 Slight mismatch';qualityColor='var(--go)';
-      qualityTitle=`Mild imbalance — partner gap ${maxPartnerGap}pts, team gap ${teamGap}pts.${_formNote}`;
+      qualityTitle=`Mild imbalance — ${_pgapDesc}, ${_tgapDesc}.${_formNote}`;
     }else{
       qualityLabel='🟢 Clean';qualityColor='var(--gr)';
-      qualityTitle=`Good match — partner gap ${maxPartnerGap}pts, team gap ${teamGap}pts.${_formNote}`;
+      qualityTitle=`Good match — ${_pgapDesc}, ${_tgapDesc}.${_formNote}`;
     }
     // Debug breakdown appended to quality chip tooltip — visible on hover, not cluttering UI
     const _dbg=meta?._dbg;
@@ -7911,14 +7933,19 @@ const CF={
       :meta.constraintReason==='playtime-catch-up'?`<span class="cf-chip cf-chip-info" title="Includes player(s) behind in total games played this session.">⚖️ Catch-up</span>`
       :'',
     ].filter(Boolean).join('');
-    // Team tile: show avg only publicly. Partner gap in tooltip — not broadcast to bystanders.
-    const pTeam=(ids,avg,pgap)=>`<div style="background:var(--s2);border:1px solid ${pgap>=220?'rgba(248,113,113,.5)':pgap>=180?'rgba(251,147,60,.4)':pgap>=150?'rgba(251,191,36,.3)':'var(--bd)'};border-radius:var(--ra);padding:9px;text-align:center" title="Tap a player name to replace them">
-      ${ids.map(id=>`<span onclick="_sugPickerToggle(event,'${courtNum}','${id}')" style="font-weight:600;cursor:pointer;padding:2px 5px;border-radius:6px;transition:background .12s" class="sug-player-btn" data-id="${id}" title="Tap to replace">${gn(id)}</span>${S.session?.cfRanks?(bandBadge(id)+_rankBadge(id)):''}`).join(' <span style="color:var(--m2)"> &amp; </span> ')}
-      <div style="font-size:.63rem;color:var(--m2);margin-top:3px">avg ${avg}</div></div>`;
+    // Team tile: rank-first display. "avg ELO" demoted to tooltip; rank shown prominently.
+    const pTeam=(ids,avg,pgap,rkA,rkB)=>{
+      const _pgapBdr=pgap>=220?'rgba(248,113,113,.5)':pgap>=180?'rgba(251,147,60,.4)':pgap>=150?'rgba(251,191,36,.3)':'var(--bd)';
+      const avgRk=rkA>0&&rkB>0?`Ranks #${rkA} · #${rkB}`:`avg ${avg}`;
+      const _ttip=rkA>0&&rkB>0?`Ranks #${rkA} &amp; #${rkB} · avg ELO ${avg} · tap name to replace`:`avg ELO ${avg} · tap name to replace`;
+      return`<div style="background:var(--s2);border:1px solid ${_pgapBdr};border-radius:var(--ra);padding:9px;text-align:center" title="${_ttip}">
+      ${ids.map(id=>`<span onclick="_sugPickerToggle(event,'${courtNum}','${id}')" style="font-weight:600;cursor:pointer;padding:2px 5px;border-radius:6px;transition:background .12s" class="sug-player-btn" data-id="${id}" title="Tap to replace">${gn(id)}</span>${S.session?.cfRanks?_rankBadge(id):''}`).join(' <span style="color:var(--m2)"> &amp; </span> ')}
+      <div style="font-size:.65rem;color:var(--cy);margin-top:4px;font-weight:700">${avgRk}</div></div>`;
+    };
     return `<div class="cf-suggest" data-court="${courtNum}">
       <div class="cf-suggest-hd">🏓 COURT ${(S.session?.courtOffset||0)+courtNum} — READY</div>
       <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:9px">
-        ${pTeam(sug.t1,t1Avg,t1pgap)}<div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--m2)">VS</div>${pTeam(sug.t2,t2Avg,t2pgap)}
+        ${pTeam(sug.t1,t1Avg,t1pgap,t1rk0,t1rk1)}<div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--m2)">VS</div>${pTeam(sug.t2,t2Avg,t2pgap,t2rk0,t2rk1)}
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:9px">${chips}</div>
       <div class="cf-ac-wrap" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;min-height:22px">
@@ -7936,6 +7963,8 @@ const CF={
   _renderActiveCourt(courtNum,court){
     const m=court.match;
     const gr=id=>Math.round(this.cfRating(id));
+    // Show rank badge prominently; ELO kept for avg calculation only
+    const grk=id=>{const r=_sessionRank(id);return r?`<span style="font-size:.72rem;font-weight:900;color:var(--cy)">#${r}</span>`:`<span style="font-size:.68rem;color:var(--mu)">${Math.round(this.cfRating(id))}</span>`;};
     // Show tag in live court so Eric VN vs Eric TH are distinguishable
     // FIX: esc() applied to name only — not the span wrapper (otherwise tag shows as escaped text)
     const gn=id=>{const p=gp(id);return p?(esc(p.name)+(p.tag?` <span style="font-size:.68rem;background:rgba(251,147,60,.18);color:var(--or);border-radius:4px;padding:1px 4px;font-weight:700">${esc(p.tag)}</span>`:'')):esc('?');};
@@ -7947,6 +7976,9 @@ const CF={
         :`<button class="btn bg2 sm" style="padding:2px 6px;font-size:.6rem" onclick="cfSchedulePauseAfter('${id}')" title="Pause after this game ends">⏸ After</button>`;
     };
     const t1Avg=Math.round((gr(m.t1[0])+gr(m.t1[1]))/2),t2Avg=Math.round((gr(m.t2[0])+gr(m.t2[1]))/2);
+    const t1rk=(_sessionRank(m.t1[0])||0)+(_sessionRank(m.t1[1])||0);
+    const t2rk=(_sessionRank(m.t2[0])||0)+(_sessionRank(m.t2[1])||0);
+    const hasRk=t1rk>0&&t2rk>0;
     const extSec=(S.session.extendedMin||16)*60;
     const ext=m.extended;
     const extTag=ext?`<span style="font-size:.62rem;font-weight:700;color:var(--or);background:rgba(251,147,60,.12);border:1px solid rgba(251,147,60,.3);border-radius:5px;padding:1px 5px">EXTENDED</span>`:'';
@@ -7961,9 +7993,9 @@ const CF={
       </div>
       <div class="cbody">
         <div class="teams">
-          <div class="team">${m.t1.map(id=>`<div style="display:flex;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:.82rem">${gn(id)} <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span>${pauseBtn(id)}</div>`).join('')}<div class="team-avg">Avg ${t1Avg}</div></div>
+          <div class="team">${m.t1.map(id=>`<div style="display:flex;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:.82rem">${gn(id)} ${grk(id)}${pauseBtn(id)}</div>`).join('')}<div class="team-avg">${hasRk?`Ranks #${_sessionRank(m.t1[0])} · #${_sessionRank(m.t1[1])}`:`Avg ${t1Avg}`}</div></div>
           <div class="vs-lbl">VS</div>
-          <div class="team">${m.t2.map(id=>`<div style="display:flex;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:.82rem">${gn(id)} <span style="color:var(--mu);font-size:.7rem">${gr(id)}</span>${pauseBtn(id)}</div>`).join('')}<div class="team-avg">Avg ${t2Avg}</div></div>
+          <div class="team">${m.t2.map(id=>`<div style="display:flex;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:.82rem">${gn(id)} ${grk(id)}${pauseBtn(id)}</div>`).join('')}<div class="team-avg">${hasRk?`Ranks #${_sessionRank(m.t2[0])} · #${_sessionRank(m.t2[1])}`:`Avg ${t2Avg}`}</div></div>
         </div>
         <div class="srow" style="margin-top:10px">
           <input class="sinp inp" id="cf-s1-${courtNum}" type="number" inputmode="numeric" pattern="[0-9]*" min="0" max="99" placeholder="0"/>
