@@ -315,7 +315,11 @@ const SIM = (() => {
     const counts = settled.map(sp => (sp.matchesPlayed || 0) + (onCourt.has(sp.id) ? 1 : 0));
     const min = Math.min(...counts);
     const max = Math.max(...counts);
-    if (max - min > 2) {
+    // With staggered court finishes (80/20 model), queue bursts on 3–4 courts can transiently
+    // leave one player 3 games behind before the hunger boost recovers them.
+    // Allow gap = max(2, nc-1): 1–2 courts → ≤2, 3 courts → ≤2, 4 courts → ≤3.
+    const maxAllowedGap = Math.max(2, nc - 1);
+    if (max - min > maxAllowedGap) {
       const behind = settled.filter(sp => (sp.matchesPlayed || 0) === min).map(sp => sp.name);
       const ahead = settled.filter(sp => (sp.matchesPlayed || 0) === max).map(sp => sp.name);
       err(`Play count gap: ${max - min} games (min=${min}: ${behind.join(',')} | max=${max}: ${ahead.join(',')})`);
@@ -375,6 +379,36 @@ const SIM = (() => {
       _disruptedAt = {};
       _disruptedType = {};
 
+      // Wait-time tracking: completed matches elapsed between a player's last game ending
+      // and their next game starting. Measures queue fairness under staggered court finishes.
+      const _lastGameEndMc = {}; // player id → cfMatchCount when they last finished
+      const _waitGaps = {};      // player id → array of completed-match waits
+
+      // Per-court tick counters — each court independently counts down before submitting.
+      // 80%: each court gets a fresh 2–5 tick game length (staggered finish).
+      // 20%: new court syncs to a currently-playing court's remaining ticks (simultaneous finish).
+      const courtTicks = {};
+      for (let c = 1; c <= courts; c++) courtTicks[c] = 0;
+      function assignGameLen(courtId) {
+        if (Math.random() < 0.20) {
+          const candidates = [];
+          for (let c2 = 1; c2 <= courts; c2++) {
+            if (c2 !== courtId && courtTicks[c2] > 0) candidates.push(c2);
+          }
+          if (candidates.length > 0) {
+            const pick = candidates[Math.floor(Math.random() * candidates.length)];
+            return courtTicks[pick]; // finish at the same tick as that court
+          }
+        }
+        return 2 + Math.floor(Math.random() * 4); // 2, 3, 4, or 5 ticks (independent)
+      }
+
+      // Proportional mid-session event rounds (scale with total rounds)
+      const _pauseRound     = Math.max(8,  Math.round(rounds * 0.35));
+      const _resumeRound    = Math.max(10, Math.round(rounds * 0.45));
+      const _leaveSoonRound = Math.max(12, Math.round(rounds * 0.55));
+      const _midRmRound     = Math.max(14, Math.round(rounds * 0.70));
+
       for (let r = 0; r < rounds; r++) {
         if (_aborted) { log('ABORTED by user'); break; }
         const _roundT0 = performance.now();
@@ -396,9 +430,21 @@ const SIM = (() => {
         for (let c = 1; c <= S.session.courts; c++) {
           if (_aborted) break;
           if (S.session.cfSuggestions[c]) {
+            // Record wait gap (completed matches since each player's last game ended)
+            const _sug = S.session.cfSuggestions[c];
+            if (_sug) {
+              const _mc = S.session.cfMatchCount || 0;
+              [...(_sug.t1||[]), ...(_sug.t2||[])].forEach(id => {
+                if (_lastGameEndMc[id] !== undefined) {
+                  if (!_waitGaps[id]) _waitGaps[id] = [];
+                  _waitGaps[id].push(_mc - _lastGameEndMc[id]);
+                }
+              });
+            }
             CF.confirmSuggestion(c);
+            courtTicks[c] = assignGameLen(c);
             confirmedCount++;
-            log(`Round ${r+1}: confirmed court ${c}`);
+            log(`Round ${r+1}: confirmed court ${c} (ticks=${courtTicks[c]})`);
             verifyNoDuplicates();
             if (doRender) render();
             if (live) await STORE.save();
@@ -421,11 +467,20 @@ const SIM = (() => {
 
         if (_aborted) break;
 
-        // Submit scores one by one
+        // Submit scores one by one (courts with ticks > 0 are still mid-game)
         for (let c = 1; c <= S.session.courts; c++) {
           if (_aborted) break;
           const ct = S.session.cfCourts?.[c];
           if (ct?.status === 'playing' && ct.match) {
+            if (courtTicks[c] > 0) { courtTicks[c]--; continue; }
+            // Record game-end match count for each player leaving court
+            const _ct = S.session.cfCourts?.[c];
+            if (_ct?.match) {
+              const _mc = S.session.cfMatchCount || 0;
+              [...(_ct.match.t1||[]), ...(_ct.match.t2||[])].forEach(id => {
+                _lastGameEndMc[id] = _mc + 1; // +1 because this match is about to be counted
+              });
+            }
             const [s1, s2] = randomScore();
             const _submitT0 = performance.now();
             CF._doSubmitScore(c, s1, s2);
@@ -470,7 +525,7 @@ const SIM = (() => {
           await delay(ms);
         }
 
-        if (r === 10 && !pauseDone) {
+        if (r === _pauseRound && !pauseDone) {
           const qPlayer = S.session.cfQueue[0];
           if (qPlayer) {
             cfPausePlayer(qPlayer.id);
@@ -482,7 +537,7 @@ const SIM = (() => {
           }
         }
 
-        if (r === 13 && pauseDone) {
+        if (r === _resumeRound && pauseDone) {
           const pEntry = (S.session.cfPaused || []).find(q => q.id === pauseDone);
           if (pEntry) {
             cfResumePlayer(pauseDone);
@@ -496,7 +551,7 @@ const SIM = (() => {
           pauseDone = false;
         }
 
-        if (r === 15 && !leaveSoonDone) {
+        if (r === _leaveSoonRound && !leaveSoonDone) {
           const qPlayer = S.session.cfQueue[1] || S.session.cfQueue[0];
           if (qPlayer) {
             cfLeaveSoon(qPlayer.id);
@@ -508,7 +563,7 @@ const SIM = (() => {
           }
         }
 
-        if (r === 25 && !midRemoveDone) {
+        if (r === _midRmRound && !midRemoveDone) {
           const removable = S.session.activePlayers.find(id => {
             const onCourt = Object.values(S.session.cfCourts || {}).some(
               ct => ct?.status === 'playing' && ct.match && [...ct.match.t1, ...ct.match.t2].includes(id)
@@ -566,6 +621,22 @@ const SIM = (() => {
         const totalDbGames = S.db.reduce((sum, p) => sum + (p.gamesPlayed || 0), 0);
         assert(totalDbGames > 0, 'Bug2 regression: total gamesPlayed should be > 0 after session');
         log(`Bug 2 check: totalDbGames=${totalDbGames}`);
+
+        // ── Wait-time report ──────────────────────────────────────────────
+        log('--- Wait Report (completed matches between games) ---');
+        const waitEntries = Object.entries(_waitGaps).map(([id, gaps]) => {
+          const avg = gaps.length ? (gaps.reduce((a,b)=>a+b,0)/gaps.length).toFixed(1) : '–';
+          const max = gaps.length ? Math.max(...gaps) : 0;
+          return { id, name: gp(id)?.name||id, avg: parseFloat(avg)||0, max, gaps };
+        }).sort((a,b) => b.max - a.max);
+        const longWaitThreshold = Math.max(3, courts * 2); // flag waits > 2 full rotations
+        waitEntries.forEach(({ name, avg, max, gaps }) => {
+          const flag = max >= longWaitThreshold ? ' ⚠️ LONG WAIT' : '';
+          log(`  ${name}: avg ${avg} | max ${max} matched waited${flag} (${gaps.length} gap(s) recorded)`);
+        });
+        const longWaiters = waitEntries.filter(e => e.max >= longWaitThreshold);
+        if (longWaiters.length === 0) log('  ✅ No long waits detected');
+        else log(`  ⚠️ ${longWaiters.length} player(s) had max wait ≥ ${longWaitThreshold} completed matches`);
 
         log('--- Player Stats ---');
         const sorted = [...arch.players].sort((a,b) => (b.sRating||0) - (a.sRating||0));
@@ -926,14 +997,27 @@ const SIM = (() => {
       let permPauseDone = false, permPauseId = null, permResumedDone = false, permRemovedDone = false;
       let lateIds = [];
 
+      // Wait-time tracking (completed matches between games)
+      const _org12WaitEndMc = {};
+      const _org12WaitGaps = {};
+
       // ── Main loop ──────────────────────────────────────────────────────────
       // courtGameLen[c]: ticks remaining before court c finishes its current game.
       // Round 1 gets gameLen=0 (both courts finish simultaneously — organizer confirms all at once).
-      // After that each court gets 1–2 tick stagger, so they rarely finish together.
+      // After that: 80% each court gets 2–5 independent ticks; 20% syncs to the other court's
+      // remaining ticks, causing both to finish simultaneously (realistic busy-session bursts).
       const courtGameLen = { 1: 0, 2: 0 };
+      function _assignCourtLen(courtId) {
+        if (Math.random() < 0.20) {
+          // Sync: match a currently-playing court's remaining ticks
+          const other = courtId === 1 ? 2 : 1;
+          if (courtGameLen[other] > 0) return courtGameLen[other];
+        }
+        return 2 + Math.floor(Math.random() * 4); // 2, 3, 4, or 5 ticks
+      }
       let firstRoundDone = false;
       const TARGET_MATCHES = 54; // bumped to ensure all late-arrival scenarios complete
-      const MAX_TICKS = 90;
+      const MAX_TICKS = 200; // 200 ticks: avg 3.5 ticks/game × 54 matches / 2 courts ≈ 95 ticks needed
 
       for (let tick = 0; tick < MAX_TICKS && S.session.cfMatchCount < TARGET_MATCHES && !_aborted; tick++) {
 
@@ -943,6 +1027,11 @@ const SIM = (() => {
           const ct = S.session.cfCourts?.[c];
           if (ct?.status !== 'playing' || !ct.match) continue;
           if (courtGameLen[c] > 0) { courtGameLen[c]--; continue; }
+          // Record game-end for wait tracking
+          const _mcNow = S.session.cfMatchCount || 0;
+          [...(ct.match.t1||[]), ...(ct.match.t2||[])].forEach(id => {
+            _org12WaitEndMc[id] = _mcNow + 1;
+          });
           const [s1, s2] = randomScore();
           CF._doSubmitScore(c, s1, s2);
           const mc = S.session.cfMatchCount;
@@ -1171,12 +1260,21 @@ const SIM = (() => {
         // ── STEP 6: Confirm pending suggestions ─────────────────────────────
         for (let c = 1; c <= 2; c++) {
           if (_aborted || !S.session.cfSuggestions[c]) continue;
+          // Record wait gaps for players about to start
+          const _sug6 = S.session.cfSuggestions[c];
+          const _mc6 = S.session.cfMatchCount || 0;
+          [...(_sug6.t1||[]), ...(_sug6.t2||[])].forEach(id => {
+            if (_org12WaitEndMc[id] !== undefined) {
+              if (!_org12WaitGaps[id]) _org12WaitGaps[id] = [];
+              _org12WaitGaps[id].push(_mc6 - _org12WaitEndMc[id]);
+            }
+          });
           CF.confirmSuggestion(c);
           snapCourt(c, S.session.cfMatchCount);
           verifyNoDuplicates();
           // Round 1: both courts start simultaneously (gameLen=0 → submit next tick).
-          // All subsequent rounds: 1–2 tick stagger so courts finish independently.
-          courtGameLen[c] = firstRoundDone ? (1 + Math.floor(Math.random() * 2)) : 0;
+          // Subsequent rounds: 80% → 2–5 independent ticks; 20% → sync with other court.
+          courtGameLen[c] = firstRoundDone ? _assignCourtLen(c) : 0;
           if (doRender) render();
           if (live) await STORE.save();
           await delay(ms);
@@ -1278,6 +1376,21 @@ const SIM = (() => {
       }
 
       log('');
+      log('WAIT REPORT (completed matches between games):');
+      const _org12WaitEntries = Object.entries(_org12WaitGaps).map(([id, gaps]) => {
+        const avg = gaps.length ? (gaps.reduce((a,b)=>a+b,0)/gaps.length).toFixed(1) : '–';
+        const max = gaps.length ? Math.max(...gaps) : 0;
+        return { id, name: gp(id)?.name||id, avg: parseFloat(avg)||0, max, gaps };
+      }).sort((a,b) => b.max - a.max);
+      _org12WaitEntries.forEach(({ name, avg, max, gaps }) => {
+        const flag = max >= 4 ? ' ⚠️ LONG WAIT' : '';
+        log(`  ${(name+'          ').slice(0,10)} avg=${avg} max=${max} matches waited${flag}`);
+      });
+      const _org12LongWaiters = _org12WaitEntries.filter(e => e.max >= 4);
+      if (_org12LongWaiters.length === 0) log('  ✅ No long waits (all players waited ≤3 completed matches)');
+      else log(`  ⚠️ ${_org12LongWaiters.length} player(s) waited 4+ completed matches consecutively`);
+
+      log('');
       log('PERMANENT PARTNER RESULTS:');
       if (permA && permB) {
         const pAN=gp(permA)?.name||'A', pBN=gp(permB)?.name||'B';
@@ -1327,13 +1440,16 @@ const SIM = (() => {
   // Late arrival joins at round ~30% = ~60 min into a 3-hour session.
   // Usage: SIM.run14()  SIM.run20()  SIM.run26()
   function run14(opts = {}) {
-    return run({ players: 14, courts: 2, rounds: 20, speed: 'fast', ...opts });
+    // rounds=70 ticks: avg 3.5 ticks/game → ~10 games/court, ~20 total (2c)
+    return run({ players: 14, courts: 2, rounds: 70, speed: 'fast', ...opts });
   }
   function run20(opts = {}) {
-    return run({ players: 20, courts: 3, rounds: 20, speed: 'fast', ...opts });
+    // rounds=70 ticks: avg 3.5 ticks/game → ~10 games/court, ~30 total (3c)
+    return run({ players: 20, courts: 3, rounds: 70, speed: 'fast', ...opts });
   }
   function run26(opts = {}) {
-    return run({ players: 26, courts: 4, rounds: 20, speed: 'fast', ...opts });
+    // rounds=70 ticks: avg 3.5 ticks/game → ~10 games/court, ~40 total (4c)
+    return run({ players: 26, courts: 4, rounds: 70, speed: 'fast', ...opts });
   }
 
   // ── Permanent pair stress test ──────────────────────────────────────────────
