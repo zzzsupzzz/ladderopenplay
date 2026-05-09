@@ -1474,19 +1474,21 @@ const SIM = (() => {
 
   // ── Convenience sims: fixed player/court combos ─────────────────────────────
   // Each runs the generic run() at the correct ratio (6-7 players/court).
+  // Max total players INCLUDING the late arrival = target count.
+  // Start with (target-1) so that when 1 late arrival joins, total = target exactly.
   // Late arrival joins at round ~30% = ~60 min into a 3-hour session.
   // Usage: SIM.run14()  SIM.run20()  SIM.run26()
   function run14(opts = {}) {
-    // rounds=70 ticks: avg 3.5 ticks/game → ~10 games/court, ~20 total (2c)
-    return run({ players: 14, courts: 2, rounds: 70, speed: 'fast', ...opts });
+    // 13 start + 1 late arrival = 14 total max
+    return run({ players: 13, courts: 2, rounds: 70, speed: 'fast', ...opts });
   }
   function run20(opts = {}) {
-    // rounds=70 ticks: avg 3.5 ticks/game → ~10 games/court, ~30 total (3c)
-    return run({ players: 20, courts: 3, rounds: 70, speed: 'fast', ...opts });
+    // 19 start + 1 late arrival = 20 total max
+    return run({ players: 19, courts: 3, rounds: 70, speed: 'fast', ...opts });
   }
   function run26(opts = {}) {
-    // rounds=70 ticks: avg 3.5 ticks/game → ~10 games/court, ~40 total (4c)
-    return run({ players: 26, courts: 4, rounds: 70, speed: 'fast', ...opts });
+    // 25 start + 1 late arrival = 26 total max
+    return run({ players: 25, courts: 4, rounds: 70, speed: 'fast', ...opts });
   }
 
   // ── No-pair-lock variants: same as above but cfPendingPairs cleared each round ──
