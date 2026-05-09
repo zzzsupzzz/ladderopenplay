@@ -1696,6 +1696,44 @@ function _totalRanked(){
   return _totalRankedCache;
 }
 
+// ── Session phase (elapsed time) ─────────────────────────────────────────────
+// Phase 1: 0–60 min  — ranks are noisy, wider tolerance
+// Phase 2: 60–120 min — ranks settling, moderate tolerance
+// Phase 3: 120+ min  — ranks reliable, tightest tolerance
+function _sessionPhase(){
+  if(!S.session?.sessionStart)return 1;
+  const min=(Date.now()-S.session.sessionStart)/60000;
+  return min<60?1:min<120?2:3;
+}
+
+// ── Partner rank-gap caps (indexed by phase → court-count bucket) ─────────────
+// Base cap: starting maximum partner gap as % of N
+// Ceiling: absolute maximum even after full wait relaxation, per phase
+// Both tighten as session matures — ranks become more trustworthy over time.
+const _PARTNER_GAP_BASE={
+  1:{2:0.50,3:0.45,4:0.40},
+  2:{2:0.40,3:0.35,4:0.30},
+  3:{2:0.32,3:0.26,4:0.20}
+};
+const _PARTNER_GAP_CEIL={
+  1:{2:0.58,3:0.55,4:0.50},
+  2:{2:0.46,3:0.40,4:0.36},
+  3:{2:0.38,3:0.30,4:0.24}
+};
+// Compute effective max partner gap for current context.
+// waitMatches: how many match confirmations this player missed while waiting.
+// Widens by 8% of N per 2 missed matches, capped at the phase+court ceiling.
+// Floor of 5 prevents deadlock in thin queues.
+function _maxPartnerGap(n,nc,waitMatches){
+  const phase=_sessionPhase();
+  const key=nc<=2?2:nc<=3?3:4;
+  const base=Math.max(5,Math.ceil(n*(_PARTNER_GAP_BASE[phase]?.[key]||0.40)));
+  const ceil=Math.max(5,Math.ceil(n*(_PARTNER_GAP_CEIL[phase]?.[key]||0.55)));
+  const relaxSteps=Math.floor(waitMatches/2);
+  const relax=Math.ceil(n*0.08)*relaxSteps;
+  return Math.min(ceil,base+relax);
+}
+
 function _bandFromRank(rank){
   // Derive A/B/C/D from rank quartile — updates live as ranks change
   const n=_totalRanked();
@@ -1740,47 +1778,37 @@ function _ranksCompatible(t1ids,t2ids,waitMatches=0){
   if(!S.session?.cfRanks||Object.keys(S.session.cfRanks).length===0)return true;
 
   const n=_totalRanked()||S.session?.activePlayers?.length||20;
-
-  // ── Rule 1: Partner within 1 band + court spread ≤1 band ──────────────────
-  // Partner check: A+C (diff=2) blocked. Court spread: A+B vs B+C → bands {A,B,C} → spread=2 → blocked.
-  // This ensures at most 2 adjacent bands appear on any single court.
-  const bNum=(id)=>({D:1,C:2,B:3,A:4}[playerBand(id)]||2);
-  const bn0=bNum(t1ids[0]),bn1=bNum(t1ids[1]),bn2=bNum(t2ids[0]),bn3=bNum(t2ids[1]);
   const nc=S.session?.courts||1;
-  // Small sessions (≤2 courts): always use bandLimit=2 — quartile bands have too few players
-  // per band to reliably find strict ±1 groups. Rank checks (Rules 2+3) still guard quality.
-  // Larger sessions: relax after nc missed matches.
-  const bandLimit=(nc<=2)||waitMatches>=nc?2:1;
-  if(Math.abs(bn0-bn1)>bandLimit)return false;
-  if(Math.abs(bn2-bn3)>bandLimit)return false;
-  if(Math.max(bn0,bn1,bn2,bn3)-Math.min(bn0,bn1,bn2,bn3)>bandLimit)return false;
 
-  // ── Rule 2: Team balance using live session ranks ─────────────────────────
-  // Rank numbers (1=best, N=worst) reflect tonight's actual performance.
-  // NR players ranked from DUPR/nrLevelHint — meaningful from game 1.
-  // Ranks update after every match so this improves through the session.
-  // Fallback: estimate rank from cfRating if not yet ranked.
-  // After Opt 2 in batchGenerate, all queue players have ranks → this fast-paths immediately.
-  // Falls back to cfRating estimation only for non-queue players (very rare).
+  // ── Rank estimator (fast path: live rank; slow path: cfRating percentile) ──
   const _estRank=(id)=>{
     const existing=_sessionRank(id);
-    if(existing)return existing; // fast path: normal case
+    if(existing)return existing;
     if(n<=1)return 1;
-    // Slow path: estimate from cfRating percentile (should only fire for non-queue players)
     const myR=CF.cfRating(id);
     const above=Object.entries(S.session.cfRanks)
       .filter(([pid])=>CF.cfRating(pid)>myR).length;
     return Math.max(1,Math.min(n,above+1));
   };
   const r=(id)=>_estRank(id);
+
+  // ── Rule 1: Partner rank-gap cap (rank-position based, replaces ELO bands) ─
+  // Uses phase+court table so tolerance tightens as ranks stabilise.
+  // Widens gradually with waitMatches but never exceeds the per-phase ceiling.
+  const maxGap=_maxPartnerGap(n,nc,waitMatches);
+  if(Math.abs(r(t1ids[0])-r(t1ids[1]))>maxGap)return false;
+  if(Math.abs(r(t2ids[0])-r(t2ids[1]))>maxGap)return false;
+
+  // ── Rule 2: Team balance using live session ranks ─────────────────────────
   const t1avg=(r(t1ids[0])+r(t1ids[1]))/2;
   const t2avg=(r(t2ids[0])+r(t2ids[1]))/2;
 
-  // Small sessions have fewer players per band so widen team balance tolerance.
-  const _small=(S.session?.courts||1)<=2;
+  // Relax team balance only after nc+1 missed matches (not the old hardcoded 3).
+  // 40% cap removed — max allowed relaxation is 35% to prevent extreme team gaps.
+  const _small=nc<=2;
   let thresh=Math.round(_small?n*0.30:n*0.25);
-  if(waitMatches>=3)thresh=Math.round(n*0.40);
-  else if(waitMatches>=2)thresh=Math.round(n*0.32);
+  if(waitMatches>=nc+1)thresh=Math.round(n*0.35);
+  else if(waitMatches>=nc-1)thresh=Math.round(n*0.32);
 
   if(Math.abs(t1avg-t2avg)>thresh)return false;
 
@@ -1874,6 +1902,9 @@ function _insertLateArrival(id){
   for(const p of ranked){
     if(baseR>p.baseR){insertAt=p.rank;break;}
   }
+  // Nudge ~10% lower than pure ELO-estimated position — late arrivals haven't proven
+  // their rank in tonight's session yet. Rank movement corrects within 3 games.
+  insertAt=Math.min(n+1,Math.ceil(insertAt*1.10));
 
   // Shift ACTIVE players at insertAt and below down one position
   // Do NOT shift paused players — their rank entries should not be disturbed
@@ -1955,12 +1986,16 @@ function _compatibleQueuePartners(id){
   const key=S.session.cfMatchCount||0;
   if(_compatCache&&_compatCacheKey===key&&_compatCache[id])return _compatCache[id];
   if(!_compatCache||_compatCacheKey!==key){_compatCache={};_compatCacheKey=key;}
-  const myBNum={D:1,C:2,B:3,A:4}[playerBand(id)]||2;
+  const myRank=_sessionRank(id)||Math.ceil((_totalRanked()||20)/2);
+  const n=_totalRanked()||20;
+  const nc=S.session?.courts||1;
+  // Use phase-aware base gap (no wait relaxation — pending pairs form immediately)
+  const maxGap=_maxPartnerGap(n,nc,0);
   const result=(S.session.cfQueue||[])
     .filter(q=>{
       if(q.id===id)return false;
-      const theirBNum={D:1,C:2,B:3,A:4}[playerBand(q.id)]||2;
-      return Math.abs(myBNum-theirBNum)<=1;
+      const theirRank=_sessionRank(q.id)||Math.ceil(n/2);
+      return Math.abs(myRank-theirRank)<=maxGap;
     })
     .map(q=>q.id);
   _compatCache[id]=result;
@@ -2077,9 +2112,10 @@ const MM={
     // Cross-team imbalance dominates — 200pt avg gap = 26.7pts penalty
     // Uses sum (t1+t2 each doubled), so divide by 15 not 30
     const crossImb=Math.abs((t1[0].sr+t1[1].sr)-(t2[0].sr+t2[1].sr))/15;
-    // Within-team gap — bad partner pairing. Hard cap enforced separately.
-    const t1gap=Math.abs(t1[0].sr-t1[1].sr)/40;
-    const t2gap=Math.abs(t2[0].sr-t2[1].sr)/40;
+    // Within-team gap — bad partner pairing. Hard cap enforced in _ranksCompatible.
+    // Weight /20 (was /40): partner quality now competes with cross-team balance on equal footing.
+    const t1gap=Math.abs(t1[0].sr-t1[1].sr)/20;
+    const t2gap=Math.abs(t2[0].sr-t2[1].sr)/20;
     // Repeat penalties — 10× less than a 200pt gap. Context: 1 partner repeat=3, 1 opp repeat=5.
     // Band-aware: if either player has a thin compatible partner pool (<6 players),
     // reduce rp_pen proportionally so cooldown doesn't strand outlier players.

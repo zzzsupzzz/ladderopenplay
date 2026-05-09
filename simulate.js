@@ -379,6 +379,11 @@ const SIM = (() => {
       _disruptedAt = {};
       _disruptedType = {};
 
+      // Wait-time tracking: completed matches elapsed between a player's last game ending
+      // and their next game starting. Measures queue fairness under staggered court finishes.
+      const _lastGameEndMc = {}; // player id → cfMatchCount when they last finished
+      const _waitGaps = {};      // player id → array of completed-match waits
+
       // Per-court tick counters — each court independently counts down before submitting.
       // 80%: each court gets a fresh 2–5 tick game length (staggered finish).
       // 20%: new court syncs to a currently-playing court's remaining ticks (simultaneous finish).
@@ -425,6 +430,17 @@ const SIM = (() => {
         for (let c = 1; c <= S.session.courts; c++) {
           if (_aborted) break;
           if (S.session.cfSuggestions[c]) {
+            // Record wait gap (completed matches since each player's last game ended)
+            const _sug = S.session.cfSuggestions[c];
+            if (_sug) {
+              const _mc = S.session.cfMatchCount || 0;
+              [...(_sug.t1||[]), ...(_sug.t2||[])].forEach(id => {
+                if (_lastGameEndMc[id] !== undefined) {
+                  if (!_waitGaps[id]) _waitGaps[id] = [];
+                  _waitGaps[id].push(_mc - _lastGameEndMc[id]);
+                }
+              });
+            }
             CF.confirmSuggestion(c);
             courtTicks[c] = assignGameLen(c);
             confirmedCount++;
@@ -457,6 +473,14 @@ const SIM = (() => {
           const ct = S.session.cfCourts?.[c];
           if (ct?.status === 'playing' && ct.match) {
             if (courtTicks[c] > 0) { courtTicks[c]--; continue; }
+            // Record game-end match count for each player leaving court
+            const _ct = S.session.cfCourts?.[c];
+            if (_ct?.match) {
+              const _mc = S.session.cfMatchCount || 0;
+              [...(_ct.match.t1||[]), ...(_ct.match.t2||[])].forEach(id => {
+                _lastGameEndMc[id] = _mc + 1; // +1 because this match is about to be counted
+              });
+            }
             const [s1, s2] = randomScore();
             const _submitT0 = performance.now();
             CF._doSubmitScore(c, s1, s2);
@@ -597,6 +621,22 @@ const SIM = (() => {
         const totalDbGames = S.db.reduce((sum, p) => sum + (p.gamesPlayed || 0), 0);
         assert(totalDbGames > 0, 'Bug2 regression: total gamesPlayed should be > 0 after session');
         log(`Bug 2 check: totalDbGames=${totalDbGames}`);
+
+        // ── Wait-time report ──────────────────────────────────────────────
+        log('--- Wait Report (completed matches between games) ---');
+        const waitEntries = Object.entries(_waitGaps).map(([id, gaps]) => {
+          const avg = gaps.length ? (gaps.reduce((a,b)=>a+b,0)/gaps.length).toFixed(1) : '–';
+          const max = gaps.length ? Math.max(...gaps) : 0;
+          return { id, name: gp(id)?.name||id, avg: parseFloat(avg)||0, max, gaps };
+        }).sort((a,b) => b.max - a.max);
+        const longWaitThreshold = Math.max(3, courts * 2); // flag waits > 2 full rotations
+        waitEntries.forEach(({ name, avg, max, gaps }) => {
+          const flag = max >= longWaitThreshold ? ' ⚠️ LONG WAIT' : '';
+          log(`  ${name}: avg ${avg} | max ${max} matched waited${flag} (${gaps.length} gap(s) recorded)`);
+        });
+        const longWaiters = waitEntries.filter(e => e.max >= longWaitThreshold);
+        if (longWaiters.length === 0) log('  ✅ No long waits detected');
+        else log(`  ⚠️ ${longWaiters.length} player(s) had max wait ≥ ${longWaitThreshold} completed matches`);
 
         log('--- Player Stats ---');
         const sorted = [...arch.players].sort((a,b) => (b.sRating||0) - (a.sRating||0));
@@ -957,6 +997,10 @@ const SIM = (() => {
       let permPauseDone = false, permPauseId = null, permResumedDone = false, permRemovedDone = false;
       let lateIds = [];
 
+      // Wait-time tracking (completed matches between games)
+      const _org12WaitEndMc = {};
+      const _org12WaitGaps = {};
+
       // ── Main loop ──────────────────────────────────────────────────────────
       // courtGameLen[c]: ticks remaining before court c finishes its current game.
       // Round 1 gets gameLen=0 (both courts finish simultaneously — organizer confirms all at once).
@@ -983,6 +1027,11 @@ const SIM = (() => {
           const ct = S.session.cfCourts?.[c];
           if (ct?.status !== 'playing' || !ct.match) continue;
           if (courtGameLen[c] > 0) { courtGameLen[c]--; continue; }
+          // Record game-end for wait tracking
+          const _mcNow = S.session.cfMatchCount || 0;
+          [...(ct.match.t1||[]), ...(ct.match.t2||[])].forEach(id => {
+            _org12WaitEndMc[id] = _mcNow + 1;
+          });
           const [s1, s2] = randomScore();
           CF._doSubmitScore(c, s1, s2);
           const mc = S.session.cfMatchCount;
@@ -1211,6 +1260,15 @@ const SIM = (() => {
         // ── STEP 6: Confirm pending suggestions ─────────────────────────────
         for (let c = 1; c <= 2; c++) {
           if (_aborted || !S.session.cfSuggestions[c]) continue;
+          // Record wait gaps for players about to start
+          const _sug6 = S.session.cfSuggestions[c];
+          const _mc6 = S.session.cfMatchCount || 0;
+          [...(_sug6.t1||[]), ...(_sug6.t2||[])].forEach(id => {
+            if (_org12WaitEndMc[id] !== undefined) {
+              if (!_org12WaitGaps[id]) _org12WaitGaps[id] = [];
+              _org12WaitGaps[id].push(_mc6 - _org12WaitEndMc[id]);
+            }
+          });
           CF.confirmSuggestion(c);
           snapCourt(c, S.session.cfMatchCount);
           verifyNoDuplicates();
@@ -1316,6 +1374,21 @@ const SIM = (() => {
         if (avgGap > 120) log('  ⚠️  High avg gap — rating spread too wide for 2 courts');
         else if (avgGap <= 60) log('  ✅ Excellent balance');
       }
+
+      log('');
+      log('WAIT REPORT (completed matches between games):');
+      const _org12WaitEntries = Object.entries(_org12WaitGaps).map(([id, gaps]) => {
+        const avg = gaps.length ? (gaps.reduce((a,b)=>a+b,0)/gaps.length).toFixed(1) : '–';
+        const max = gaps.length ? Math.max(...gaps) : 0;
+        return { id, name: gp(id)?.name||id, avg: parseFloat(avg)||0, max, gaps };
+      }).sort((a,b) => b.max - a.max);
+      _org12WaitEntries.forEach(({ name, avg, max, gaps }) => {
+        const flag = max >= 4 ? ' ⚠️ LONG WAIT' : '';
+        log(`  ${(name+'          ').slice(0,10)} avg=${avg} max=${max} matches waited${flag}`);
+      });
+      const _org12LongWaiters = _org12WaitEntries.filter(e => e.max >= 4);
+      if (_org12LongWaiters.length === 0) log('  ✅ No long waits (all players waited ≤3 completed matches)');
+      else log(`  ⚠️ ${_org12LongWaiters.length} player(s) waited 4+ completed matches consecutively`);
 
       log('');
       log('PERMANENT PARTNER RESULTS:');
