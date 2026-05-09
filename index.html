@@ -3512,8 +3512,15 @@ function renderSessStd(){
 
   sess.players.forEach(sp=>{
     const myMatches=allMatches.filter(m=>[...m.t1,...m.t2].includes(sp.id));
-    const mq={avgOpp:null,oppGap:null,worstPGap:null,partners:0,g:myMatches.length};
+    const mq={avgOpp:null,oppGap:null,worstPGap:null,partners:0,g:myMatches.length,maxWait:null,avgWait:null};
     if(!myMatches.length){mqMap[sp.id]=mq;return;}
+    // Wait gaps: completed matches by other courts while this player sat in the queue
+    if(allMatches.length>1&&myMatches.length>1){
+      const indices=myMatches.map(m=>allMatches.indexOf(m));
+      const gaps=[];for(let wi=1;wi<indices.length;wi++)gaps.push(indices[wi]-indices[wi-1]-1);
+      mq.maxWait=gaps.length?Math.max(...gaps):null;
+      mq.avgWait=gaps.length?parseFloat((gaps.reduce((a,b)=>a+b,0)/gaps.length).toFixed(1)):null;
+    }
     const oppGaps=[];
     let worstPGap=0;
     const partnerSet=new Set();
@@ -3591,11 +3598,16 @@ function renderSessStd(){
     const oppGapColor=oppGapAbs==null?'var(--mu)':oppGapAbs<=oppGreenMax?'var(--gr)':oppGapAbs<=oppOrangeMax?'var(--or)':'var(--re)';
     const oppGapLabel=mq.oppGap!=null?(mq.oppGap>=0?'+':'')+mq.oppGap:'—';
     const pGapColor=mq.worstPGap==null?'var(--mu)':mq.worstPGap<=pGapGreenMax?'var(--gr)':mq.worstPGap<=pGapOrangeMax?'var(--or)':'var(--re)';
-    return `<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.79rem">${esc(name)}${tag?`<span class="ptag">${esc(tag)}</span>`:''}${nrTag}${courtTag}${sp.status==='left'?'<span class="tleft">LEFT</span>':''}</td><td style="font-size:.73rem;color:var(--mu)">${sp.wins}W/${sp.losses}L${sp.ties?'/'+sp.ties+'T':''}</td><td><span class="dl ${d>0?'du':d<0?'dd':'dz'}">${d>=0?'+':''}${d}</span></td><td><span class="rv">${rtgCell}</span></td><td style="font-size:.71rem;color:${oppGapColor};font-weight:600" title="Avg session rank gap vs opponents">${oppGapLabel}</td><td style="font-size:.71rem;color:${pGapColor}" title="Worst rating gap with a partner">${mq.worstPGap!=null?mq.worstPGap:'—'}</td><td style="font-size:.71rem;color:var(--mu)" title="Unique partners / games played">${mq.partners||0}/${mq.g}</td></tr>`;
+    const _nc=sess.courts||2;
+    const waitGreenMax=_nc, waitOrangeMax=_nc*2;
+    const waitColor=mq.maxWait==null?'var(--mu)':mq.maxWait<=waitGreenMax?'var(--gr)':mq.maxWait<=waitOrangeMax?'var(--or)':'var(--re)';
+    const waitLabel=mq.maxWait!=null?mq.maxWait:'—';
+    const waitTitle=mq.maxWait!=null?`Max wait: ${mq.maxWait} matches · Avg: ${mq.avgWait} · Threshold: ${waitOrangeMax}`:'No wait data';
+    return `<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.79rem">${esc(name)}${tag?`<span class="ptag">${esc(tag)}</span>`:''}${nrTag}${courtTag}${sp.status==='left'?'<span class="tleft">LEFT</span>':''}</td><td style="font-size:.73rem;color:var(--mu)">${sp.wins}W/${sp.losses}L${sp.ties?'/'+sp.ties+'T':''}</td><td><span class="dl ${d>0?'du':d<0?'dd':'dz'}">${d>=0?'+':''}${d}</span></td><td><span class="rv">${rtgCell}</span></td><td style="font-size:.71rem;color:${oppGapColor};font-weight:600" title="Avg session rank gap vs opponents">${oppGapLabel}</td><td style="font-size:.71rem;color:${pGapColor}" title="Worst rating gap with a partner">${mq.worstPGap!=null?mq.worstPGap:'—'}</td><td style="font-size:.71rem;color:var(--mu)" title="Unique partners / games played">${mq.partners||0}/${mq.g}</td><td style="font-size:.71rem;color:${waitColor};font-weight:600" title="${waitTitle}">${waitLabel}</td></tr>`;
   }).join('');
 
-  el.innerHTML=labelHtml+`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Wins / Losses / Ties">W/L</th><th title="Rating change this session">+/−</th><th title="Current session rating">RTG</th><th title="Opponent gap: avg opponent session rank minus yours. Green = well matched, red = big mismatch">OPP Δ</th><th title="Worst partner gap: biggest session rank difference with a teammate">P.GAP</th><th title="Unique partners / total games played">P/G</th></tr></thead><tbody>${rows}</tbody></table>
-  <div style="font-size:.62rem;color:var(--m2);margin-top:5px;padding:0 2px">+/− = rating change · OPP Δ = avg opponent session rank vs yours (<span style="color:var(--gr)">green</span>=close, <span style="color:var(--re)">red</span>=mismatch) · P.GAP = worst partner gap · P/G = unique partners / games</div>`;
+  el.innerHTML=labelHtml+`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Wins / Losses / Ties">W/L</th><th title="Rating change this session">+/−</th><th title="Current session rating">RTG</th><th title="Opponent gap: avg opponent session rank minus yours. Green = well matched, red = big mismatch">OPP Δ</th><th title="Worst partner gap: biggest session rank difference with a teammate">P.GAP</th><th title="Unique partners / total games played">P/G</th><th title="Worst wait: most completed matches by others while this player sat in queue between games. Green ≤ courts, orange ≤ courts×2, red = too long">WAIT</th></tr></thead><tbody>${rows}</tbody></table>
+  <div style="font-size:.62rem;color:var(--m2);margin-top:5px;padding:0 2px">+/− = rating change · OPP Δ = avg opponent session rank vs yours (<span style="color:var(--gr)">green</span>=close, <span style="color:var(--re)">red</span>=mismatch) · P.GAP = worst partner gap · P/G = unique partners / games · WAIT = max matches others played while you sat out between games</div>`;
 }
 // renderAllTime removed — all-time ratings visible in Setup player list
 
