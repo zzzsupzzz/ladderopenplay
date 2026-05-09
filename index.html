@@ -2007,33 +2007,56 @@ function _compatibleQueuePartners(id){
 function _checkPendingPairs(){
   if(!S.session)return;
   if(!S.session.cfPendingPairs)S.session.cfPendingPairs=[];
+  const nc=S.session.courts||2;
+  const mc=S.session.cfMatchCount||0;
   const queue=S.session.cfQueue||[];
+
+  // ── Expiry: release locks held for ≥ nc completed matches without confirming.
+  // Scenario: Riley locked with PartnerX, but ALL of PartnerX's compatible partners
+  // are locked in their own pairs — nobody can confirm, deadlock persists for 7+ waits.
+  // Expiring after nc matches breaks the chain and lets waiting players reform pairs.
+  const _pairTimeout=nc; // one full rotation cycle (e.g. 2 for 2-court, 3 for 3-court)
+  const _before=S.session.cfPendingPairs.length;
+  S.session.cfPendingPairs=S.session.cfPendingPairs.filter(p=>{
+    const lockedAt=p[2]??null;
+    if(lockedAt===null)return false; // legacy entry without timestamp → treat as stale
+    return (mc-lockedAt)<_pairTimeout;
+  });
+  if(S.session.cfPendingPairs.length<_before){
+    console.log(`[pairs] Expired ${_before-S.session.cfPendingPairs.length} stale lock(s) after ${_pairTimeout} matches`);
+  }
+
+  // ── Create new locks for players who have waited ≥ PENDING_PAIR_THRESHOLD ──
   for(const q of queue){
     const gap=CF?.matchGap?.(q.id)||0;
     if(gap<PENDING_PAIR_THRESHOLD)continue;
-    if(S.session.cfPendingPairs.some(p=>p.includes(q.id)))continue;
+    // Already in a (fresh) lock — don't double-lock
+    if(S.session.cfPendingPairs.some(p=>p[0]===q.id||p[1]===q.id))continue;
     // IMPORTANT: use base threshold (no relaxation) when locking pending pairs.
-    // Band-based check — never lock cross-band pairs (B+D blocked by definition)
     const compat=_compatibleQueuePartners(q.id)
-      .filter(pid=>!S.session.cfPendingPairs.some(p=>p.includes(pid)));
+      .filter(pid=>!S.session.cfPendingPairs.some(p=>p[0]===pid||p[1]===pid));
     if(!compat.length){
-      // No base-compatible partner available — don't lock a bad pair.
-      // Player continues waiting; pending pair will form when right partner arrives.
-      console.log(`[pairs] ${gp(q.id)?.name}(#${_sessionRank(q.id)}) waiting — no compatible partner in queue yet`);
+      // No compatible partner free — don't lock a bad pair.
+      // Player continues waiting; lock will form when a compatible partner is freed.
+      console.log(`[pairs] ${gp(q.id)?.name}(#${_sessionRank(q.id)}) waiting — no compatible partner available`);
       continue;
     }
     const partner=compat.sort((a,b)=>(CF?.matchGap?.(b)||0)-(CF?.matchGap?.(a)||0))[0];
-    S.session.cfPendingPairs.push([q.id,partner]);
-    console.log(`[pairs] Locked: ${gp(q.id)?.name}(#${_sessionRank(q.id)}) + ${gp(partner)?.name}(#${_sessionRank(partner)})`);
+    // Store [id1, id2, lockedAtMatchCount] — timestamp enables expiry
+    S.session.cfPendingPairs.push([q.id,partner,mc]);
+    console.log(`[pairs] Locked: ${gp(q.id)?.name}(#${_sessionRank(q.id)}) + ${gp(partner)?.name}(#${_sessionRank(partner)}) at mc=${mc}`);
   }
-  // Clean up pairs where a player left the queue
-  S.session.cfPendingPairs=S.session.cfPendingPairs.filter(([a,b])=>
-    queue.some(q=>q.id===a)&&queue.some(q=>q.id===b));
+
+  // ── Clean up pairs where a player left the queue (on court, paused, or left) ──
+  S.session.cfPendingPairs=S.session.cfPendingPairs.filter(p=>
+    queue.some(q=>q.id===p[0])&&queue.some(q=>q.id===p[1]));
 }
 
-function _isPendingPairMember(id){return(S.session?.cfPendingPairs||[]).some(p=>p.includes(id));}
-function _getPendingPartner(id){const pair=(S.session?.cfPendingPairs||[]).find(p=>p.includes(id));return pair?pair.find(pid=>pid!==id):null;}
-function _clearPendingPair(id){if(!S.session?.cfPendingPairs)return;S.session.cfPendingPairs=S.session.cfPendingPairs.filter(p=>!p.includes(id));}
+// Use explicit index checks (p[0]/p[1]) — safer than p.includes() which would also
+// match the numeric lockedAt timestamp stored at p[2] if an id ever equalled it.
+function _isPendingPairMember(id){return(S.session?.cfPendingPairs||[]).some(p=>p[0]===id||p[1]===id);}
+function _getPendingPartner(id){const pair=(S.session?.cfPendingPairs||[]).find(p=>p[0]===id||p[1]===id);return pair?(pair[0]===id?pair[1]:pair[0]):null;}
+function _clearPendingPair(id){if(!S.session?.cfPendingPairs)return;S.session.cfPendingPairs=S.session.cfPendingPairs.filter(p=>p[0]!==id&&p[1]!==id);}
 
 // ── Manual rank override ──────────────────────────────────────────────────────
 function openRankOverride(id){
@@ -6998,6 +7021,7 @@ const CF={
       const _paths={};
       _paths[`session/cfCourts/${courtNum}`]=_sp.cfCourts[courtNum]??null;
       _paths['session/cfPinnedIds']=_sp.cfPinnedIds??null;
+      _paths['session/cfPendingPairs']=_sp.cfPendingPairs??null; // sync pair clears + timestamps
       _paths['session/cfPairConsec']=_sp.cfPairConsec??null;
       _paths['session/cfPairSessionCount']=_sp.cfPairSessionCount??null;
       _paths['session/cfPairLastAt']=_sp.cfPairLastAt??null;
