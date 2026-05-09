@@ -374,7 +374,8 @@ const SIM = (() => {
 
       let totalMatches = 0;
       let midAddDone = false;
-      let pauseDone = false;
+      let pauseDone = false;      // first pause/resume
+      let pauseDone2 = false;     // second pause/resume (different player, later in session)
       let leaveSoonDone = false;
       let midRemoveDone = false;
       _disruptedAt = {};
@@ -405,10 +406,12 @@ const SIM = (() => {
       }
 
       // Proportional mid-session event rounds (scale with total rounds)
-      const _pauseRound     = Math.max(8,  Math.round(rounds * 0.35));
-      const _resumeRound    = Math.max(10, Math.round(rounds * 0.45));
-      const _leaveSoonRound = Math.max(12, Math.round(rounds * 0.55));
-      const _midRmRound     = Math.max(14, Math.round(rounds * 0.70));
+      const _pauseRound     = Math.max(8,  Math.round(rounds * 0.35)); // player 1 pause
+      const _resumeRound    = Math.max(10, Math.round(rounds * 0.45)); // player 1 resume
+      const _pause2Round    = Math.max(12, Math.round(rounds * 0.58)); // player 2 pause (after leave-soon)
+      const _resume2Round   = Math.max(14, Math.round(rounds * 0.68)); // player 2 resume
+      const _leaveSoonRound = Math.max(11, Math.round(rounds * 0.52)); // between the two pauses
+      const _midRmRound     = Math.max(16, Math.round(rounds * 0.78));
 
       for (let r = 0; r < rounds; r++) {
         if (_aborted) { log('ABORTED by user'); break; }
@@ -558,6 +561,37 @@ const SIM = (() => {
             await delay(ms);
           }
           pauseDone = false;
+        }
+
+        // Second pause/resume — different player, later in the session
+        if (r === _pause2Round && !pauseDone2) {
+          // Pick a queue player who wasn't the first paused player and isn't leaving soon
+          const leaveSoonIds = S.session.cfLeaveSoonIds || [];
+          const cand2 = S.session.cfQueue.find(q =>
+            q.id !== pauseDone && !leaveSoonIds.includes(q.id)
+          );
+          if (cand2) {
+            cfPausePlayer(cand2.id);
+            pauseDone2 = cand2.id;
+            log(`Paused #2: ${gp(cand2.id)?.name} (round ${r+1})`);
+            if (doRender) render();
+            if (live) await STORE.save();
+            await delay(ms);
+          }
+        }
+
+        if (r === _resume2Round && pauseDone2) {
+          const pEntry2 = (S.session.cfPaused || []).find(q => q.id === pauseDone2);
+          if (pEntry2) {
+            cfResumePlayer(pauseDone2);
+            _disruptedAt[pauseDone2] = S.session.cfMatchCount || 0;
+            _disruptedType[pauseDone2] = 'resume';
+            log(`Resumed #2: ${gp(pauseDone2)?.name} (round ${r+1})`);
+            if (doRender) render();
+            if (live) await STORE.save();
+            await delay(ms);
+          }
+          pauseDone2 = false;
         }
 
         if (r === _leaveSoonRound && !leaveSoonDone) {
