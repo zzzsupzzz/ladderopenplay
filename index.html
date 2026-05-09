@@ -1115,6 +1115,7 @@ const SYNC={
          }
          _pageFirstLoad=false;
          HAS_REMOTE_HYDRATED=true;
+         renderDB(); // clear loading banner + re-enable Add button now that db is safe to write
          // Merge any players the user added before Firebase data arrived.
          // Without this, adding a player on a slow connection before hydration is silently lost.
          if(_preHydrationPlayers?.length){
@@ -2332,6 +2333,7 @@ const MM={
 /* ── PLAYER DB ───────────────────────────────────── */
 function addPlayer(){
   if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
+  if(!HAS_REMOTE_HYDRATED){toast('⏳ Still loading player database — wait for 🟢 Live in the header','warn');return;}
   const name=document.getElementById('np-name').value.trim();
   const tag=document.getElementById('np-tag').value.trim();
   const isNR=document.getElementById('np-nr')?.checked||false;
@@ -3032,6 +3034,13 @@ function renderDB(){
     _abBtn.classList.toggle('bc',_dbAbsentOnly);
     _abBtn.classList.toggle('bg2',!_dbAbsentOnly);
   }
+  // Disable "+ Add" button while Firebase hasn't loaded yet
+  const _addBtn=document.querySelector('button[onclick="addPlayer()"]');
+  if(_addBtn){
+    _addBtn.disabled=!HAS_REMOTE_HYDRATED;
+    _addBtn.title=HAS_REMOTE_HYDRATED?'':'Waiting for server database to load…';
+    _addBtn.style.opacity=HAS_REMOTE_HYDRATED?'':'0.45';
+  }
   // Refresh NR level labels if NR panel is open (checked-in pool may have changed)
   if(document.getElementById('np-nr-level')?.style.display!=='none')updateNRLevelLabels();
   const q=(document.getElementById('db-search')?.value||'').toLowerCase();
@@ -3039,8 +3048,9 @@ function renderDB(){
   if(q)players=players.filter(p=>plainName(p).toLowerCase().includes(q));
   if(_dbAbsentOnly)players=players.filter(p=>!S.checkedIn.has(p.id));
   document.getElementById('db-badge').textContent=_dbAbsentOnly?`${players.length}/${S.db.length}`:S.db.length;
-  if(!players.length){document.getElementById('db-list').innerHTML=`<div class="empty">No players yet.</div>`;return;}
-  document.getElementById('db-list').innerHTML=players.map(p=>{
+  const _loadingBanner=!HAS_REMOTE_HYDRATED?`<div style="background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);border-radius:var(--ra);padding:8px 12px;margin-bottom:8px;font-size:.72rem;color:var(--go);display:flex;align-items:center;gap:8px"><span style="font-size:1rem">⏳</span><span>Loading player database from server… wait for <strong style="color:var(--gr)">🟢 Live</strong> in the header before adding players.</span></div>`:'';
+  if(!players.length){document.getElementById('db-list').innerHTML=_loadingBanner+`<div class="empty">No players yet.</div>`;return;}
+  document.getElementById('db-list').innerHTML=_loadingBanner+players.map(p=>{
     const chk=S.checkedIn.has(p.id),ed=S.editId===p.id;
     const wr=p.gamesPlayed>0?Math.round((p.wins/p.gamesPlayed)*100)+'%':'—';
     const pd=p.gamesPlayed>0?(p.wins-p.losses>=0?'+':'')+(p.wins-p.losses):'';
