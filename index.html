@@ -1007,8 +1007,15 @@ const SYNC={
         console.warn(`[sync] Archive shrink blocked (${remoteArchiveLen}<${localArchiveLen})`);
       }
 
-      // Capture local state before overwriting with remote — needed for safety restore
-      S.db=remote.db||[];
+      // db shrink guard: never overwrite a populated local db with an empty remote.
+      // Firebase converts empty arrays to null, so remote.db arrives as null when wiped.
+      // The archive shrink guard above does NOT block this line — it only saves preservedArchive.
+      // Without this guard, every archive-shrink event also silently wipes the player db.
+      if(!isFirstLoad&&(!remote.db||remote.db.length===0)&&S.db?.length>0){
+        console.warn(`[sync] db shrink blocked — remote.db empty but local has ${S.db.length} players`);
+      }else{
+        S.db=remote.db||[];
+      }
       // Active-court preservation: keep locally playing courts only when their match.id
       // is NOT already in the remote cfLog. Using match.id (not player set) means a
       // legitimate rematch with the same four players is correctly treated as a new match.
