@@ -1126,6 +1126,11 @@ const SYNC={
          }
          _pageFirstLoad=false;
          HAS_REMOTE_HYDRATED=true;
+         // Clear stale 'offline' indicator — Firebase data confirmed, we're fully connected.
+         // _setSaveStatus('offline') is called during local-backup restore before Firebase loads.
+         // Without this, the header shows both '⚡ offline' AND '🟢 Live' simultaneously.
+         {const _ss=document.getElementById('save-status');
+          if(_ss&&_ss.textContent==='⚡ offline')_setSaveStatus('saved');}
          renderDB(); // clear loading banner + re-enable Add button now that db is safe to write
          // Merge any players the user added before Firebase data arrived.
          // Without this, adding a player on a slow connection before hydration is silently lost.
