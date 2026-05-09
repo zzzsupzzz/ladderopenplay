@@ -850,6 +850,9 @@ const SYNC={
         });
         // players per array-index — two courts scoring simultaneously write different players, no overwrite
         (sess.players||[]).forEach((p,i)=>{updates[`session/players/${i}`]=p??null;});
+        // Null out a few slots past the current array end to clear orphans from lobby player removal.
+        // Firebase removes null-valued keys, so this cleans up stale entries when a player is unchecked.
+        for(let _i=(sess.players||[]).length;_i<(sess.players||[]).length+5;_i++){updates[`session/players/${_i}`]=null;}
         // cfCourts per court — court 1 and court 2 write different Firebase paths, no collision
         Object.entries(sess.cfCourts||{}).forEach(([c,ct])=>{updates[`session/cfCourts/${c}`]=ct??null;});
         // cfLog keyed by match ID — simultaneous submissions go to different Firebase paths
@@ -6681,6 +6684,7 @@ const CF={
       _paths['session/cfPairLastLost']=_sp.cfPairLastLost??null;
       _paths['session/partnerHx']=_sp.partnerHx??null;
       _paths['session/oppHx']=_sp.oppHx??null;
+      _paths['session/oppHxTime']=_sp.oppHxTime??null;
       _paths[`session/cfSuggestions/${courtNum}`]=null; // cleared above
       // Queue entries for the 4 players being put on court
       sug.allIds.forEach(id=>{
@@ -6936,7 +6940,8 @@ const CF={
       _paths['session/cfLeaveSoonIds']=_sp.cfLeaveSoonIds??null;
       _paths['session/cfPauseAfterGame']=_sp.cfPauseAfterGame??null;
       if(_sp.nrPairingHx)_paths['session/nrPairingHx']=_sp.nrPairingHx;
-      if(_sp.cfRanks)_paths['session/cfRanks']=_sp.cfRanks;
+      // cfRanks per-player — different courts update different players, no collision
+      Object.entries(_sp.cfRanks||{}).forEach(([_rid,_rv])=>{_paths[`session/cfRanks/${_rid}`]=_rv??null;});
       // Per-player paths: only the 4 players in this match + any auto-leave players
       const _affectedIds=new Set([...m.t1,...m.t2]);
       (_sp.cfLeaveSoonIds||[]).forEach(id=>_affectedIds.add(id));
