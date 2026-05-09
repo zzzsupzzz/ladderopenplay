@@ -660,7 +660,7 @@ const SIM = (() => {
           log(`  ✅ All players waited ≤${longWaitThreshold-1} completed matches between games`);
         } else {
           log(`  ⚠️ ${longWaiters.length} player(s) had a single wait ≥${longWaitThreshold} matches`);
-          if (stuckPlayers.length) log(`  🔴 ${stuckPlayers.length} player(s) hit long waits on consecutive turns (stuck in queue)`)
+          if (stuckPlayers.length) log(`  🔴 ${stuckPlayers.length} player(s) had long waits back-to-back (long wait → played 1 game → long wait again)`)
         }
 
         log('--- Player Stats ---');
@@ -1423,7 +1423,7 @@ const SIM = (() => {
       if (_org12LongWaiters.length === 0) log(`  ✅ No long waits (threshold: ${_org12LongWaitThreshold} completed matches)`);
       else {
         const stuck = _org12LongWaiters.filter(e => e.maxConsecRun >= 2);
-        if (stuck.length) log(`  🔴 ${stuck.length} player(s) STUCK — long wait on consecutive turns`);
+        if (stuck.length) log(`  🔴 ${stuck.length} player(s) had long waits back-to-back (long wait → played 1 game → long wait again)`);
         log(`  ⚠️ ${_org12LongWaiters.length} player(s) waited ${_org12LongWaitThreshold}+ completed matches between games`);
       }
 
