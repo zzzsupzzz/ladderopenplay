@@ -7876,15 +7876,19 @@ const CF={
 
     // ── Match quality indicator (primary) ──────────────────────────────
     // Uses session rank positions — rank gap is the true measure of mismatch.
-    // Thresholds scale with field size (% of N) so 14p and 26p sessions feel equivalent.
+    // Thresholds are phase-aware: aligned with _maxPartnerGap() so the chip never
+    // flags a pairing the matchmaker already approved as within normal tolerance.
+    // Avoid:          partner gap > phase base cap  (matchmaker had to relax — genuinely bad)
+    // Slight mismatch: partner gap > 60% of phase base cap (approaching tolerance limit)
+    // Clean:          everything within comfortable range
     const maxPartnerGapRk=hasRanks?Math.max(t1pgapRk,t2pgapRk):null;
     const teamRkGap=hasRanks?Math.abs((t1rk0+t1rk1)/2-(t2rk0+t2rk1)/2):null;
-    // Avoid: partner >35% of N apart OR teams avg >25% of N apart
-    // Slight mismatch: partner >20% of N apart OR teams >15% of N apart
-    const _avoidPgap=Math.max(2,_N*0.35);
-    const _avoidTeam=Math.max(2,_N*0.25);
-    const _warnPgap=Math.max(2,_N*0.20);
-    const _warnTeam=Math.max(1,_N*0.15);
+    const _nc=S.session?.courts||2;
+    const _phaseCap=_maxPartnerGap(_N,_nc,0); // base cap for current phase+courts, no wait relaxation
+    const _avoidPgap=_phaseCap;                        // avoid if matchmaker had to go beyond normal cap
+    const _warnPgap=Math.max(2,Math.round(_phaseCap*0.60)); // warn if approaching cap
+    const _avoidTeam=Math.max(2,Math.round(_N*0.25));  // team balance: less phase-sensitive, stays static
+    const _warnTeam=Math.max(1,Math.round(_N*0.15));
     let qualityLabel,qualityColor,qualityTitle;
     // Build form context string for tooltip
     const _formCtx=[...sug.t1,...sug.t2].map(id=>{

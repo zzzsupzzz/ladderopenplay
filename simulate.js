@@ -337,7 +337,8 @@ const SIM = (() => {
       courts = 4,
       rounds = 20,
       speed = 'instant',
-      live = false
+      live = false,
+      noPairLock = false  // when true: cfPendingPairs cleared each round, pair-lock never fires
     } = opts;
 
     _running = true;
@@ -348,7 +349,7 @@ const SIM = (() => {
     const ms = resolveSpeed(speed);
     const doRender = ms > 0 || live;
 
-    log(`=== SIMULATION START === speed=${speed}(${ms}ms) live=${live}`);
+    log(`=== SIMULATION START === speed=${speed}(${ms}ms) live=${live} noPairLock=${noPairLock}`);
     const t0 = performance.now();
 
     let _lastSimArch = null;
@@ -412,6 +413,10 @@ const SIM = (() => {
       for (let r = 0; r < rounds; r++) {
         if (_aborted) { log('ABORTED by user'); break; }
         const _roundT0 = performance.now();
+
+        // Pair-lock disabled: clear any pending pairs before each suggestion cycle
+        // so the matchmaker treats every queue player as a free agent.
+        if (noPairLock && S.session?.cfPendingPairs) S.session.cfPendingPairs = [];
 
         // Regenerate suggestions for ready courts that have none
         const readyNoSug = [];
@@ -1452,6 +1457,15 @@ const SIM = (() => {
     return run({ players: 26, courts: 4, rounds: 70, speed: 'fast', ...opts });
   }
 
+  // ── No-pair-lock variants: same as above but cfPendingPairs cleared each round ──
+  // Use these to compare matchmaking quality with vs without the pair-lock system.
+  // Pair lock: players waiting too long get their partner reserved to guarantee next game.
+  // Without it: matchmaker picks freely every round — may improve variety at cost of fairness.
+  // Usage: SIM.run14({noPairLock:true})  or  SIM.runNoPairLock({players:14, courts:2})
+  function runNoPairLock(opts = {}) {
+    return run({ rounds: 70, speed: 'fast', ...opts, noPairLock: true });
+  }
+
   // ── Permanent pair stress test ──────────────────────────────────────────────
 
   async function runPermPairCheck() {
@@ -1682,6 +1696,6 @@ const SIM = (() => {
     else window.addEventListener('load', buildPanel);
   }
 
-  return { run, run14, run20, run26, runBugChecks, runOrganizer12, runPermPairCheck, stop, _uiRun, _continue, log: () => _log, errors: () => _errs };
+  return { run, run14, run20, run26, runNoPairLock, runBugChecks, runOrganizer12, runPermPairCheck, stop, _uiRun, _continue, log: () => _log, errors: () => _errs };
 
 })();
