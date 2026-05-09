@@ -832,7 +832,11 @@ const SYNC={
     const updates={
       'meta/_by':DEVICE_ID,
       'meta/_ts':S._lastSaveTs,
-      'meta/_v':S._version
+      // Only write meta/_v after Firebase has hydrated. A fresh tab starts at
+      // S._version=0 and writing v1 would overwrite e.g. v6 in Firebase, causing
+      // every peer at v6 to see a version regression and reject all subsequent data.
+      // After hydration, S._version is synced to remoteV so writes go out at v(n+1).
+      ...(HAS_REMOTE_HYDRATED?{'meta/_v':S._version}:{})
     };
     if(S.adminPin)updates['meta/adminPin']=S.adminPin;
     if(S._sessionEndedId)updates['meta/sessionEndedId']=S._sessionEndedId;
@@ -884,7 +888,8 @@ const SYNC={
     }
     S._lastSaveTs=Date.now();
     S._version=(S._version||0)+1;
-    const updates={'meta/_by':DEVICE_ID,'meta/_ts':S._lastSaveTs,'meta/_v':S._version};
+    const updates={'meta/_by':DEVICE_ID,'meta/_ts':S._lastSaveTs,
+      ...(HAS_REMOTE_HYDRATED?{'meta/_v':S._version}:{})};
     if(S.adminPin)updates['meta/adminPin']=S.adminPin;
     if(S._sessionEndedId)updates['meta/sessionEndedId']=S._sessionEndedId;
     else updates['meta/sessionEndedId']=null;
@@ -940,7 +945,12 @@ const SYNC={
       const localV=S._version||0;
       const _vValid=v=>Number.isInteger(v)&&v>0; // strict version validation
       if(!isFirstLoad&&_vValid(remoteV)&&_vValid(localV)&&remoteV<localV){
-        console.warn(`[sync] Rejected version regression: incoming v${remoteV} < local v${localV}`);
+        console.warn(`[sync] Rejected version regression: incoming v${remoteV} < local v${localV}. Pushing local state to repair Firebase.`);
+        // A device with a stale version counter overwrote Firebase's meta._v.
+        // Push local state so Firebase recovers to the correct version.
+        // Without this push, Firebase stays stuck at the stale low version and
+        // every new device that connects sees the wrong data.
+        if(SYNC.ready)setTimeout(()=>STORE.save('all'),200);
         return;
       }
 
