@@ -628,20 +628,40 @@ const SIM = (() => {
         log(`Bug 2 check: totalDbGames=${totalDbGames}`);
 
         // ── Wait-time report ──────────────────────────────────────────────
-        log('--- Wait Report (completed matches between games) ---');
+        // Shows each player's full gap sequence so consecutive long waits are visible.
+        // A gap = completed matches by other courts while this player sat in queue.
+        // Flag threshold: courts*2 (e.g. 4 for 2c, 6 for 3c, 8 for 4c).
+        log('--- Wait Report (completed matches waited between games) ---');
+        const longWaitThreshold = courts * 2; // 2 full rotation cycles = clearly too long
         const waitEntries = Object.entries(_waitGaps).map(([id, gaps]) => {
           const avg = gaps.length ? (gaps.reduce((a,b)=>a+b,0)/gaps.length).toFixed(1) : '–';
           const max = gaps.length ? Math.max(...gaps) : 0;
-          return { id, name: gp(id)?.name||id, avg: parseFloat(avg)||0, max, gaps };
-        }).sort((a,b) => b.max - a.max);
-        const longWaitThreshold = Math.max(3, courts * 2); // flag waits > 2 full rotations
-        waitEntries.forEach(({ name, avg, max, gaps }) => {
-          const flag = max >= longWaitThreshold ? ' ⚠️ LONG WAIT' : '';
-          log(`  ${name}: avg ${avg} | max ${max} matched waited${flag} (${gaps.length} gap(s) recorded)`);
+          // Find longest consecutive run of gaps >= longWaitThreshold
+          let consecRun = 0, maxConsecRun = 0, cur = 0;
+          gaps.forEach(g => {
+            if (g >= longWaitThreshold) { cur++; maxConsecRun = Math.max(maxConsecRun, cur); }
+            else cur = 0;
+          });
+          return { id, name: gp(id)?.name||id, avg: parseFloat(avg)||0, max, gaps, maxConsecRun };
+        }).sort((a,b) => b.max - a.max || b.maxConsecRun - a.maxConsecRun);
+
+        waitEntries.forEach(({ name, avg, max, gaps, maxConsecRun }) => {
+          // Annotate the sequence: mark each gap with ★ if it hits the threshold
+          const seq = gaps.map(g => g >= longWaitThreshold ? `[${g}]` : `${g}`).join('-');
+          const flag = max >= longWaitThreshold
+            ? (maxConsecRun >= 2 ? ' 🔴 STUCK' : ' ⚠️ long wait')
+            : '';
+          log(`  ${(name+'          ').slice(0,10)} avg=${avg} max=${max}  gaps: ${seq||'–'}${flag}`);
         });
+
         const longWaiters = waitEntries.filter(e => e.max >= longWaitThreshold);
-        if (longWaiters.length === 0) log('  ✅ No long waits detected');
-        else log(`  ⚠️ ${longWaiters.length} player(s) had max wait ≥ ${longWaitThreshold} completed matches`);
+        const stuckPlayers = waitEntries.filter(e => e.maxConsecRun >= 2);
+        if (longWaiters.length === 0) {
+          log(`  ✅ All players waited ≤${longWaitThreshold-1} completed matches between games`);
+        } else {
+          log(`  ⚠️ ${longWaiters.length} player(s) had a single wait ≥${longWaitThreshold} matches`);
+          if (stuckPlayers.length) log(`  🔴 ${stuckPlayers.length} player(s) hit long waits on consecutive turns (stuck in queue)`)
+        }
 
         log('--- Player Stats ---');
         const sorted = [...arch.players].sort((a,b) => (b.sRating||0) - (a.sRating||0));
@@ -1381,19 +1401,31 @@ const SIM = (() => {
       }
 
       log('');
-      log('WAIT REPORT (completed matches between games):');
+      log('WAIT REPORT (completed matches waited between games):');
+      const _org12LongWaitThreshold = 2 * 2; // courts=2 × 2
       const _org12WaitEntries = Object.entries(_org12WaitGaps).map(([id, gaps]) => {
         const avg = gaps.length ? (gaps.reduce((a,b)=>a+b,0)/gaps.length).toFixed(1) : '–';
         const max = gaps.length ? Math.max(...gaps) : 0;
-        return { id, name: gp(id)?.name||id, avg: parseFloat(avg)||0, max, gaps };
-      }).sort((a,b) => b.max - a.max);
-      _org12WaitEntries.forEach(({ name, avg, max, gaps }) => {
-        const flag = max >= 4 ? ' ⚠️ LONG WAIT' : '';
-        log(`  ${(name+'          ').slice(0,10)} avg=${avg} max=${max} matches waited${flag}`);
+        let cur = 0, maxConsecRun = 0;
+        gaps.forEach(g => {
+          if (g >= _org12LongWaitThreshold) { cur++; maxConsecRun = Math.max(maxConsecRun, cur); }
+          else cur = 0;
+        });
+        return { id, name: gp(id)?.name||id, avg: parseFloat(avg)||0, max, gaps, maxConsecRun };
+      }).sort((a,b) => b.max - a.max || b.maxConsecRun - a.maxConsecRun);
+      _org12WaitEntries.forEach(({ name, avg, max, gaps, maxConsecRun }) => {
+        const seq = gaps.map(g => g >= _org12LongWaitThreshold ? `[${g}]` : `${g}`).join('-');
+        const flag = max >= _org12LongWaitThreshold
+          ? (maxConsecRun >= 2 ? ' 🔴 STUCK' : ' ⚠️ long wait') : '';
+        log(`  ${(name+'          ').slice(0,10)} avg=${avg} max=${max}  gaps: ${seq||'–'}${flag}`);
       });
-      const _org12LongWaiters = _org12WaitEntries.filter(e => e.max >= 4);
-      if (_org12LongWaiters.length === 0) log('  ✅ No long waits (all players waited ≤3 completed matches)');
-      else log(`  ⚠️ ${_org12LongWaiters.length} player(s) waited 4+ completed matches consecutively`);
+      const _org12LongWaiters = _org12WaitEntries.filter(e => e.max >= _org12LongWaitThreshold);
+      if (_org12LongWaiters.length === 0) log(`  ✅ No long waits (threshold: ${_org12LongWaitThreshold} completed matches)`);
+      else {
+        const stuck = _org12LongWaiters.filter(e => e.maxConsecRun >= 2);
+        if (stuck.length) log(`  🔴 ${stuck.length} player(s) STUCK — long wait on consecutive turns`);
+        log(`  ⚠️ ${_org12LongWaiters.length} player(s) waited ${_org12LongWaitThreshold}+ completed matches between games`);
+      }
 
       log('');
       log('PERMANENT PARTNER RESULTS:');
