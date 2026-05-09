@@ -5852,9 +5852,19 @@ const CF={
     });
     const p2=Math.max(-250,Math.min(250,playFairness));
 
-    // P3: Avoid repeats — capped at 200
+    // Session phase: 1=first hour, 2=second hour, 3=third hour (time-based, not match-count)
+    // Phase 3 tightens rank bands and reduces repeat avoidance — quality over variety late in session.
+    const _elapsedMin=S.session?.sessionStart?(Date.now()-S.session.sessionStart)/60000:0;
+    const _phase=_elapsedMin<60?1:_elapsedMin<120?2:3;
+
+    // P3: Avoid repeats — decay weight by phase so skill balance dominates in later hours.
+    // Phase 1: 100% (fresh session, encourage variety)
+    // Phase 2: 60%  (quality and variety balanced)
+    // Phase 3: 30%  (accept repeats freely — a good rematch > a bad new match)
+    const _p3Mult=_phase===1?1.0:_phase===2?0.6:0.3;
     const p3Raw=partRpt*3 + oppRpt*5 + matchRpt + groupRpt + overlapPen + splitPen + consecPen;
-    const p3=p3Raw>200?Math.round(200*p3Raw/Math.max(p3Raw,1)):p3Raw;
+    const p3Base=p3Raw>200?Math.round(200*p3Raw/Math.max(p3Raw,1)):p3Raw;
+    const p3=Math.round(p3Base*_p3Mult);
 
     // P4: Wait time — capped so it can't override P1/P2
     const p4Raw=waitBonus + gapBonus;
@@ -5982,35 +5992,49 @@ const CF={
       const hasHotOpp=oppTeam.some(o=>spFn(o.id)?._hotFlag);
       if(hasHotOpp)hotColdPen+=isCold&&isPlayingUp?70:isPlayingUp?50:40;
     });
-    // ── Skill-band guardrail (Step 5) ──────────────────────────────────
-    // Band tags (q1/q3/q4) are stamped on each player object ONCE per generation
-    // in _generateSingleSuggestion — not recomputed here per scoring call.
-    let bandPen=0;
-    [[t1[0],t1[1]],[t2[0],t2[1]]].forEach(([a,b])=>{
-      const aq=a.band, bq=b.band;
-      if(!aq||!bq)return;
-      if((aq===1&&bq===4)||(aq===4&&bq===1))bandPen+=300;
-      else if((aq===1&&bq===3)||(aq===3&&bq===1))bandPen+=80;
-    });
-    // ── Rank-band spread penalty (Step 6) ──────────────────────────────
-    // Keep groups within a tight rank band so top and bottom players rarely meet.
-    // Formula: base = round(N / courts×2).  E.g. 14p/2c → base=4 (ranks 1–4 ideal group).
-    // Quadratic penalty kicks in when spread > base×2, capped at 300.
-    // This is soft — fairness overrides (hunger, 0-game, MGL) can still widen the band.
+    // ── Phase-aware rank-band spread penalty ──────────────────────────
+    // Replaces static bandPen (ELO quartile, redundant with P1+ranks) and old rankBandPen.
+    // Two-tier: hard limit blocks crazy mismatches always; soft target tightens by phase.
+    //
+    // Hard limit = Phase 1 tolerance (never relaxed regardless of queue pressure):
+    //   2 courts → 60% of N  (e.g. 14p: max spread 8)
+    //   3+ courts → 50% of N (e.g. 20p: max spread 10)
+    //
+    // Soft phase targets (encourages tighter matching as session progresses):
+    //   2 courts:  Phase1=60%, Phase2=50%, Phase3=40%
+    //   3+ courts: Phase1=50%, Phase2=40%, Phase3=35%
+    //
+    // Phase 3 guard: if any player has <4 games, treat that group as Phase 2
+    // (ranks not calibrated enough yet to enforce tightest bands).
     let rankBandPen=0;
     {
       const _rks=group.map(p=>_sessionRank(p.id)).filter(r=>r>0);
       if(_rks.length===4){
         const _rSpread=Math.max(..._rks)-Math.min(..._rks);
-        const _N4=_totalRanked();const _C4=S.session?.courts||1;
-        const _baseSpread=Math.max(2,Math.round(_N4/(_C4*2)));
-        if(_rSpread>_baseSpread*2){
-          const excess=_rSpread-_baseSpread*2;
-          rankBandPen=Math.min(300,excess*excess*5);
+        const _N4=_totalRanked();
+        const _C4=S.session?.courts||1;
+        const _is2c=_C4<=2;
+        const _hardPct=_is2c?0.60:0.50;
+        const _hardLimit=Math.max(4,Math.round(_N4*_hardPct));
+        // Phase 3 guard: fall back to Phase 2 limits if any player is uncalibrated
+        const _minGames=Math.min(...group.map(p=>gsp(p.id)?.matchesPlayed||0));
+        const _effPhase=(_phase===3&&_minGames<4)?2:_phase;
+        const _softPct=_is2c
+          ?(_effPhase===1?0.60:_effPhase===2?0.50:0.40)
+          :(_effPhase===1?0.50:_effPhase===2?0.40:0.35);
+        const _softTarget=Math.max(3,Math.round(_N4*_softPct));
+        if(_rSpread>_hardLimit){
+          // Crazy mismatch — essentially block this group (still escapable if queue is empty)
+          const exc=_rSpread-_hardLimit;
+          rankBandPen=Math.min(2000,exc*exc*30);
+        }else if(_rSpread>_softTarget){
+          // Phase-soft zone — moderate quadratic penalty, tighter each phase
+          const exc=_rSpread-_softTarget;
+          rankBandPen=Math.min(350,exc*exc*10);
         }
       }
     }
-    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+bandPen+rankBandPen+neverPairPen,meta,t1,t2,group};
+    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+rankBandPen+neverPairPen,meta,t1,t2,group};
   },
 
   /* Generate a suggestion for a court */
