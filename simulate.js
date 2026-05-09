@@ -554,6 +554,7 @@ const SIM = (() => {
               matchesPlayed: sp.matchesPlayed, ptsFor: sp.ptsFor, ptsAgainst: sp.ptsAgainst
             };
           }),
+          cfRanks: JSON.parse(JSON.stringify(S.session.cfRanks || {})),
           cfLog: JSON.parse(JSON.stringify(S.session.cfLog || []))
         };
         S.archive.unshift(arch);
@@ -1235,6 +1236,7 @@ const SIM = (() => {
           wins:sp.wins, losses:sp.losses, ties:sp.ties,
           matchesPlayed:sp.matchesPlayed, ptsFor:sp.ptsFor, ptsAgainst:sp.ptsAgainst
         })),
+        cfRanks: JSON.parse(JSON.stringify(S.session.cfRanks||{})),
         cfLog: JSON.parse(JSON.stringify(S.session.cfLog||[]))
       };
       S.archive.unshift(arch);
