@@ -2996,6 +2996,8 @@ function cfResumePlayer(id){
   const [entry]=S.session.cfPaused.splice(pi,1);
   // Re-enter queue preserving wait time (since is kept from original)
   S.session.cfQueue.push({id:entry.id,since:entry.since,consec:entry.consec||0});
+  // Mark resumed so catch-up pressure is capped — don't force continuous play to recoup missed games
+  const _spResume=gsp(id);if(_spResume)_spResume.resumedFromPause=true;
   STORE.save('session');renderLive();toast(`${p.name} back in queue ✓`,'ok');
 }
 
@@ -5531,6 +5533,19 @@ const CF={
     const activePlayers=S.session.players.filter(p=>p.status!=='left');
     const allGames=activePlayers.map(p=>p.matchesPlayed||0);
     if(!allGames.length)return 0;
+    // Late arrivals and resumed players: no catch-up hunger pressure.
+    // They joined/resumed at a different time — queue normally, don't play continuously.
+    // At most treat them as "1 game behind the minimum" so they get mild queue priority
+    // like any other player who just sat out once.
+    const isLate=S.session?.cfRanks?.[id]?.isLateArrival;
+    const isResumed=sp?.resumedFromPause;
+    if(isLate||isResumed){
+      const playedGames=allGames.filter(g=>g>0);
+      if(!playedGames.length)return 0;
+      const minG=Math.min(...playedGames);
+      const deficit=Math.max(0,minG-myGames); // only measure deficit vs the session floor
+      return Math.min(20,deficit*15); // tiny boost — at most "1 game behind" level
+    }
     const avgGames=allGames.reduce((a,b)=>a+b,0)/allGames.length;
     const deficit=avgGames-myGames;
     if(myGames===0&&avgGames>0)return Math.min(200,avgGames*25);
@@ -5573,7 +5588,9 @@ const CF={
       const maxG=activeCounts.length?Math.max(...activeCounts):0;
       const myG=gsp(qEntry.id)?.matchesPlayed||0;
       const pcg=maxG-myG;
-      pcgBonus=pcg>=4?100:pcg>=3?60:pcg>=2?25:0;
+      // Late arrivals and resumed players: no pcg catch-up bonus — queue normally
+      const _isLR=S.session?.cfRanks?.[qEntry.id]?.isLateArrival||!!(gsp(qEntry.id)?.resumedFromPause);
+      pcgBonus=_isLR?0:(pcg>=4?100:pcg>=3?60:pcg>=2?25:0);
     }
     return waitMin*2+skillFit+gapBonus+hunger+pcgBonus;
   },
@@ -6046,12 +6063,22 @@ const CF={
     // Stamp cached values for _scoreGroup on pool objects (multi-court paths skip _generateSingleSuggestion)
     const _batchActiveCounts=S.session.players.filter(sp=>sp.status!=='left').map(sp=>sp.matchesPlayed||0);
     const _batchMaxPlayed=_batchActiveCounts.length?Math.max(..._batchActiveCounts):0;
-    const _batchMinPlayed=_batchActiveCounts.length?Math.min(..._batchActiveCounts):0;
+    // Exclude late arrivals and resumed players from the floor — their low counts shouldn't
+    // trigger overplay penalties for everyone else or set an artificially low minimum.
+    const _batchFloorCounts=S.session.players.filter(sp=>{
+      if(sp.status==='left')return false;
+      if(S.session.cfRanks?.[sp.id]?.isLateArrival||sp.resumedFromPause)return false;
+      return true;
+    }).map(sp=>sp.matchesPlayed||0);
+    const _batchMinPlayed=_batchFloorCounts.length?Math.min(..._batchFloorCounts):0;
     const _batchMC=S.session.cfMatchCount||0;
     pool.forEach(p=>{
       const sp=gsp(p.id);
       p.mg=sp?.lastPlayedAtMatch!=null&&sp.matchesPlayed>0?_batchMC-(sp.lastPlayedAtMatch||0):_batchMC+1;
-      p.pcg=_batchMaxPlayed-(sp?.matchesPlayed||0);
+      const _rawPcg=_batchMaxPlayed-(sp?.matchesPlayed||0);
+      // Late arrivals / resumed: cap catch-up pressure at 1 game — they queue normally
+      const _isLR2=S.session.cfRanks?.[p.id]?.isLateArrival||sp?.resumedFromPause;
+      p.pcg=_isLR2?Math.min(_rawPcg,1):_rawPcg;
       p._minGames=_batchMinPlayed;
     });
 
@@ -6460,12 +6487,20 @@ const CF={
     const _activePlayerCounts=S.session.players
       .filter(sp2=>sp2.status!=='left').map(sp2=>sp2.matchesPlayed||0);
     const _maxPlayed=_activePlayerCounts.length?Math.max(..._activePlayerCounts):0;
-    const _minPlayed=_activePlayerCounts.length?Math.min(..._activePlayerCounts):0;
+    // Exclude late arrivals and resumed players from floor — same logic as batch path
+    const _floorCounts=S.session.players.filter(sp2=>{
+      if(sp2.status==='left')return false;
+      if(S.session.cfRanks?.[sp2.id]?.isLateArrival||sp2.resumedFromPause)return false;
+      return true;
+    }).map(sp2=>sp2.matchesPlayed||0);
+    const _minPlayed=_floorCounts.length?Math.min(..._floorCounts):0;
     const _mc=S.session.cfMatchCount||0;
     pool.forEach(p=>{
       const sp2=gsp(p.id);
       p.mg=sp2?.lastPlayedAtMatch!=null&&sp2.matchesPlayed>0?_mc-(sp2.lastPlayedAtMatch||0):_mc+1;
-      p.pcg=_maxPlayed-(sp2?.matchesPlayed||0); // play-count gap vs leader
+      const _rawPcg2=_maxPlayed-(sp2?.matchesPlayed||0);
+      const _isLR3=S.session.cfRanks?.[p.id]?.isLateArrival||sp2?.resumedFromPause;
+      p.pcg=_isLR3?Math.min(_rawPcg2,1):_rawPcg2; // late/resumed: no catch-up debt
       p._minGames=_minPlayed;
     });
 
