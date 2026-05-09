@@ -1074,7 +1074,7 @@ const SYNC={
           // localActiveCourts block above — no second restore path needed here.
           // Remove on-court players from queue (null-safe court iteration)
           const onCourtIds=new Set(
-            Object.values(S.session.cfCourts)
+            Object.values(S.session.cfCourts||{})
               .filter(ct=>ct&&ct.status==='playing'&&ct.match)
               .flatMap(ct=>[...ct.match.t1,...ct.match.t2])
           );
