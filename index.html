@@ -1052,6 +1052,10 @@ const SYNC={
           const sameMatch=remoteCt?.status==='playing'&&remoteCt?.match?.id===ct.match?.id;
           if(!remoteCt||remoteCt.status==='ready'||remoteCt.status==null||sameMatch){
             S.session.cfCourts[c]=ct;
+            // Clear any stale remote suggestion for this court — it's already playing locally.
+            // Without this, cfSuggestions[c] from remote survives and renderLive renders
+            // a READY suggestion card on top of the LIVE playing card for the same court.
+            if(S.session.cfSuggestions)S.session.cfSuggestions[c]=null;
             console.warn(`[sync] Preserved local active court ${c} match ${ct.match.id}${sameMatch?' (swap)':''} — not in remote log`);
           }
         });
