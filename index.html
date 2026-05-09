@@ -7086,6 +7086,12 @@ const CF={
       if(!noElo)sp.sRating=Math.max(400,sp.sRating+m.eloDeltas[i]);
       sp.matchesPlayed++;
       sp.timeOnCourtMs=(sp.timeOnCourtMs||0)+durMs;
+      // Late arrival integration: after playing nc games they're in the normal rotation.
+      // Clear the flag so they get full hunger/pcg priority like any other player.
+      const _nc=S.session.courts||2;
+      if(S.session.cfRanks?.[id]?.isLateArrival&&sp.matchesPlayed>=_nc){
+        S.session.cfRanks[id].isLateArrival=false;
+      }
       // noElo = not counted in ladder — skip W/L/T and points differential too
       if(!noElo){
         if(i<2){sp.ptsFor+=s1;sp.ptsAgainst+=s2;}else{sp.ptsFor+=s2;sp.ptsAgainst+=s1;}

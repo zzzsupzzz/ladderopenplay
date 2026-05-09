@@ -523,6 +523,10 @@ const SIM = (() => {
           midAddDone = true;
           _disruptedAt[newId] = S.session.cfMatchCount || 0;
           _disruptedType[newId] = 'midadd';
+          // Initialise wait tracking from join time so the queue-wait before first game
+          // is counted, not skipped. Without this, _lastGameEndMc stays undefined and
+          // the first inter-game gap records as 0 regardless of actual wait.
+          _lastGameEndMc[newId] = S.session.cfMatchCount || 0;
           log(`Mid-add: ${NAMES[nPlayers]} joined (round ${r+1})`);
           verifyNoGhosts();
           if (doRender) render();
