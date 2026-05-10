@@ -482,12 +482,17 @@ const SIM = (() => {
           const ct = S.session.cfCourts?.[c];
           if (ct?.status === 'playing' && ct.match) {
             if (courtTicks[c] > 0) { courtTicks[c]--; continue; }
-            // Record game-end match count for each player leaving court
+            // Record game-end match count for each player leaving court.
+            // Use match.matchIdx+1 (= cfMatchCount when this match was confirmed), NOT
+            // the current cfMatchCount at submit time. By submit time, other courts may
+            // have confirmed several more matches, inflating cfMatchCount well above
+            // this match's position — making all subsequent gaps smaller than reality.
+            // matchIdx is stamped at confirmSuggestion time so it's always accurate.
             const _ct = S.session.cfCourts?.[c];
             if (_ct?.match) {
-              const _mc = S.session.cfMatchCount || 0;
+              const _endAnchor = (_ct.match.matchIdx ?? 0) + 1;
               [...(_ct.match.t1||[]), ...(_ct.match.t2||[])].forEach(id => {
-                _lastGameEndMc[id] = _mc + 1; // +1 because this match is about to be counted
+                _lastGameEndMc[id] = _endAnchor;
               });
             }
             const [s1, s2] = randomScore();
