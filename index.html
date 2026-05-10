@@ -2003,6 +2003,127 @@ function _compatibleQueuePartners(id){
 }
 
 
+// ── Progressive group reservation ─────────────────────────────────────────────
+// Builds a 4-player match in advance for long-waiting players.
+// Starts at wait=courts (enough time to collect all 4 before the hard cap).
+// Hard cap: wait=courts*2 — forces match complete using phase ceiling relaxation.
+// Only one group builds at a time. No partial locks that can deadlock.
+function _tryGrowReservation(){
+  const sp=S.session;
+  if(!sp||!sp.cfQueue)return;
+  const n=_totalRanked()||sp.activePlayers?.length||20;
+  const nc=sp.courts||1;
+  const startThreshold=nc;   // begin at wait=courts
+  const hardCap=nc*2;        // force-complete at wait=courts*2
+
+  // ── Validate existing group ─────────────────────────────────────────────────
+  if(sp.cfReservedGroup){
+    const g=sp.cfReservedGroup;
+    const activePids=new Set(sp.players.filter(p=>p.status!=='left').map(p=>p.id));
+    if(!g.ids.every(id=>activePids.has(id))){
+      console.log('[reserve] Group dissolved — member left');
+      sp.cfReservedGroup=null;
+    }
+  }
+
+  if((sp.cfReservedGroup?.ids?.length||0)>=4)return; // complete, nothing to grow
+
+  const queueIds=new Set((sp.cfQueue||[]).map(q=>q.id));
+
+  // ── Grow existing group ─────────────────────────────────────────────────────
+  if(sp.cfReservedGroup){
+    const g=sp.cfReservedGroup;
+    const reservedSet=new Set(g.ids);
+    const anchorWait=CF.matchGap(g.anchorId);
+    const useHardCap=anchorWait>=hardCap;
+    const waitForGap=useHardCap?hardCap:0;
+    const maxGap=_maxPartnerGap(n,nc,waitForGap);
+    // Candidates: in queue, not already reserved
+    const candidates=(sp.cfQueue||[]).filter(q=>!reservedSet.has(q.id));
+
+    if(g.ids.length===2){
+      // Add 3rd: will be an opponent; check a viable 4th exists somewhere in active pool
+      const [a0,a1]=g.ids;
+      const r0=_sessionRank(a0)||Math.ceil(n/2);
+      const r1=_sessionRank(a1)||Math.ceil(n/2);
+      const pairAvg=(r0+r1)/2;
+      const allActive=sp.players.filter(p=>p.status!=='left').map(p=>p.id);
+      let best3=null,best3Score=-Infinity;
+      for(const cand of candidates){
+        const rc=_sessionRank(cand.id)||Math.ceil(n/2);
+        // Confirm a viable 4th exists (in queue or still active on court)
+        const hasViable4th=allActive.some(pid=>{
+          if(reservedSet.has(pid)||pid===cand.id)return false;
+          const rp=_sessionRank(pid)||Math.ceil(n/2);
+          return Math.abs(rc-rp)<=maxGap&&Math.abs((rc+rp)/2-pairAvg)<=maxGap*1.5;
+        });
+        if(!hasViable4th)continue;
+        const score=CF.matchGap(cand.id)*10-Math.abs(rc-pairAvg);
+        if(score>best3Score){best3Score=score;best3=cand;}
+      }
+      if(best3){
+        g.ids.push(best3.id);
+        console.log(`[reserve] Group +3rd: ${gp(best3.id)?.name} (wait=${CF.matchGap(best3.id)})`);
+      }
+    }
+
+    if(g.ids.length===3){
+      // Add 4th: must complete a valid 2v2 — try all team assignments
+      const [a0,a1,a2]=g.ids;
+      let best4=null,best4Score=-Infinity,best4Asgn=null;
+      for(const cand of candidates){
+        if(g.ids.includes(cand.id))continue;
+        const perms=[
+          {t1:[a0,a1],t2:[a2,cand.id]},
+          {t1:[a0,a2],t2:[a1,cand.id]},
+          {t1:[a0,cand.id],t2:[a1,a2]},
+        ];
+        for(const asgn of perms){
+          if(_ranksCompatible(asgn.t1,asgn.t2,waitForGap)){
+            const score=CF.matchGap(cand.id)*10;
+            if(score>best4Score){best4Score=score;best4=cand;best4Asgn=asgn;}
+            break;
+          }
+        }
+      }
+      if(best4){
+        g.ids.push(best4.id);
+        g.assignment=best4Asgn;
+        console.log(`[reserve] Group COMPLETE: ${g.ids.map(id=>gp(id)?.name).join(', ')}`);
+      }
+    }
+    return;
+  }
+
+  // ── Start a new group ───────────────────────────────────────────────────────
+  const anchors=(sp.cfQueue||[])
+    .map(q=>({...q,wait:CF.matchGap(q.id)}))
+    .filter(q=>q.wait>=startThreshold)
+    .sort((a,b)=>b.wait-a.wait);
+  if(!anchors.length)return;
+
+  const anchor=anchors[0];
+  const anchorRank=_sessionRank(anchor.id)||Math.ceil(n/2);
+  const maxGap=_maxPartnerGap(n,nc,0);
+
+  let bestPartner=null,bestScore=-Infinity;
+  for(const cand of sp.cfQueue){
+    if(cand.id===anchor.id)continue;
+    const cr=_sessionRank(cand.id)||Math.ceil(n/2);
+    if(Math.abs(anchorRank-cr)>maxGap)continue;
+    const score=CF.matchGap(cand.id);
+    if(score>bestScore){bestScore=score;bestPartner=cand;}
+  }
+  if(!bestPartner)return;
+
+  sp.cfReservedGroup={
+    ids:[anchor.id,bestPartner.id],
+    anchorId:anchor.id,
+    formedAt:sp.cfMatchCount||0,
+  };
+  console.log(`[reserve] Group started: ${gp(anchor.id)?.name}(wait=${anchor.wait}) + ${gp(bestPartner.id)?.name}(wait=${CF.matchGap(bestPartner.id)})`);
+}
+
 // ── Manual rank override ──────────────────────────────────────────────────────
 function openRankOverride(id){
   if(!S.session?.cfRanks){toast('Session not started','warn');return;}
@@ -2550,7 +2671,7 @@ function startSession(){
     }),
     partnerHx:{},oppHx:{},oppHxTime:{},
     nrPairingHx:{},
-    cfQueue:[],cfPinnedIds:[],cfPauseAfterGame:[],cfLockedPairs:[],cfSoftPairs:[],cfPermPairs:[],cfLeaveSoonIds:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,
+    cfQueue:[],cfPinnedIds:[],cfPauseAfterGame:[],cfLockedPairs:[],cfSoftPairs:[],cfPermPairs:[],cfLeaveSoonIds:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,cfReservedGroup:null,
     courtOffset:0,
     cfMatchupHx:{},cfGroupHx:{},cfPairConsec:{},cfPairWins:{},cfMustSplitPair:null,cfPaused:[],
     cfPairSessionCount:{},cfPairLastAt:{},cfPairLastLost:{},
@@ -3034,6 +3155,11 @@ function cfPausePlayer(id){
   const [entry]=S.session.cfQueue.splice(qi,1);
   if(!S.session.cfPaused)S.session.cfPaused=[];
   S.session.cfPaused.push({...entry,pausedAt:Date.now()});
+  // Dissolve reserved group if this player was in it
+  if(S.session.cfReservedGroup?.ids?.includes(id)){
+    console.log(`[reserve] Group dissolved — ${gp(id)?.name} paused`);
+    S.session.cfReservedGroup=null;
+  }
   // Invalidate and regenerate any suggestions containing the paused player
   if(S.session.cfSuggestions){
     const needRegen=[];
@@ -6146,8 +6272,14 @@ const CF={
       if(sug&&!readySet.has(+c))sug.allIds.forEach(id=>reservedIds.add(id));
     });
     let queue=S.session.cfQueue.filter(q=>!reservedIds.has(q.id));
-    const nc=readyCourts.length;
-    const need=nc*4;
+    // Exclude incomplete reserved group from pool — they hold for their group to complete
+    const _rgReserved=S.session.cfReservedGroup;
+    if(_rgReserved&&(_rgReserved.ids?.length||0)<4){
+      const _rgSet=new Set(_rgReserved.ids||[]);
+      queue=queue.filter(q=>!_rgSet.has(q.id));
+    }
+    let nc=readyCourts.length;
+    let need=nc*4;
 
     // Not enough players for even one court
     if(queue.length<4){readyCourts.forEach(c=>{S.session.cfSuggestions[c]=null;});return;}
@@ -6192,6 +6324,30 @@ const CF={
         const aLeft=gsp(a)?.status==='left',bLeft=gsp(b)?.status==='left';
         if(aQ&&!bQ&&!bLeft){queue=queue.filter(q=>q.id!==a);qIds.delete(a);}
         if(bQ&&!aQ&&!aLeft){queue=queue.filter(q=>q.id!==b);qIds.delete(b);}
+      }
+    }
+
+    // ── Complete reserved group: inject into first ready court ─────────────────
+    if(_rgReserved?.ids?.length===4&&_rgReserved?.assignment){
+      const _rgQSet=new Set(queue.map(q=>q.id));
+      if(_rgReserved.ids.every(id=>_rgQSet.has(id))){
+        const _rgCourt=readyCourts[0];
+        S.session.cfSuggestions[_rgCourt]={
+          t1:_rgReserved.assignment.t1,
+          t2:_rgReserved.assignment.t2,
+          allIds:[..._rgReserved.assignment.t1,..._rgReserved.assignment.t2],
+        };
+        const _rgIdSet=new Set(_rgReserved.ids);
+        queue=queue.filter(q=>!_rgIdSet.has(q.id));
+        readyCourts=readyCourts.filter(c=>c!==_rgCourt);
+        S.session.cfReservedGroup=null;
+        nc=readyCourts.length;
+        need=nc*4;
+        setTimeout(()=>cfMaybeAutoConfirm(_rgCourt),500);
+        if(!readyCourts.length)return;
+      }else{
+        // Stale — some reserved player was grabbed elsewhere; dissolve
+        S.session.cfReservedGroup=null;
       }
     }
 
@@ -6923,6 +7079,8 @@ const CF={
       if(qEntry&&sp){sp.timeInQueueMs=(sp.timeInQueueMs||0)+(now-qEntry.since);}
     });
     this.dequeue(sug.allIds);
+    // Validate reserved group — a dequeue may have removed a group member
+    try{_tryGrowReservation();}catch(e){console.warn('[reserve] grow error:',e);}
     // Clear any pins that were satisfied by this confirmation
     if(S.session.cfPinnedIds){
       S.session.cfPinnedIds=S.session.cfPinnedIds.filter(id=>!sug.allIds.includes(id));
@@ -6972,6 +7130,7 @@ const CF={
       _paths['session/oppHx']=_sp.oppHx??null;
       _paths['session/oppHxTime']=_sp.oppHxTime??null;
       _paths[`session/cfSuggestions/${courtNum}`]=null; // cleared above
+      _paths['session/cfReservedGroup']=_sp.cfReservedGroup??null;
       // Queue entries for the 4 players being put on court
       sug.allIds.forEach(id=>{
         _paths[`session/cfQueue/${id}`]=null; // dequeued
@@ -7206,6 +7365,8 @@ const CF={
     // CRITICAL: suggestion generation must NEVER block score saving.
     // Wrap in try-catch — any runtime error in matchmaking is non-fatal.
     // Score, ELO, queue re-entry and stats are already committed above this line.
+    // Grow reservation first — newly re-queued players may complete the group
+    try{_tryGrowReservation();}catch(e){console.warn('[reserve] grow error:',e);}
     try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     catch(e){console.error('CF suggestion error (non-fatal):',e);}
     // Audit: most important forensic event — score submission with full result context
@@ -7233,6 +7394,7 @@ const CF={
       _paths['session/cfLeaveSoonIds']=_sp.cfLeaveSoonIds??null;
       _paths['session/cfPauseAfterGame']=_sp.cfPauseAfterGame??null;
       if(_sp.nrPairingHx)_paths['session/nrPairingHx']=_sp.nrPairingHx;
+      _paths['session/cfReservedGroup']=_sp.cfReservedGroup??null;
       // cfRanks per-player — different courts update different players, no collision
       Object.entries(_sp.cfRanks||{}).forEach(([_rid,_rv])=>{_paths[`session/cfRanks/${_rid}`]=_rv??null;});
       // Per-player paths: only the 4 players in this match + any auto-leave players
@@ -8190,6 +8352,13 @@ const CF={
           if(waitMin>=20)reasons.push(`<span style="font-size:.59rem;color:var(--re)">⏰ Long wait priority</span>`);
           const gap2=CF.matchGap(q.id);
           const nc2=S.session?.courts||1;
+          // Reserved group badge
+          const _rg=S.session.cfReservedGroup;
+          if(_rg?.ids?.includes(q.id)){
+            const _rgStage=_rg.ids.length;
+            if(_rgStage>=4)reasons.push(`<span style="font-size:.59rem;color:var(--gr);font-weight:700">✅ Group ready — next court</span>`);
+            else reasons.push(`<span style="font-size:.59rem;color:var(--cy);font-weight:700">⏳ Group forming (${_rgStage}/4) — waiting for opponents</span>`);
+          }
           // Permanent pair: show who they're waiting for if partner isn't in queue
           const _permPairsQ=S.session.cfPermPairs||[];
           for(const[_pa,_pb]of _permPairsQ){
