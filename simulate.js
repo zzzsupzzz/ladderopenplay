@@ -181,7 +181,7 @@ const SIM = (() => {
       cfMatchupHx: {}, cfGroupHx: {}, cfPairConsec: {}, cfPairWins: {},
       cfMustSplitPair: null, cfPaused: [],
       cfPairSessionCount: {}, cfPairLastAt: {}, cfPairLastLost: {},
-      cfRanks: {}, cfPendingPairs: [],
+      cfRanks: {},
       neverPair: {}, ratingOverrides: {},
       auditLog: [],
       status: 'lobby'
@@ -339,7 +339,6 @@ const SIM = (() => {
       rounds = 20,
       speed = 'instant',
       live = false,
-      noPairLock = false  // when true: cfPendingPairs cleared each round, pair-lock never fires
     } = opts;
 
     _running = true;
@@ -350,7 +349,7 @@ const SIM = (() => {
     const ms = resolveSpeed(speed);
     const doRender = ms > 0 || live;
 
-    log(`=== SIMULATION START === speed=${speed}(${ms}ms) live=${live} noPairLock=${noPairLock}`);
+    log(`=== SIMULATION START === speed=${speed}(${ms}ms) live=${live}`);
     const t0 = performance.now();
 
     let _lastSimArch = null;
@@ -422,10 +421,6 @@ const SIM = (() => {
       for (let r = 0; r < rounds; r++) {
         if (_aborted) { log('ABORTED by user'); break; }
         const _roundT0 = performance.now();
-
-        // Pair-lock disabled: clear any pending pairs before each suggestion cycle
-        // so the matchmaker treats every queue player as a free agent.
-        if (noPairLock && S.session?.cfPendingPairs) S.session.cfPendingPairs = [];
 
         // Regenerate suggestions for ready courts that have none
         const readyNoSug = [];
@@ -1049,7 +1044,7 @@ const SIM = (() => {
         cfLeaveSoonIds:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,courtOffset:0,
         cfMatchupHx:{},cfGroupHx:{},cfPairConsec:{},cfPairWins:{},cfMustSplitPair:null,cfPaused:[],
         cfPairSessionCount:{},cfPairLastAt:{},cfPairLastLost:{},
-        cfRanks:{},cfPendingPairs:[],neverPair:{},ratingOverrides:{},auditLog:[],status:'lobby'
+        cfRanks:{},neverPair:{},ratingOverrides:{},auditLog:[],status:'lobby'
       };
       S.session.status = 'active'; S.session.sessionStart = Date.now();
       _initSessionRanks(); _invalidateMatchmakingCaches();
@@ -1541,14 +1536,6 @@ const SIM = (() => {
     return run({ players: 25, courts: 4, rounds: 70, speed: 'fast', ...opts });
   }
 
-  // ── No-pair-lock variants: same as above but cfPendingPairs cleared each round ──
-  // Use these to compare matchmaking quality with vs without the pair-lock system.
-  // Pair lock: players waiting too long get their partner reserved to guarantee next game.
-  // Without it: matchmaker picks freely every round — may improve variety at cost of fairness.
-  // Usage: SIM.run14({noPairLock:true})  or  SIM.runNoPairLock({players:14, courts:2})
-  function runNoPairLock(opts = {}) {
-    return run({ rounds: 70, speed: 'fast', ...opts, noPairLock: true });
-  }
 
   // ── Permanent pair stress test ──────────────────────────────────────────────
 
@@ -1728,14 +1715,10 @@ const SIM = (() => {
         <input type="checkbox" id="sim-step"/>
         <label for="sim-step">Step mode (pause after each action)</label>
       </div>
-      <div class="sim-chk">
-        <input type="checkbox" id="sim-nopairlock"/>
-        <label for="sim-nopairlock">No pair lock (free matchmaking, no reserved partner slots)</label>
-      </div>
       <button class="sim-go" id="sim-run-btn" onclick="SIM._uiRun()">▶ Run Full Simulation</button>
-      <button class="sim-go" style="background:#34d399;color:#052e16" onclick="SIM.run14({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,noPairLock:document.getElementById('sim-nopairlock')?.checked??false})">14p / 2c</button>
-      <button class="sim-go" style="background:#38bdf8;color:#0c1a2e" onclick="SIM.run20({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,noPairLock:document.getElementById('sim-nopairlock')?.checked??false})">20p / 3c</button>
-      <button class="sim-go" style="background:#f59e0b;color:#1c0f00" onclick="SIM.run26({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,noPairLock:document.getElementById('sim-nopairlock')?.checked??false})">26p / 4c</button>
+      <button class="sim-go" style="background:#34d399;color:#052e16" onclick="SIM.run14({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">14p / 2c</button>
+      <button class="sim-go" style="background:#38bdf8;color:#0c1a2e" onclick="SIM.run20({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">20p / 3c</button>
+      <button class="sim-go" style="background:#f59e0b;color:#1c0f00" onclick="SIM.run26({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">26p / 4c</button>
       <button class="sim-go" style="background:#a78bfa;color:#1a0540" onclick="SIM.runOrganizer12({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">⛓️ Organizer 14p/2c</button>
       <button class="sim-bug" onclick="SIM.runPermPairCheck()">🔒 Perm Pair Stress Test</button>
       <button class="sim-continue" id="sim-continue-btn" onclick="SIM._continue()" style="display:none;background:#fb923c;color:#111">Continue</button>
@@ -1770,10 +1753,8 @@ const SIM = (() => {
     const rounds = parseInt(document.getElementById('sim-rounds')?.value) || 40;
     const speed = document.getElementById('sim-speed')?.value || 'normal';
     const live = document.getElementById('sim-live')?.checked ?? false;
-    const noPairLock = document.getElementById('sim-nopairlock')?.checked ?? false;
-
     try {
-      await run({ players, courts, rounds, speed, live, noPairLock });
+      await run({ players, courts, rounds, speed, live });
     } finally {
       if (btn) btn.disabled = false;
       if (stopBtn) stopBtn.disabled = true;
@@ -1785,6 +1766,6 @@ const SIM = (() => {
     else window.addEventListener('load', buildPanel);
   }
 
-  return { run, run14, run20, run26, runNoPairLock, runBugChecks, runOrganizer12, runPermPairCheck, stop, _uiRun, _continue, log: () => _log, errors: () => _errs };
+  return { run, run14, run20, run26, runBugChecks, runOrganizer12, runPermPairCheck, stop, _uiRun, _continue, log: () => _log, errors: () => _errs };
 
 })();

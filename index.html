@@ -1664,7 +1664,6 @@ function effectiveRating(id, round){
 // Matchmaking rules scale automatically to tonight's player count.
 
 const BAND_COLORS = {A:'var(--go)',B:'var(--gr)',C:'var(--cy)',D:'var(--pu)'};
-const PENDING_PAIR_THRESHOLD = 4; // matches sat out before pending pair locks
 
 // ── Rank helpers ─────────────────────────────────────────────────────────────
 
@@ -1989,13 +1988,9 @@ function _compatibleQueuePartners(id){
   const myRank=_sessionRank(id)||Math.ceil((_totalRanked()||20)/2);
   const n=_totalRanked()||20;
   const nc=S.session?.courts||1;
-  // Pass actual wait gap so extreme-wait players (Riley, Charlie at rating extremes)
-  // get a progressively wider partner pool. _maxPartnerGap already has the relaxation
-  // logic (8% of N per 2 missed matches, capped at phase ceiling) — it was just never
-  // being fed the real wait. Without this, Riley (bottom-rated) was locked to a 6-rank
-  // window forever and starved whenever those 6 players were all on court.
-  const wait=CF?.matchGap?.(id)||0;
-  const maxGap=_maxPartnerGap(n,nc,wait);
+  // Base gap only — no wait-based relaxation needed without the pending pair system.
+  // The main matchmaking engine already handles wait relaxation in _ranksCompatible.
+  const maxGap=_maxPartnerGap(n,nc,0);
   const result=(S.session.cfQueue||[])
     .filter(q=>{
       if(q.id===id)return false;
@@ -2007,76 +2002,6 @@ function _compatibleQueuePartners(id){
   return result;
 }
 
-// ── Pending pair system ───────────────────────────────────────────────────────
-
-function _checkPendingPairs(){
-  if(!S.session)return;
-  if(!S.session.cfPendingPairs)S.session.cfPendingPairs=[];
-  if(!S.session.cfPairCooldown)S.session.cfPairCooldown={};
-  const nc=S.session.courts||2;
-  const mc=S.session.cfMatchCount||0;
-  const queue=S.session.cfQueue||[];
-
-  // ── Expiry: release locks held for ≥ nc completed matches without confirming.
-  // When a lock expires, apply a cooldown (nc matches) to both players so they are
-  // NOT immediately re-locked in the same call. Without cooldown, the expiry loop and
-  // the lock-creation loop run back-to-back in one function call, causing repeated
-  // nc-cycle deadlocks: Jordan gets [4] → expires → immediately re-locks → expires →
-  // re-locks → total wait grows to [8] (two cycles of nc=2 each).
-  const _pairTimeout=nc; // one full rotation cycle
-  const _before=S.session.cfPendingPairs.length;
-  const _expiredIds=[];
-  S.session.cfPendingPairs=S.session.cfPendingPairs.filter(p=>{
-    const lockedAt=p[2]??null;
-    if(lockedAt===null){_expiredIds.push(p[0],p[1]);return false;} // legacy → stale
-    if((mc-lockedAt)>=_pairTimeout){_expiredIds.push(p[0],p[1]);return false;}
-    return true;
-  });
-  if(_expiredIds.length){
-    // Cooldown: prevent re-locking the same players for nc more matches
-    _expiredIds.forEach(id=>{S.session.cfPairCooldown[id]=mc;});
-    const names=[...new Set(_expiredIds)].map(id=>gp(id)?.name||id).join(', ');
-    console.log(`[pairs] Expired ${_before-S.session.cfPendingPairs.length} stale lock(s); cooldown → ${names}`);
-  }
-
-  // ── Create new locks for players who have waited ≥ PENDING_PAIR_THRESHOLD ──
-  for(const q of queue){
-    const gap=CF?.matchGap?.(q.id)||0;
-    if(gap<PENDING_PAIR_THRESHOLD)continue;
-    // Already in a (fresh) lock — don't double-lock
-    if(S.session.cfPendingPairs.some(p=>p[0]===q.id||p[1]===q.id))continue;
-    // Cooldown: skip re-locking for nc matches after a lock expired (breaks cycle deadlock)
-    const _coolAt=S.session.cfPairCooldown[q.id]??null;
-    if(_coolAt!==null){
-      if((mc-_coolAt)<nc){
-        console.log(`[pairs] ${gp(q.id)?.name} cooling down (${nc-(mc-_coolAt)} left) — hunger priority instead`);
-        continue;
-      }
-      delete S.session.cfPairCooldown[q.id]; // cooldown elapsed, clear it
-    }
-    const compat=_compatibleQueuePartners(q.id)
-      .filter(pid=>!S.session.cfPendingPairs.some(p=>p[0]===pid||p[1]===pid));
-    if(!compat.length){
-      // No compatible partner free — don't lock a bad pair.
-      console.log(`[pairs] ${gp(q.id)?.name}(#${_sessionRank(q.id)}) waiting — no compatible partner available`);
-      continue;
-    }
-    const partner=compat.sort((a,b)=>(CF?.matchGap?.(b)||0)-(CF?.matchGap?.(a)||0))[0];
-    // Store [id1, id2, lockedAtMatchCount] — timestamp enables expiry
-    S.session.cfPendingPairs.push([q.id,partner,mc]);
-    console.log(`[pairs] Locked: ${gp(q.id)?.name}(#${_sessionRank(q.id)}) + ${gp(partner)?.name}(#${_sessionRank(partner)}) at mc=${mc}`);
-  }
-
-  // ── Clean up pairs where a player left the queue (on court, paused, or left) ──
-  S.session.cfPendingPairs=S.session.cfPendingPairs.filter(p=>
-    queue.some(q=>q.id===p[0])&&queue.some(q=>q.id===p[1]));
-}
-
-// Use explicit index checks (p[0]/p[1]) — safer than p.includes() which would also
-// match the numeric lockedAt timestamp stored at p[2] if an id ever equalled it.
-function _isPendingPairMember(id){return(S.session?.cfPendingPairs||[]).some(p=>p[0]===id||p[1]===id);}
-function _getPendingPartner(id){const pair=(S.session?.cfPendingPairs||[]).find(p=>p[0]===id||p[1]===id);return pair?(pair[0]===id?pair[1]:pair[0]):null;}
-function _clearPendingPair(id){if(!S.session?.cfPendingPairs)return;S.session.cfPendingPairs=S.session.cfPendingPairs.filter(p=>p[0]!==id&&p[1]!==id);}
 
 // ── Manual rank override ──────────────────────────────────────────────────────
 function openRankOverride(id){
@@ -2629,7 +2554,7 @@ function startSession(){
     courtOffset:0,
     cfMatchupHx:{},cfGroupHx:{},cfPairConsec:{},cfPairWins:{},cfMustSplitPair:null,cfPaused:[],
     cfPairSessionCount:{},cfPairLastAt:{},cfPairLastLost:{},
-    cfRanks:{},cfPendingPairs:[],cfPairCooldown:{}, // session ranking system — populated on beginPlay
+    cfRanks:{}, // session ranking system — populated on beginPlay
     neverPair:{},ratingOverrides:{},
     auditLog:[],
     status:'lobby'
@@ -6279,10 +6204,6 @@ const CF={
     const pool=queue
       .map(q=>({id:q.id,sr:this._rankSr(q.id),waitMin:(Date.now()-q.since)/60000,qEntry:q}))
       .sort((a,b)=>{
-        // Pending pair members always float to top — they've waited 4+ matches
-        const aPending=_isPendingPairMember(a.id)?1:0; // session score aware
-        const bPending=_isPendingPairMember(b.id)?1:0;
-        if(aPending!==bPending)return bPending-aPending;
         // Primary sort: large hunger difference (>10) forces hungry player first —
         // guarantees 0-game / far-behind players are in the search window.
         const ha=this.hungerBoost(a.id),hb=this.hungerBoost(b.id);
@@ -7002,8 +6923,6 @@ const CF={
       if(qEntry&&sp){sp.timeInQueueMs=(sp.timeInQueueMs||0)+(now-qEntry.since);}
     });
     this.dequeue(sug.allIds);
-    // Clear pending pair reservations for these players — they're playing now
-    sug.allIds.forEach(id=>_clearPendingPair(id));
     // Clear any pins that were satisfied by this confirmation
     if(S.session.cfPinnedIds){
       S.session.cfPinnedIds=S.session.cfPinnedIds.filter(id=>!sug.allIds.includes(id));
@@ -7045,8 +6964,6 @@ const CF={
       const _paths={};
       _paths[`session/cfCourts/${courtNum}`]=_sp.cfCourts[courtNum]??null;
       _paths['session/cfPinnedIds']=_sp.cfPinnedIds??null;
-      _paths['session/cfPendingPairs']=_sp.cfPendingPairs??null; // sync pair clears + timestamps
-      _paths['session/cfPairCooldown']=_sp.cfPairCooldown??null; // sync cooldown state
       _paths['session/cfPairConsec']=_sp.cfPairConsec??null;
       _paths['session/cfPairSessionCount']=_sp.cfPairSessionCount??null;
       _paths['session/cfPairLastAt']=_sp.cfPairLastAt??null;
@@ -7155,8 +7072,6 @@ const CF={
       [...winners].forEach(id=>_updateSessionRank(id,true,pd,losers));
       [...losers].forEach(id=>_updateSessionRank(id,false,pd,winners));
     }
-    // Check for pending pairs after each match (players now back in queue)
-    setTimeout(()=>_checkPendingPairs(),100);
     // Single batched NR promotion check — write db only (session handled by savePaths below)
     const _anyPromo=[...m.t1,...m.t2].map(id=>checkNRPromotion(id)).some(Boolean);
     if(_anyPromo)STORE.save('db');
@@ -8275,9 +8190,6 @@ const CF={
           if(waitMin>=20)reasons.push(`<span style="font-size:.59rem;color:var(--re)">⏰ Long wait priority</span>`);
           const gap2=CF.matchGap(q.id);
           const nc2=S.session?.courts||1;
-          // P5: Pending pair label
-          const _pendingPartner=_getPendingPartner(q.id);
-          if(_pendingPartner){const _ppName=gp(_pendingPartner)?.name?.split(' ')[0]||'?';reasons.push(`<span style="font-size:.59rem;color:var(--cy);font-weight:700">🔒 Reserved with ${_ppName} — waiting for compatible court</span>`);}
           // Permanent pair: show who they're waiting for if partner isn't in queue
           const _permPairsQ=S.session.cfPermPairs||[];
           for(const[_pa,_pb]of _permPairsQ){
