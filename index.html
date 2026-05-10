@@ -1989,8 +1989,13 @@ function _compatibleQueuePartners(id){
   const myRank=_sessionRank(id)||Math.ceil((_totalRanked()||20)/2);
   const n=_totalRanked()||20;
   const nc=S.session?.courts||1;
-  // Use phase-aware base gap (no wait relaxation — pending pairs form immediately)
-  const maxGap=_maxPartnerGap(n,nc,0);
+  // Pass actual wait gap so extreme-wait players (Riley, Charlie at rating extremes)
+  // get a progressively wider partner pool. _maxPartnerGap already has the relaxation
+  // logic (8% of N per 2 missed matches, capped at phase ceiling) — it was just never
+  // being fed the real wait. Without this, Riley (bottom-rated) was locked to a 6-rank
+  // window forever and starved whenever those 6 players were all on court.
+  const wait=CF?.matchGap?.(id)||0;
+  const maxGap=_maxPartnerGap(n,nc,wait);
   const result=(S.session.cfQueue||[])
     .filter(q=>{
       if(q.id===id)return false;
