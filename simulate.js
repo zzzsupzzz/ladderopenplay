@@ -384,8 +384,13 @@ const SIM = (() => {
 
       // Wait-time tracking: completed matches elapsed between a player's last game ending
       // and their next game starting. Measures queue fairness under staggered court finishes.
-      const _lastGameEndMc = {}; // player id → cfMatchCount when they last finished
+      const _lastGameEndMc = {}; // player id → cfMatchCount anchor for gap calculation
       const _waitGaps = {};      // player id → array of completed-match waits
+      // Per-court: cfMatchCount immediately AFTER this court's last confirm. Used at
+      // score-submission to anchor _lastGameEndMc correctly — using cfMatchCount at
+      // submit time is wrong because other courts may have confirmed more matches since,
+      // inflating the value and making all subsequent gaps appear smaller than reality.
+      const _courtConfirmMc = {};
 
       // Per-court tick counters — each court independently counts down before submitting.
       // 80%: each court gets a fresh 2–5 tick game length (staggered finish).
@@ -449,6 +454,9 @@ const SIM = (() => {
                   _waitGaps[id].push(_mc - _lastGameEndMc[id]);
                 }
               });
+              // Snapshot cfMatchCount+1 (= value after this confirm) keyed by court.
+              // Used at score-submission time to anchor _lastGameEndMc correctly.
+              _courtConfirmMc[c] = _mc + 1;
             }
             CF.confirmSuggestion(c);
             courtTicks[c] = assignGameLen(c);
@@ -482,15 +490,13 @@ const SIM = (() => {
           const ct = S.session.cfCourts?.[c];
           if (ct?.status === 'playing' && ct.match) {
             if (courtTicks[c] > 0) { courtTicks[c]--; continue; }
-            // Record game-end match count for each player leaving court.
-            // Use match.matchIdx+1 (= cfMatchCount when this match was confirmed), NOT
-            // the current cfMatchCount at submit time. By submit time, other courts may
-            // have confirmed several more matches, inflating cfMatchCount well above
-            // this match's position — making all subsequent gaps smaller than reality.
-            // matchIdx is stamped at confirmSuggestion time so it's always accurate.
+            // Anchor _lastGameEndMc to the cfMatchCount captured at THIS court's
+            // confirm time (stored in _courtConfirmMc[c] = cfMatchCount right after
+            // confirm). Using cfMatchCount at submit time is wrong — by then, other
+            // courts may have confirmed more matches, inflating the value.
             const _ct = S.session.cfCourts?.[c];
             if (_ct?.match) {
-              const _endAnchor = (_ct.match.matchIdx ?? 0) + 1;
+              const _endAnchor = _courtConfirmMc[c] ?? (S.session.cfMatchCount || 0);
               [...(_ct.match.t1||[]), ...(_ct.match.t2||[])].forEach(id => {
                 _lastGameEndMc[id] = _endAnchor;
               });
