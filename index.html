@@ -3557,12 +3557,16 @@ function renderSessStd(){
     const myMatches=allMatches.filter(m=>[...m.t1,...m.t2].includes(sp.id));
     const mq={avgOpp:null,oppGap:null,worstPGap:null,partners:0,g:myMatches.length,maxWait:null,avgWait:null};
     if(!myMatches.length){mqMap[sp.id]=mq;return;}
-    // Wait gaps: completed matches by other courts while this player sat in the queue
+    // Wait gaps: completed matches by other courts while this player sat in the queue.
+    // Use m.matchIdx (recorded at submit time) rather than indexOf — indexOf relies on
+    // object reference identity which breaks after Firebase roundtrips that spread-copy
+    // match objects ({...m}), causing inflated gap values (e.g. WAIT=8 when real max=6).
     if(allMatches.length>1&&myMatches.length>1){
-      const indices=myMatches.map(m=>allMatches.indexOf(m));
+      const indices=myMatches.map(m=>m.matchIdx??allMatches.indexOf(m));
       const gaps=[];for(let wi=1;wi<indices.length;wi++)gaps.push(indices[wi]-indices[wi-1]-1);
-      mq.maxWait=gaps.length?Math.max(...gaps):null;
-      mq.avgWait=gaps.length?parseFloat((gaps.reduce((a,b)=>a+b,0)/gaps.length).toFixed(1)):null;
+      const validGaps=gaps.filter(g=>g>=0); // negative means bad index — skip
+      mq.maxWait=validGaps.length?Math.max(...validGaps):null;
+      mq.avgWait=validGaps.length?parseFloat((validGaps.reduce((a,b)=>a+b,0)/validGaps.length).toFixed(1)):null;
     }
     const oppGaps=[];
     let worstPGap=0;
