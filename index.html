@@ -5696,17 +5696,15 @@ const CF={
     // New: 0–5 bonus for skill closeness, wait time always dominates.
     const skillFit=Math.max(0,5-Math.abs(er-courtAvg)*0.02);
     const gap=this.matchGap(qEntry.id);
-    const nc=S.session?.courts||1;
-    // Graduated matchGap bonus — each threshold = nc missed matches (1 per court):
-    //   nc*1 missed: small boost, still in normal rotation
-    //   nc*2 missed: mild boost — clearly sitting out
-    //   nc*3 missed: strong boost — been waiting a long time
-    //   nc*4+ missed: maximum — must-play, override everything
+    // Absolute gap thresholds — independent of court count.
+    // At 3-4 courts the nc-scaled version fired too late (nc*4=12-16),
+    // allowing outlier-ranked players to wait 11+ matches before max priority.
+    // Equivalent to 2-court nc-scaling (nc*1=2, nc*2=4, nc*3=6, nc*4=8).
     const gapBonus=
-      gap>=nc*4 ? 200 :          // must-play tier
-      gap>=nc*3 ? 120 :          // strong boost
-      gap>=nc*2 ?  50 :          // mild boost
-      gap>=nc   ?  15 : 0;       // minor — just sat once
+      gap>=8 ? 200 :          // must-play tier
+      gap>=6 ? 120 :          // strong boost
+      gap>=4 ?  50 :          // mild boost
+      gap>=2 ?  15 : 0;       // minor — just sat once
     const hunger=this.hungerBoost(qEntry.id);
     // Play-count gap bonus in pool ordering: players behind in TOTAL games
     // get additional priority boost on top of matchGap (which only covers recent sitting).
@@ -5921,8 +5919,8 @@ const CF={
       else if(ahead>=1)playFairness+=50;
 
       const gap=p.mg!=null?p.mg:(S.session?CF.matchGap(p.id):0);
-      if(gap>=nc4*3)playFairness-=150;
-      else if(gap>=nc4*2)playFairness-=80;
+      if(gap>=6)playFairness-=150;   // absolute, same as 2-court nc*3
+      else if(gap>=4)playFairness-=80;  // absolute, same as 2-court nc*2
     });
     const p2=Math.max(-250,Math.min(250,playFairness));
 
@@ -6808,8 +6806,8 @@ const CF={
     // If the best group from passes 1/2 has bad skill balance, retry with
     // pass 3 (unrestricted) to get a fallback match instead of leaving the court empty.
     const nc=S.session?.courts||1;
-    const hasMustPlay=top.some(p=>this.matchGap(p.id)>=nc*2);
-    const hasOutlierWait=top.some(p=>this.matchGap(p.id)>=nc*3);
+    const hasMustPlay=top.some(p=>this.matchGap(p.id)>=4);   // absolute, same as 2-court nc*2
+    const hasOutlierWait=top.some(p=>this.matchGap(p.id)>=6); // absolute, same as 2-court nc*3
     if(best&&best.fallbackPass!==3&&!hasMustPlay&&!hasOutlierWait){
       const bestP1=Math.abs((best.t1[0].sr+best.t1[1].sr)/2-(best.t2[0].sr+best.t2[1].sr)/2)*1.5
                   +Math.abs(best.t1[0].sr-best.t1[1].sr)/50+Math.abs(best.t2[0].sr-best.t2[1].sr)/50;
