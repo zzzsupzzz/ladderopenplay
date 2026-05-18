@@ -1988,9 +1988,11 @@ function _compatibleQueuePartners(id){
   const myRank=_sessionRank(id)||Math.ceil((_totalRanked()||20)/2);
   const n=_totalRanked()||20;
   const nc=S.session?.courts||1;
-  // Base gap only — no wait-based relaxation needed without the pending pair system.
-  // The main matchmaking engine already handles wait relaxation in _ranksCompatible.
-  const maxGap=_maxPartnerGap(n,nc,0);
+  // Widen partner band as the player's own wait grows, capped at phase ceiling.
+  // Mirrors what _ranksCompatible already does for team-vs-team compatibility.
+  // Phase 3 ceiling (e.g. 6 ranks for 14p) protects ladder quality at extreme waits.
+  const myWait=CF.matchGap(id);
+  const maxGap=_maxPartnerGap(n,nc,myWait);
   const result=(S.session.cfQueue||[])
     .filter(q=>{
       if(q.id===id)return false;
@@ -2003,61 +2005,6 @@ function _compatibleQueuePartners(id){
 }
 
 
-// ── Progressive group reservation ─────────────────────────────────────────────
-// Builds a 4-player match in advance for long-waiting players.
-// Starts at wait=courts (enough time to collect all 4 before the hard cap).
-// Hard cap: wait=courts*2 — forces match complete using phase ceiling relaxation.
-// Only one group builds at a time. No partial locks that can deadlock.
-// ── Soft anchor pair — Option B priority injection ────────────────────────────
-// No holdout. Identifies the highest-wait player + best partner, stores as a
-// soft pair. When both are in queue simultaneously, the suggestion engine injects
-// them as a pre-formed team and finds opponents normally. Either member can still
-// be grabbed by normal matching — the pair dissolves and reforms next cycle.
-function _tryUpdateSoftPair(){
-  const sp=S.session;
-  if(!sp||!sp.cfQueue)return;
-  const n=_totalRanked()||sp.activePlayers?.length||20;
-  const nc=sp.courts||1;
-  const threshold=nc; // form pair when anchor has waited ≥ courts matches
-
-  // ── Clear stale pair ────────────────────────────────────────────────────────
-  if(sp.cfSoftAnchorPair){
-    const {anchor,partner}=sp.cfSoftAnchorPair;
-    const anchorLeft=sp.players.find(p=>p.id===anchor)?.status==='left';
-    const partnerLeft=sp.players.find(p=>p.id===partner)?.status==='left';
-    // Also clear if anchor's wait dropped below threshold (they played recently)
-    const anchorWait=CF.matchGap(anchor);
-    if(anchorLeft||partnerLeft||anchorWait<threshold){
-      sp.cfSoftAnchorPair=null;
-    }
-  }
-
-  if(sp.cfSoftAnchorPair)return; // already have a valid pair
-
-  // ── Find new anchor + partner ───────────────────────────────────────────────
-  const anchors=(sp.cfQueue||[])
-    .map(q=>({...q,wait:CF.matchGap(q.id)}))
-    .filter(q=>q.wait>=threshold)
-    .sort((a,b)=>b.wait-a.wait);
-  if(!anchors.length)return;
-
-  const anchor=anchors[0];
-  const anchorRank=_sessionRank(anchor.id)||Math.ceil(n/2);
-  const maxGap=_maxPartnerGap(n,nc,0); // base gap — no band relaxation for partner selection
-
-  let bestPartner=null,bestScore=-Infinity;
-  for(const cand of sp.cfQueue){
-    if(cand.id===anchor.id)continue;
-    const cr=_sessionRank(cand.id)||Math.ceil(n/2);
-    if(Math.abs(anchorRank-cr)>maxGap)continue;
-    const score=CF.matchGap(cand.id); // prefer higher-wait partner
-    if(score>bestScore){bestScore=score;bestPartner=cand;}
-  }
-  if(!bestPartner)return;
-
-  sp.cfSoftAnchorPair={anchor:anchor.id,partner:bestPartner.id,formedAt:sp.cfMatchCount||0};
-  console.log(`[softpair] ${gp(anchor.id)?.name}(w=${anchor.wait}) + ${gp(bestPartner.id)?.name}(w=${CF.matchGap(bestPartner.id)})`);
-}
 
 // ── Manual rank override ──────────────────────────────────────────────────────
 function openRankOverride(id){
@@ -2606,7 +2553,7 @@ function startSession(){
     }),
     partnerHx:{},oppHx:{},oppHxTime:{},
     nrPairingHx:{},
-    cfQueue:[],cfPinnedIds:[],cfPauseAfterGame:[],cfLockedPairs:[],cfSoftPairs:[],cfPermPairs:[],cfLeaveSoonIds:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,cfSoftAnchorPair:null,
+    cfQueue:[],cfPinnedIds:[],cfPauseAfterGame:[],cfLockedPairs:[],cfSoftPairs:[],cfPermPairs:[],cfLeaveSoonIds:[],cfCourts:{},cfSuggestions:{},cfLog:[],cfMatchCount:0,
     courtOffset:0,
     cfMatchupHx:{},cfGroupHx:{},cfPairConsec:{},cfPairWins:{},cfMustSplitPair:null,cfPaused:[],
     cfPairSessionCount:{},cfPairLastAt:{},cfPairLastLost:{},
@@ -3090,14 +3037,6 @@ function cfPausePlayer(id){
   const [entry]=S.session.cfQueue.splice(qi,1);
   if(!S.session.cfPaused)S.session.cfPaused=[];
   S.session.cfPaused.push({...entry,pausedAt:Date.now()});
-  // Dissolve soft pair if this player was in it
-  if(S.session.cfSoftAnchorPair){
-    const {anchor,partner}=S.session.cfSoftAnchorPair;
-    if(anchor===id||partner===id){
-      console.log(`[softpair] Dissolved — ${gp(id)?.name} paused`);
-      S.session.cfSoftAnchorPair=null;
-    }
-  }
   // Invalidate and regenerate any suggestions containing the paused player
   if(S.session.cfSuggestions){
     const needRegen=[];
@@ -6210,8 +6149,8 @@ const CF={
       if(sug&&!readySet.has(+c))sug.allIds.forEach(id=>reservedIds.add(id));
     });
     let queue=S.session.cfQueue.filter(q=>!reservedIds.has(q.id));
-    let nc=readyCourts.length;
-    let need=nc*4;
+    const nc=readyCourts.length;
+    const need=nc*4;
 
     // Not enough players for even one court
     if(queue.length<4){readyCourts.forEach(c=>{S.session.cfSuggestions[c]=null;});return;}
@@ -6256,52 +6195,6 @@ const CF={
         const aLeft=gsp(a)?.status==='left',bLeft=gsp(b)?.status==='left';
         if(aQ&&!bQ&&!bLeft){queue=queue.filter(q=>q.id!==a);qIds.delete(a);}
         if(bQ&&!aQ&&!aLeft){queue=queue.filter(q=>q.id!==b);qIds.delete(b);}
-      }
-    }
-
-    // ── Soft anchor pair: inject pre-formed team, find opponents normally ────────
-    // No holdout — both members stay in the normal pool. If both are in queue and
-    // valid opponents exist, the pair gets priority for the first ready court.
-    // Falls through to normal matching if no valid opponents found.
-    const _sap=S.session.cfSoftAnchorPair;
-    if(_sap){
-      const {anchor:_sAn,partner:_sPa}=_sap;
-      const _sapQSet=new Set(queue.map(q=>q.id));
-      if(_sapQSet.has(_sAn)&&_sapQSet.has(_sPa)){
-        const _sWait=Math.max(CF.matchGap(_sAn),CF.matchGap(_sPa));
-        const _sOthers=queue.filter(q=>q.id!==_sAn&&q.id!==_sPa);
-        const _sn=_totalRanked()||S.session.activePlayers?.length||20;
-        const _snc=S.session.courts||1;
-        let _sBest=null,_sBestScore=-Infinity;
-        for(let _si=0;_si<_sOthers.length-1;_si++){
-          for(let _sj=_si+1;_sj<_sOthers.length;_sj++){
-            const _t2=[_sOthers[_si].id,_sOthers[_sj].id];
-            const _smw=Math.max(_sWait,CF.matchGap(_t2[0]),CF.matchGap(_t2[1]));
-            if(!_ranksCompatible([_sAn,_sPa],_t2,_smw))continue;
-            // Score: prefer balanced teams + high-wait opponents
-            const _rAn=_sessionRank(_sAn)||Math.ceil(_sn/2);
-            const _rPa=_sessionRank(_sPa)||Math.ceil(_sn/2);
-            const _r0=_sessionRank(_t2[0])||Math.ceil(_sn/2);
-            const _r1=_sessionRank(_t2[1])||Math.ceil(_sn/2);
-            const _bal=Math.abs((_rAn+_rPa)/2-(_r0+_r1)/2);
-            const _score=CF.matchGap(_t2[0])+CF.matchGap(_t2[1])-_bal*2;
-            if(_score>_sBestScore){_sBestScore=_score;_sBest={t1:[_sAn,_sPa],t2:_t2,allIds:[_sAn,_sPa,..._t2]};}
-          }
-        }
-        if(_sBest){
-          const _sCourt=readyCourts[0];
-          S.session.cfSuggestions[_sCourt]=_sBest;
-          queue=queue.filter(q=>!_sBest.allIds.includes(q.id));
-          readyCourts=readyCourts.filter(c=>c!==_sCourt);
-          S.session.cfSoftAnchorPair=null;
-          nc=readyCourts.length;
-          need=nc*4;
-          setTimeout(()=>cfMaybeAutoConfirm(_sCourt),500);
-          if(!readyCourts.length)return;
-        }
-        // No valid opponents found → fall through to normal matching (no blocking)
-      }else{
-        S.session.cfSoftAnchorPair=null; // one/both already played, stale
       }
     }
 
@@ -7033,8 +6926,6 @@ const CF={
       if(qEntry&&sp){sp.timeInQueueMs=(sp.timeInQueueMs||0)+(now-qEntry.since);}
     });
     this.dequeue(sug.allIds);
-    // Validate reserved group — a dequeue may have removed a group member
-    try{_tryUpdateSoftPair();}catch(e){console.warn('[softpair] update error:',e);}
     // Clear any pins that were satisfied by this confirmation
     if(S.session.cfPinnedIds){
       S.session.cfPinnedIds=S.session.cfPinnedIds.filter(id=>!sug.allIds.includes(id));
@@ -7084,7 +6975,6 @@ const CF={
       _paths['session/oppHx']=_sp.oppHx??null;
       _paths['session/oppHxTime']=_sp.oppHxTime??null;
       _paths[`session/cfSuggestions/${courtNum}`]=null; // cleared above
-      _paths['session/cfSoftAnchorPair']=_sp.cfSoftAnchorPair??null;
       // Queue entries for the 4 players being put on court
       sug.allIds.forEach(id=>{
         _paths[`session/cfQueue/${id}`]=null; // dequeued
@@ -7320,8 +7210,7 @@ const CF={
     // Wrap in try-catch — any runtime error in matchmaking is non-fatal.
     // Score, ELO, queue re-entry and stats are already committed above this line.
     // Grow reservation first — newly re-queued players may complete the group
-    try{_tryUpdateSoftPair();}catch(e){console.warn('[softpair] update error:',e);}
-    try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
+try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     catch(e){console.error('CF suggestion error (non-fatal):',e);}
     // Audit: most important forensic event — score submission with full result context
     const _t1n=m.t1.map(id=>gp(id)?.name||'?').join(' & ');
@@ -7348,7 +7237,6 @@ const CF={
       _paths['session/cfLeaveSoonIds']=_sp.cfLeaveSoonIds??null;
       _paths['session/cfPauseAfterGame']=_sp.cfPauseAfterGame??null;
       if(_sp.nrPairingHx)_paths['session/nrPairingHx']=_sp.nrPairingHx;
-      _paths['session/cfSoftAnchorPair']=_sp.cfSoftAnchorPair??null;
       // cfRanks per-player — different courts update different players, no collision
       Object.entries(_sp.cfRanks||{}).forEach(([_rid,_rv])=>{_paths[`session/cfRanks/${_rid}`]=_rv??null;});
       // Per-player paths: only the 4 players in this match + any auto-leave players
@@ -8306,16 +8194,6 @@ const CF={
           if(waitMin>=20)reasons.push(`<span style="font-size:.59rem;color:var(--re)">⏰ Long wait priority</span>`);
           const gap2=CF.matchGap(q.id);
           const nc2=S.session?.courts||1;
-          // Soft anchor pair badge
-          const _sap2=S.session.cfSoftAnchorPair;
-          if(_sap2){
-            const {anchor:_sapA,partner:_sapP}=_sap2;
-            if(q.id===_sapA||q.id===_sapP){
-              const _isAnc=q.id===_sapA;
-              const _otherName=gp(_isAnc?_sapP:_sapA)?.name?.split(' ')[0]||'?';
-              reasons.push(`<span style="font-size:.59rem;color:var(--cy);font-weight:700">🤝 Paired with ${_otherName} — next available court</span>`);
-            }
-          }
           // Permanent pair: show who they're waiting for if partner isn't in queue
           const _permPairsQ=S.session.cfPermPairs||[];
           for(const[_pa,_pb]of _permPairsQ){
