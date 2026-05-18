@@ -5696,15 +5696,19 @@ const CF={
     // New: 0–5 bonus for skill closeness, wait time always dominates.
     const skillFit=Math.max(0,5-Math.abs(er-courtAvg)*0.02);
     const gap=this.matchGap(qEntry.id);
-    // Absolute gap thresholds — independent of court count.
-    // At 3-4 courts the nc-scaled version fired too late (nc*4=12-16),
-    // allowing outlier-ranked players to wait 11+ matches before max priority.
-    // Equivalent to 2-court nc-scaling (nc*1=2, nc*2=4, nc*3=6, nc*4=8).
+    const nc=S.session?.courts||1;
+    // nc-scaled thresholds capped at 2 full rotations max.
+    // Real-time: nc*2 matches ≈ 2 rounds × 20min ÷ nc courts ≈ 20-25 min max wait.
+    // Tiers: nc×0.5=just sat, nc×1=1 rotation, nc×1.5=1.5 rotations, nc×2=must-play.
+    const _gT1=Math.max(1,Math.round(nc*0.5)); // minor  : 2c=1  3c=2  4c=2
+    const _gT2=nc;                              // mild   : 2c=2  3c=3  4c=4
+    const _gT3=Math.round(nc*1.5);             // strong : 2c=3  3c=5  4c=6
+    const _gT4=nc*2;                            // max    : 2c=4  3c=6  4c=8
     const gapBonus=
-      gap>=8 ? 200 :          // must-play tier
-      gap>=6 ? 120 :          // strong boost
-      gap>=4 ?  50 :          // mild boost
-      gap>=2 ?  15 : 0;       // minor — just sat once
+      gap>=_gT4 ? 200 :    // max — must-play, 2 full rotations missed
+      gap>=_gT3 ? 120 :    // strong — 1.5 rotations
+      gap>=_gT2 ?  50 :    // mild — 1 rotation
+      gap>=_gT1 ?  15 : 0; // minor — just sat once
     const hunger=this.hungerBoost(qEntry.id);
     // Play-count gap bonus in pool ordering: players behind in TOTAL games
     // get additional priority boost on top of matchGap (which only covers recent sitting).
@@ -5919,8 +5923,10 @@ const CF={
       else if(ahead>=1)playFairness+=50;
 
       const gap=p.mg!=null?p.mg:(S.session?CF.matchGap(p.id):0);
-      if(gap>=6)playFairness-=150;   // absolute, same as 2-court nc*3
-      else if(gap>=4)playFairness-=80;  // absolute, same as 2-court nc*2
+      const _pT4=nc4*2;                   // max  : 2c=4  3c=6  4c=8
+      const _pT3=Math.round(nc4*1.5);     // strong: 2c=3  3c=5  4c=6
+      if(gap>=_pT4)playFairness-=150;
+      else if(gap>=_pT3)playFairness-=80;
     });
     const p2=Math.max(-250,Math.min(250,playFairness));
 
@@ -6806,8 +6812,8 @@ const CF={
     // If the best group from passes 1/2 has bad skill balance, retry with
     // pass 3 (unrestricted) to get a fallback match instead of leaving the court empty.
     const nc=S.session?.courts||1;
-    const hasMustPlay=top.some(p=>this.matchGap(p.id)>=4);   // absolute, same as 2-court nc*2
-    const hasOutlierWait=top.some(p=>this.matchGap(p.id)>=6); // absolute, same as 2-court nc*3
+    const hasMustPlay=top.some(p=>this.matchGap(p.id)>=Math.round(nc*1.5));  // strong tier: 2c=3 3c=5 4c=6
+    const hasOutlierWait=top.some(p=>this.matchGap(p.id)>=nc*2);             // max tier:    2c=4 3c=6 4c=8
     if(best&&best.fallbackPass!==3&&!hasMustPlay&&!hasOutlierWait){
       const bestP1=Math.abs((best.t1[0].sr+best.t1[1].sr)/2-(best.t2[0].sr+best.t2[1].sr)/2)*1.5
                   +Math.abs(best.t1[0].sr-best.t1[1].sr)/50+Math.abs(best.t2[0].sr-best.t2[1].sr)/50;
