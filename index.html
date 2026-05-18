@@ -1988,11 +1988,9 @@ function _compatibleQueuePartners(id){
   const myRank=_sessionRank(id)||Math.ceil((_totalRanked()||20)/2);
   const n=_totalRanked()||20;
   const nc=S.session?.courts||1;
-  // Widen partner band as the player's own wait grows, capped at phase ceiling.
-  // Mirrors what _ranksCompatible already does for team-vs-team compatibility.
-  // Phase 3 ceiling (e.g. 6 ranks for 14p) protects ladder quality at extreme waits.
-  const myWait=CF.matchGap(id);
-  const maxGap=_maxPartnerGap(n,nc,myWait);
+  // Use base-gap only (waitMatches=0) for display/hunger scoring.
+  // _ranksCompatible handles real wait-aware relaxation for actual match building.
+  const maxGap=_maxPartnerGap(n,nc,0);
   const result=(S.session.cfQueue||[])
     .filter(q=>{
       if(q.id===id)return false;
