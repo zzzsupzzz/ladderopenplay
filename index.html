@@ -5639,8 +5639,12 @@ const CF={
   matchGap(id){
     const sp=gsp(id);if(!sp)return 0;
     const current=S.session?.cfMatchCount||0;
-    // Never played: gap = current match count (been waiting since game 0)
-    if((sp.matchesPlayed||0)===0)return current+1; // +1 so 0 > any played player at start
+    if((sp.matchesPlayed||0)===0){
+      // Late arrivals / resumed: they just joined — gap starts at 0, no catch-up
+      if(S.session?.cfRanks?.[id]?.isLateArrival||sp.resumedFromPause)return 0;
+      // Present from session start — been waiting since game 0
+      return current+1;
+    }
     const lastAt=sp.lastPlayedAtMatch??0;
     return current-lastAt;
   },
@@ -6227,10 +6231,12 @@ const CF={
     const _batchMC=S.session.cfMatchCount||0;
     pool.forEach(p=>{
       const sp=gsp(p.id);
-      p.mg=sp?.lastPlayedAtMatch!=null&&sp.matchesPlayed>0?_batchMC-(sp.lastPlayedAtMatch||0):_batchMC+1;
+      const _isLR2=S.session.cfRanks?.[p.id]?.isLateArrival||sp?.resumedFromPause;
+      // Late arrivals / resumed with 0 games: mg=0 (no catch-up gap from session start)
+      const _neverPlayed=!sp?.matchesPlayed;
+      p.mg=_neverPlayed&&_isLR2?0:(sp?.lastPlayedAtMatch!=null&&sp.matchesPlayed>0?_batchMC-(sp.lastPlayedAtMatch||0):_batchMC+1);
       const _rawPcg=_batchMaxPlayed-(sp?.matchesPlayed||0);
       // Late arrivals / resumed: cap catch-up pressure at 1 game — they queue normally
-      const _isLR2=S.session.cfRanks?.[p.id]?.isLateArrival||sp?.resumedFromPause;
       p.pcg=_isLR2?Math.min(_rawPcg,1):_rawPcg;
       p._minGames=_batchMinPlayed;
     });
@@ -6650,9 +6656,11 @@ const CF={
     const _mc=S.session.cfMatchCount||0;
     pool.forEach(p=>{
       const sp2=gsp(p.id);
-      p.mg=sp2?.lastPlayedAtMatch!=null&&sp2.matchesPlayed>0?_mc-(sp2.lastPlayedAtMatch||0):_mc+1;
-      const _rawPcg2=_maxPlayed-(sp2?.matchesPlayed||0);
       const _isLR3=S.session.cfRanks?.[p.id]?.isLateArrival||sp2?.resumedFromPause;
+      // Late arrivals / resumed with 0 games: mg=0 (no catch-up gap from session start)
+      const _neverPlayed2=!sp2?.matchesPlayed;
+      p.mg=_neverPlayed2&&_isLR3?0:(sp2?.lastPlayedAtMatch!=null&&sp2.matchesPlayed>0?_mc-(sp2.lastPlayedAtMatch||0):_mc+1);
+      const _rawPcg2=_maxPlayed-(sp2?.matchesPlayed||0);
       p.pcg=_isLR3?Math.min(_rawPcg2,1):_rawPcg2; // late/resumed: no catch-up debt
       p._minGames=_minPlayed;
     });
@@ -8174,12 +8182,13 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
           const _formLabel=sp?._hotFlag?'🔥':sp?._playingUpFlag?'📈':sp?._coldFlag?'🧊':'';
           const _formTitle=sp?._hotFlag?'Hot streak':sp?._playingUpFlag?'Playing up vs stronger opponents':sp?._coldFlag?'Struggling':'';
           const _formVal=sp?._sessForm!=null&&sp._sessForm!==0?`<span style="font-size:.58rem;color:${sp._sessForm>0?'var(--or)':'var(--cy)'}" title="${_formTitle}">${sp._sessForm>0?'+':''}${sp._sessForm}</span>`:'';
-          // Playtime imbalance indicator
+          // Playtime imbalance indicator — suppress for late arrivals / resumed (fewer games is expected)
+          const _isLateQ=S.session?.cfRanks?.[q.id]?.isLateArrival||!!sp?.resumedFromPause;
           const _maxG=Math.max(...(S.session.players.filter(x=>x.status!=='left').map(x=>x.matchesPlayed||0)||[0]));
           const _myG=sp?.matchesPlayed||0;
           const _pcGap=_maxG-_myG;
           const _pcColor=_pcGap>=4?'var(--re)':_pcGap>=3?'var(--or)':'var(--go)';
-          const _pcVal=_pcGap>=2?`<span style="font-size:.58rem;color:${_pcColor};font-weight:700" title="${_myG}/${_maxG} games — ${_pcGap} behind the leader">${_pcGap>=4?'⚠️ Far':'⚠️ '}behind (${_myG}g)</span>`:`<span style="font-size:.58rem;color:var(--mu)" title="${_myG} games">${_myG}g</span>`;
+          const _pcVal=(!_isLateQ&&_pcGap>=2)?`<span style="font-size:.58rem;color:${_pcColor};font-weight:700" title="${_myG}/${_maxG} games — ${_pcGap} behind the leader">${_pcGap>=4?'⚠️ Far':'⚠️ '}behind (${_myG}g)</span>`:`<span style="font-size:.58rem;color:var(--mu)" title="${_myG} games">${_myG}g${_isLateQ?' (late)':''}</span>`;
           const upNext=idx<2;
           const isPinned=(S.session.cfPinnedIds||[]).includes(q.id);
           const isLeavingSoon=(S.session.cfLeaveSoonIds||[]).includes(q.id);
