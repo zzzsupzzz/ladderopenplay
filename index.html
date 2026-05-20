@@ -1730,11 +1730,12 @@ function _maxPartnerGap(n,nc,waitMatches){
   const ceil=Math.max(5,Math.ceil(n*(_PARTNER_GAP_CEIL[phase]?.[key]||0.55)));
   const relaxSteps=Math.floor(waitMatches/2);
   const relax=Math.ceil(n*0.08)*relaxSteps;
-  // Starvation override: at max-priority wait (nc*2), the phase ceiling may equal
-  // the base (especially Phase 3), making relaxation impossible and leaving STUCK
-  // players waiting indefinitely. Lift the ceiling by up to 3 ranks so the engine
-  // can actually find them a match. Only kicks in at true starvation level.
-  const starvCeil=waitMatches>=Math.max(6,nc*2)?ceil+3:ceil; // never fires before gap=6
+  // Starvation override: lift ceiling by 3 so STUCK players can find a match.
+  // Threshold: max(nc+1, 4) — scales with courts but never fires before gap=4.
+  // 2c=4, 3c=4, 4c=5. Fires early enough to prevent long blocks without
+  // disrupting normal scheduling (gap=3 at 2c was too aggressive).
+  const starvThresh=Math.max(nc+1,4);
+  const starvCeil=waitMatches>=starvThresh?ceil+3:ceil;
   return Math.min(starvCeil,base+relax);
 }
 
@@ -5446,9 +5447,11 @@ const CF={
     if(count<2)return false;
     const queue=(sess.cfQueue||[]).filter(q=>q.id!==a&&q.id!==b);
     if(queue.length<4)return false; // thin queue — relax to prevent deadlock
-    // Starvation bypass: if either player has been waiting at max-priority level,
-    // cooldown is waived. Playing with a repeat partner beats waiting 6+ matches.
-    if(this.matchGap(a)>=6||this.matchGap(b)>=6)return false;
+    // Starvation bypass: if either player has been waiting too long, cooldown is
+    // waived. Playing with a repeat partner beats a long block.
+    // Threshold: max(nc+1, 4) — 2c=4, 3c=4, 4c=5.
+    const _starvT=Math.max((sess.courts||1)+1,4);
+    if(this.matchGap(a)>=_starvT||this.matchGap(b)>=_starvT)return false;
     const lastAt=(sess.cfPairLastAt||{})[pk]||{};
     const spA=gsp(a),spB=gsp(b);
     const gamesA=(spA?.matchesPlayed||0),gamesB=(spB?.matchesPlayed||0);
