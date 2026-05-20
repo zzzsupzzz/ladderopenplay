@@ -5446,6 +5446,9 @@ const CF={
     if(count<2)return false;
     const queue=(sess.cfQueue||[]).filter(q=>q.id!==a&&q.id!==b);
     if(queue.length<4)return false; // thin queue — relax to prevent deadlock
+    // Starvation bypass: if either player has been waiting at max-priority level,
+    // cooldown is waived. Playing with a repeat partner beats waiting 6+ matches.
+    if(this.matchGap(a)>=6||this.matchGap(b)>=6)return false;
     const lastAt=(sess.cfPairLastAt||{})[pk]||{};
     const spA=gsp(a),spB=gsp(b);
     const gamesA=(spA?.matchesPlayed||0),gamesB=(spB?.matchesPlayed||0);
