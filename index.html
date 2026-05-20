@@ -1734,7 +1734,7 @@ function _maxPartnerGap(n,nc,waitMatches){
   // the base (especially Phase 3), making relaxation impossible and leaving STUCK
   // players waiting indefinitely. Lift the ceiling by up to 3 ranks so the engine
   // can actually find them a match. Only kicks in at true starvation level.
-  const starvCeil=waitMatches>=nc*2?ceil+3:ceil;
+  const starvCeil=waitMatches>=Math.max(6,nc*2)?ceil+3:ceil; // never fires before gap=6
   return Math.min(starvCeil,base+relax);
 }
 
