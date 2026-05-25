@@ -1719,6 +1719,20 @@ const _PARTNER_GAP_CEIL={
   2:{2:0.46,3:0.40,4:0.36},
   3:{2:0.38,3:0.30,4:0.24}
 };
+// Starvation ceiling lift (% of N added to ceil when a player hits starvation threshold).
+// Varies by BOTH phase and court count because the rescue needs are different in each:
+//   Phase 3 → biggest lift: bands are tightest there (base≈ceil at 3c/4c), so the engine
+//             needs the most headroom to escape deadlock without the flat +3 being insufficient.
+//   Phase 1 → smallest lift: bands already wide, normal relaxation usually covers it.
+//   3c → slightly more than 2c/4c: mid-field players overlap many bands simultaneously,
+//         making compatible-partner search harder per unit of gap than at extremes.
+// At 20p/3c Phase 3: ceil=6 (30%), lift=20%×20=4 → starvCeil=10 (50%) — enough to escape,
+// not so wide it forces mismatches.
+const _STARV_LIFT={
+  1:{2:0.10,3:0.12,4:0.10},
+  2:{2:0.12,3:0.16,4:0.12},
+  3:{2:0.15,3:0.20,4:0.15}
+};
 // Compute effective max partner gap for current context.
 // waitMatches: how many match confirmations this player missed while waiting.
 // Widens by 8% of N per 2 missed matches, capped at the phase+court ceiling.
@@ -1730,12 +1744,13 @@ function _maxPartnerGap(n,nc,waitMatches){
   const ceil=Math.max(5,Math.ceil(n*(_PARTNER_GAP_CEIL[phase]?.[key]||0.55)));
   const relaxSteps=Math.floor(waitMatches/2);
   const relax=Math.ceil(n*0.08)*relaxSteps;
-  // Starvation override: lift ceiling by 3 so STUCK players can find a match.
+  // Starvation override: lift ceiling by phase×court % of N when player is starving.
   // Threshold: max(nc+1, 4) — scales with courts but never fires before gap=4.
   // 2c=4, 3c=4, 4c=5. Fires early enough to prevent long blocks without
   // disrupting normal scheduling (gap=3 at 2c was too aggressive).
   const starvThresh=Math.max(nc+1,4);
-  const starvCeil=waitMatches>=starvThresh?ceil+3:ceil;
+  const starvLift=Math.ceil(n*(_STARV_LIFT[phase]?.[key]||0.15));
+  const starvCeil=waitMatches>=starvThresh?ceil+starvLift:ceil;
   return Math.min(starvCeil,base+relax);
 }
 
@@ -6778,12 +6793,24 @@ const CF={
       if((gsp(p.id)?.matchesPlayed||0)<=minG)return true;
       return false;
     });
+    // Critical-starvation override: a player who has waited 2× the starvation threshold
+    // (e.g. gap≥8 at 3c, gap≥10 at 4c) overrides game-count equity and jumps to anchor.
+    // Rationale: game-count equity is the RIGHT tie-breaker most of the time, but if
+    // someone has played 9 games while others are at 6, their 9-round consecutive wait
+    // is genuinely urgent and must not be de-prioritised just because others are "behind"
+    // on game count. The 2× multiplier prevents false positives from normal variance.
+    const _starvTCrit=Math.max((S.session?.courts||1)+1,4)*2; // 2c/3c→8, 4c→10
     mustPlayCandidates.sort((a,b)=>{
+      const ga=this.matchGap(a.id), gb=this.matchGap(b.id);
+      const aCrit=ga>=_starvTCrit, bCrit=gb>=_starvTCrit;
+      // Tier 1: critical starvation (gap≥2×starvThresh) → always wins anchor slot
+      if(aCrit!==bCrit)return aCrit?-1:1;
+      if(aCrit&&bCrit&&ga!==gb)return gb-ga; // both critical: higher gap wins
+      // Tier 2: normal equity — fewest games relative to min first
       const minG=a._minGames!=null?a._minGames:0;
       const aPC=(gsp(a.id)?.matchesPlayed||0)-minG;
       const bPC=(gsp(b.id)?.matchesPlayed||0)-minG;
       if(aPC!==bPC)return aPC-bPC;
-      const ga=this.matchGap(a.id), gb=this.matchGap(b.id);
       if(ga!==gb)return gb-ga;
       return (b.waitMin||0)-(a.waitMin||0);
     });
@@ -6792,6 +6819,7 @@ const CF={
       const others=orderedPool.filter(p=>p.id!==anchor.id).slice(0,15);
       const n=others.length;
       let best=null,bestScore=Infinity;
+      // Primary attempt: normal quality constraints
       for(let i=0;i<n-2;i++)for(let j=i+1;j<n-1;j++)for(let k=j+1;k<n;k++){
         const group=[anchor,...[others[i],others[j],others[k]]];
         if(_isShown(group))continue; // skip previously shown combos
@@ -6799,6 +6827,18 @@ const CF={
         if(!this._withinTeamGapOk(res.t1,res.t2,300))continue;
             if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
         if(res.score<bestScore){bestScore=res.score;best={...res,group};}
+      }
+      // Relaxed attempt for critical-starvation anchors: widen team-gap cap to 450 if normal fails.
+      // This is a last resort — accepting a wider rating spread beats leaving someone out 10+ rounds.
+      if(!best&&this.matchGap(anchor.id)>=_starvTCrit){
+        for(let i=0;i<n-2;i++)for(let j=i+1;j<n-1;j++)for(let k=j+1;k<n;k++){
+          const group=[anchor,...[others[i],others[j],others[k]]];
+          if(_isShown(group))continue;
+          const res=this._scoreGroup(group,mustSplit);
+          if(!this._withinTeamGapOk(res.t1,res.t2,450))continue; // wider cap
+          if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
+          if(res.score<bestScore){bestScore=res.score;best={...res,group};}
+        }
       }
       if(best){this._storeSuggestion(courtNum,best,finishedMatch);return;}
     }
