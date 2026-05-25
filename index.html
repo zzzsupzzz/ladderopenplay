@@ -1744,23 +1744,14 @@ function _maxPartnerGap(n,nc,waitMatches){
   const ceil=Math.max(5,Math.ceil(n*(_PARTNER_GAP_CEIL[phase]?.[key]||0.55)));
   const relaxSteps=Math.floor(waitMatches/2);
   const relax=Math.ceil(n*0.08)*relaxSteps;
-  // Starvation override: lift ceiling proportionally to how long the player has been waiting.
+  // Starvation override: lift ceiling by phase×court % of N when player is starving.
   // Threshold: max(nc+1, 4) — scales with courts but never fires before gap=4.
   // 2c=4, 3c=4, 4c=5. Fires early enough to prevent long blocks without
   // disrupting normal scheduling (gap=3 at 2c was too aggressive).
-  //
-  // The lift SCALES with gap severity — binary on/off would leave a player stuck even
-  // after the threshold if all compatible partners happen to be on court:
-  //   1× threshold (gap=4):  1× base lift — gentle widening
-  //   2× threshold (gap=8):  2× base lift — meaningful rescue
-  //   3× threshold (gap=12): 3× base lift (cap) — effectively "play with anyone"
-  // At 20p/3c Phase 3: ceil=6, lift=20%×20=4 per step.
-  //   gap=4  → starvCeil=10 (50% of pool — normal rescue)
-  //   gap=8  → starvCeil=14 (70% of pool — strong rescue)
-  //   gap=12 → starvCeil=18 (90% of pool — anyone in range)
+  // Binary (on/off) is simpler and more predictable than scaled — the multi-court
+  // greedy fallback handles extreme cases via its own relaxed-cap rescue path.
   const starvThresh=Math.max(nc+1,4);
-  const starvMult=waitMatches>=starvThresh?Math.min(3,waitMatches/starvThresh):0;
-  const starvLift=starvMult>0?Math.ceil(n*(_STARV_LIFT[phase]?.[key]||0.15)*starvMult):0;
+  const starvLift=waitMatches>=starvThresh?Math.ceil(n*(_STARV_LIFT[phase]?.[key]||0.15)):0;
   const starvCeil=ceil+starvLift;
   return Math.min(starvCeil,base+relax);
 }
@@ -6479,16 +6470,38 @@ const CF={
                                       tier2c.some(t=>t.id===p.id));
         let best=null;
         if(unserved.length>0){
+          // Sort unserved by critical starvation (gap≥2×starvThresh) first, then by gap desc.
+          // Mirrors single-court STEP 2 anchor selection so the most urgent player anchors.
+          const _greedyCritT=Math.max((S.session?.courts||1)+1,4)*2;
+          unserved.sort((a,b)=>{
+            const ga2=this.matchGap(a.id),gb2=this.matchGap(b.id);
+            const aCrit2=ga2>=_greedyCritT,bCrit2=gb2>=_greedyCritT;
+            if(aCrit2!==bCrit2)return aCrit2?-1:1;
+            if(ga2!==gb2)return gb2-ga2;
+            return 0;
+          });
           const anchor=unserved[0];
           const others=rem.filter(p=>p.id!==anchor.id);
           let bScore=Infinity;
           const olen=Math.min(others.length,14);
+          // Primary: normal quality cap
           for(let i=0;i<olen-2;i++)for(let j=i+1;j<olen-1;j++)for(let k=j+1;k<olen;k++){
             const g=[anchor,others[i],others[j],others[k]];
             const res=this._scoreGroup(g,mustSplit);
             if(!this._withinTeamGapOk(res.t1,res.t2,300))continue;
             if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
             if(res.score<bScore){bScore=res.score;best={...res,group:g};}
+          }
+          // Relaxed rescue for critical-starvation anchors: cap=500 (full sr range) so any
+          // queue combination is valid. After 8+ rounds waiting, any match beats another skip.
+          if(!best&&this.matchGap(anchor.id)>=_greedyCritT){
+            for(let i=0;i<olen-2;i++)for(let j=i+1;j<olen-1;j++)for(let k=j+1;k<olen;k++){
+              const g=[anchor,others[i],others[j],others[k]];
+              const res=this._scoreGroup(g,mustSplit);
+              if(!this._withinTeamGapOk(res.t1,res.t2,500))continue; // full sr range
+              if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
+              if(res.score<bScore){bScore=res.score;best={...res,group:g};}
+            }
           }
         }
         if(!best)best=this._findBestGroup(rem.slice(0,Math.min(12,rem.length)),mustSplit,nrIds,n);
