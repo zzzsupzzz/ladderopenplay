@@ -1744,13 +1744,24 @@ function _maxPartnerGap(n,nc,waitMatches){
   const ceil=Math.max(5,Math.ceil(n*(_PARTNER_GAP_CEIL[phase]?.[key]||0.55)));
   const relaxSteps=Math.floor(waitMatches/2);
   const relax=Math.ceil(n*0.08)*relaxSteps;
-  // Starvation override: lift ceiling by phase×court % of N when player is starving.
+  // Starvation override: lift ceiling proportionally to how long the player has been waiting.
   // Threshold: max(nc+1, 4) — scales with courts but never fires before gap=4.
   // 2c=4, 3c=4, 4c=5. Fires early enough to prevent long blocks without
   // disrupting normal scheduling (gap=3 at 2c was too aggressive).
+  //
+  // The lift SCALES with gap severity — binary on/off would leave a player stuck even
+  // after the threshold if all compatible partners happen to be on court:
+  //   1× threshold (gap=4):  1× base lift — gentle widening
+  //   2× threshold (gap=8):  2× base lift — meaningful rescue
+  //   3× threshold (gap=12): 3× base lift (cap) — effectively "play with anyone"
+  // At 20p/3c Phase 3: ceil=6, lift=20%×20=4 per step.
+  //   gap=4  → starvCeil=10 (50% of pool — normal rescue)
+  //   gap=8  → starvCeil=14 (70% of pool — strong rescue)
+  //   gap=12 → starvCeil=18 (90% of pool — anyone in range)
   const starvThresh=Math.max(nc+1,4);
-  const starvLift=Math.ceil(n*(_STARV_LIFT[phase]?.[key]||0.15));
-  const starvCeil=waitMatches>=starvThresh?ceil+starvLift:ceil;
+  const starvMult=waitMatches>=starvThresh?Math.min(3,waitMatches/starvThresh):0;
+  const starvLift=starvMult>0?Math.ceil(n*(_STARV_LIFT[phase]?.[key]||0.15)*starvMult):0;
+  const starvCeil=ceil+starvLift;
   return Math.min(starvCeil,base+relax);
 }
 
