@@ -4807,7 +4807,7 @@ function rebuildCFDerivedState(){
     S.session.cfMatchupHx[CF.matchupKey(m.t1,m.t2)]={id:m.id,at:mc};
     S.session.cfGroupHx[[...m.t1,...m.t2].sort().join(',')]={id:m.id,at:mc};
     S.session.cfMatchCount=mc;
-    [...m.t1,...m.t2].forEach(id=>{const sp=gsp(id);if(sp){const _w=li-(sp.lastPlayedAtMatch||0);sp.sessionMaxWait=Math.max(sp.sessionMaxWait||0,_w);sp.sessionWaitSum=(sp.sessionWaitSum||0)+_w;sp.lastPlayedAtMatch=li;incGames(id);}});
+    [...m.t1,...m.t2].forEach(id=>{const sp=gsp(id);if(sp){const _w=li-(sp.sessionWaitAnchor??0);sp.sessionMaxWait=Math.max(sp.sessionMaxWait||0,_w);sp.sessionWaitSum=(sp.sessionWaitSum||0)+_w;sp.sessionWaitAnchor=li+1;sp.lastPlayedAtMatch=li;incGames(id);}});
     // P2: reset ALL pair consec for every player BEFORE incrementing the new pair.
     // Matches live-submit semantics: stepping on court clears prior streaks first.
     // Without this, rebuild inflates consec for pairs that didn't play back-to-back.
@@ -7268,14 +7268,18 @@ const CF={
       const[a,b]=k.split('|');
       if(allPlayed.has(a)||allPlayed.has(b))S.session.cfPairConsec[k]=0;
     });
-    // Record lastPlayedAtMatch + sessionMaxWait for MGL system (before cfMatchCount increments)
+    // Record lastPlayedAtMatch + sessionMaxWait for MGL system (before cfMatchCount increments).
+    // sessionWaitAnchor mirrors simulate.js: uses cfMatchCount+1 (after confirm) as anchor,
+    // so the gap formula matches the console Wait Report exactly.
+    // lastPlayedAtMatch stays as-is (cfMatchCount before) — all scheduling logic depends on it.
     [...m.t1,...m.t2].forEach(id=>{
       const sp=gsp(id);if(sp){
         const _mc=S.session.cfMatchCount||0;
-        const _wait=_mc-(sp.lastPlayedAtMatch||0);
+        const _wait=_mc-(sp.sessionWaitAnchor??0); // 0 for first game (same init as simulate.js)
         sp.sessionMaxWait=Math.max(sp.sessionMaxWait||0,_wait);
         sp.sessionWaitSum=(sp.sessionWaitSum||0)+_wait;
-        sp.lastPlayedAtMatch=_mc;
+        sp.sessionWaitAnchor=_mc+1; // next gap starts from cfMatchCount+1 (matches simulate.js)
+        sp.lastPlayedAtMatch=_mc;   // unchanged — used by matchGap() for scheduling
       }
     });
     // Matchup history — store {id, at} so delete uses match.id and scoring uses cfMatchCount for decay
