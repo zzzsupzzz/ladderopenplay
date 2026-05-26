@@ -3516,20 +3516,24 @@ function renderSessStd(){
     const myMatches=allMatches.filter(m=>[...m.t1,...m.t2].includes(sp.id));
     const mq={avgOpp:null,oppGap:null,worstPGap:null,partners:0,g:myMatches.length,maxWait:null,avgWait:null};
     if(!myMatches.length){mqMap[sp.id]=mq;return;}
-    // Wait gaps: use sessionMaxWait/sessionWaitSum tracked live at game time (applyScore +
-    // _applyLog). This matches the console metric exactly — both use cfMatchCount-based gap
-    // at the moment each game is played. Avoids the matchIdx/indexOf Firebase roundtrip bug.
-    if(sp.sessionMaxWait!=null){
-      mq.maxWait=sp.sessionMaxWait;
-      const games=myMatches.length;
-      mq.avgWait=games>0?parseFloat(((sp.sessionWaitSum||0)/games).toFixed(1)):null;
-    } else if(allMatches.length>1&&myMatches.length>1){
-      // Legacy fallback for sessions without sessionMaxWait (loaded from old Firebase data)
-      const indices=myMatches.map(m=>m.matchIdx!=null?m.matchIdx:allMatches.findIndex(x=>x.id===m.id));
-      const gaps=[];for(let wi=1;wi<indices.length;wi++)gaps.push(indices[wi]-indices[wi-1]-1);
-      const validGaps=gaps.filter(g=>g>=0);
-      mq.maxWait=validGaps.length?Math.max(...validGaps):null;
-      mq.avgWait=validGaps.length?parseFloat((validGaps.reduce((a,b)=>a+b,0)/validGaps.length).toFixed(1)):null;
+    // Wait gaps: mirrors simulate.js _waitGaps algorithm exactly.
+    // anchor=0 (same as _lastGameEndMc[id]=0 on join), then anchor=matchIdx+1 after each game
+    // (same as _courtConfirmMc = _mc+1 → _lastGameEndMc = anchor). gap = matchIdx - anchor.
+    // This is reliable across Firebase roundtrips since it reads from cfLog, not player fields.
+    if(myMatches.length>0){
+      // Sort player's matches by cfLog position for correct ordering
+      const idxOf=m=>m.matchIdx!=null?m.matchIdx:allMatches.findIndex(x=>x.id===m.id);
+      const sorted=[...myMatches].sort((a,b)=>idxOf(a)-idxOf(b));
+      let anchor=0,maxW=0,sumW=0;
+      for(const gm of sorted){
+        const idx=idxOf(gm);if(idx<0)continue;
+        const gap=idx-anchor;
+        if(gap>maxW)maxW=gap;
+        sumW+=gap;
+        anchor=idx+1; // simulate.js: _lastGameEndMc = _courtConfirmMc = _mc+1 = idx+1
+      }
+      mq.maxWait=maxW;
+      mq.avgWait=parseFloat((sumW/sorted.length).toFixed(1));
     }
     const oppGaps=[];
     let worstPGap=0;
