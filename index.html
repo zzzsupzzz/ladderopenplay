@@ -6445,11 +6445,14 @@ const CF={
     // The joint optimizer may have excluded them for a better total score — override this.
     if(bestAlloc&&(tier1.length>0||tier2.length>0)){
       const allSelected=new Set(bestAlloc.flatMap(b=>b.group.map(p=>p.id)));
-      // If any 0-game or MGL player wasn't selected, force greedy path
       const unservedPrio=[...tier1,...tier2a].filter(p=>!allSelected.has(p.id));
-      if(unservedPrio.length>0&&(tier1.length+tier2a.length)<allSelected.size){
-        // Only override if there were enough priority players to fill a court
-        // but they weren't chosen (avoids override when queue is thin)
+      // ALWAYS override if a critical-starvation player (gap≥2×starvThresh) was excluded.
+      // The original condition `tier2a.length < allSelected.size` silently fails when ALL
+      // queue members have gap≥4 (common in Phase 3) — tier2a.length=8, allSelected=8,
+      // 8<8=false → override skips → critical player excluded for another round.
+      const _critTJoint=Math.max((S.session?.courts||1)+1,4)*2;
+      const hasCritExcluded=unservedPrio.some(p=>this.matchGap(p.id)>=_critTJoint);
+      if(hasCritExcluded||(unservedPrio.length>0&&(tier1.length+tier2a.length)<allSelected.size)){
         bestAlloc=null;
       }
     }
