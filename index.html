@@ -6323,6 +6323,15 @@ const CF={
           (gsp(p.id)?.matchesPlayed||0)===0||
           this.matchGap(p.id)>=4  // must-play hard anchor
         );
+        // Sort subPriority: critical starvation (gap>=critT) first, then by gap desc
+        const _nNeedCritT=Math.max((S.session?.courts||1)+1,4)*2;
+        subPriority.sort((a,b)=>{
+          const ga=this.matchGap(a.id),gb=this.matchGap(b.id);
+          const aCrit=ga>=_nNeedCritT,bCrit=gb>=_nNeedCritT;
+          if(aCrit!==bCrit)return aCrit?-1:1;
+          if(ga!==gb)return gb-ga;
+          return (gsp(a.id)?.matchesPlayed||0)-(gsp(b.id)?.matchesPlayed||0);
+        });
         let best=null;
         // Try all-priority group first (same logic as single-court path)
         if(subPriority.length>=4){
@@ -6346,8 +6355,19 @@ const CF={
               const g=[subAnchor,subOthers[i],subOthers[j],subOthers[k]];
               const res=this._scoreGroup(g,mustSplit);
               if(!this._withinTeamGapOk(res.t1,res.t2,300))continue;
-            if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
+              if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
               if(res.score<bScore){bScore=res.score;best={...res,group:g};}
+            }
+            // Relaxed rescue for critical-starvation anchors: cap=500 (full sr range)
+            if(!best&&this.matchGap(subAnchor.id)>=_nNeedCritT){
+              let bScore2=Infinity;
+              for(let i=0;i<so-2;i++)for(let j=i+1;j<so-1;j++)for(let k=j+1;k<so;k++){
+                const g=[subAnchor,subOthers[i],subOthers[j],subOthers[k]];
+                const res=this._scoreGroup(g,mustSplit);
+                if(!this._withinTeamGapOk(res.t1,res.t2,500))continue;
+                if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
+                if(res.score<bScore2){bScore2=res.score;best={...res,group:g};}
+              }
             }
           }
         }
