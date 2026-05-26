@@ -6369,6 +6369,15 @@ const CF={
                 if(res.score<bScore2){bScore2=res.score;best={...res,group:g};}
               }
             }
+            // NUCLEAR fallback: gap>=nc*2+1 (3c→7, 4c→9) → skip ALL skill filters, guarantee placement.
+            if(!best&&this.matchGap(subAnchor.id)>=(S.session?.courts||1)*2+1){
+              let nScore=Infinity;
+              for(let i=0;i<so-2;i++)for(let j=i+1;j<so-1;j++)for(let k=j+1;k<so;k++){
+                const g=[subAnchor,subOthers[i],subOthers[j],subOthers[k]];
+                const res=this._scoreGroup(g,mustSplit);
+                if(res.score<nScore){nScore=res.score;best={...res,group:g};}
+              }
+            }
           }
         }
         if(!best)best=this._findBestGroup(subRaw,mustSplit,nrIds,n);
@@ -6534,6 +6543,15 @@ const CF={
               if(!this._withinTeamGapOk(res.t1,res.t2,500))continue; // full sr range
               if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
               if(res.score<bScore){bScore=res.score;best={...res,group:g};}
+            }
+          }
+          // NUCLEAR fallback: gap>=nc*2+1 (3c→7, 4c→9) → skip ALL skill filters, guarantee placement.
+          if(!best&&this.matchGap(anchor.id)>=(S.session?.courts||1)*2+1){
+            let nScore=Infinity;
+            for(let i=0;i<olen-2;i++)for(let j=i+1;j<olen-1;j++)for(let k=j+1;k<olen;k++){
+              const g=[anchor,others[i],others[j],others[k]];
+              const res=this._scoreGroup(g,mustSplit);
+              if(res.score<nScore){nScore=res.score;best={...res,group:g};}
             }
           }
         }
@@ -6896,6 +6914,16 @@ const CF={
           if(!this._withinTeamGapOk(res.t1,res.t2,500))continue; // full sr range — any combo valid
           if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
           if(res.score<bestScore){bestScore=res.score;best={...res,group};}
+        }
+      }
+      // NUCLEAR fallback: gap>=nc*2+1 (3c→7, 4c→9) → skip ALL skill filters, guarantee placement.
+      // No _withinTeamGapOk, no _ranksCompatible — player has waited long enough.
+      if(!best&&this.matchGap(anchor.id)>=(S.session?.courts||1)*2+1){
+        let nScore=Infinity;
+        for(let i=0;i<n-2;i++)for(let j=i+1;j<n-1;j++)for(let k=j+1;k<n;k++){
+          const group=[anchor,...[others[i],others[j],others[k]]];
+          const res=this._scoreGroup(group,mustSplit);
+          if(res.score<nScore){nScore=res.score;best={...res,group};}
         }
       }
       if(best){this._storeSuggestion(courtNum,best,finishedMatch);return;}
