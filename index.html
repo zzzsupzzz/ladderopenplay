@@ -6213,10 +6213,13 @@ const CF={
     });
     if(eligibleCounts.length){
       const minGames=Math.min(...eligibleCounts);
-      const tight=queue.filter(q=>(gsp(q.id)?.matchesPlayed||0)<=minGames+1);
+      // Emergency exception: never filter out players with matchGap >= critThresh — they must
+      // stay in the pool so the nuclear fallback can reach them regardless of game count.
+      const _pcCapEmerg=(S.session?.courts||1)*2-1;
+      const tight=queue.filter(q=>this.matchGap(q.id)>=_pcCapEmerg||(gsp(q.id)?.matchesPlayed||0)<=minGames+1);
       if(tight.length>=4)queue=tight;
       else{
-        const capped=queue.filter(q=>(gsp(q.id)?.matchesPlayed||0)<=minGames+2);
+        const capped=queue.filter(q=>this.matchGap(q.id)>=_pcCapEmerg||(gsp(q.id)?.matchesPlayed||0)<=minGames+2);
         if(capped.length>=4)queue=capped;
       }
     }
