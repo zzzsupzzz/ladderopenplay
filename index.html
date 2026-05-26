@@ -6865,14 +6865,15 @@ const CF={
             if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
         if(res.score<bestScore){bestScore=res.score;best={...res,group};}
       }
-      // Relaxed attempt for critical-starvation anchors: widen team-gap cap to 450 if normal fails.
-      // This is a last resort — accepting a wider rating spread beats leaving someone out 10+ rounds.
+      // Relaxed attempt for critical-starvation anchors: widen team-gap cap to 500 if normal fails.
+      // 500 = full sr range (rank1 sr=1200, rank20 sr=700 → diff=500), so any pair passes.
+      // After 8+ rounds waiting, any match beats another exclusion — quality is secondary.
       if(!best&&this.matchGap(anchor.id)>=_starvTCrit){
         for(let i=0;i<n-2;i++)for(let j=i+1;j<n-1;j++)for(let k=j+1;k<n;k++){
           const group=[anchor,...[others[i],others[j],others[k]]];
           if(_isShown(group))continue;
           const res=this._scoreGroup(group,mustSplit);
-          if(!this._withinTeamGapOk(res.t1,res.t2,450))continue; // wider cap
+          if(!this._withinTeamGapOk(res.t1,res.t2,500))continue; // full sr range — any combo valid
           if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
           if(res.score<bestScore){bestScore=res.score;best={...res,group};}
         }
