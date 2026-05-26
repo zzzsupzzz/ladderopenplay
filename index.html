@@ -3516,14 +3516,18 @@ function renderSessStd(){
     const myMatches=allMatches.filter(m=>[...m.t1,...m.t2].includes(sp.id));
     const mq={avgOpp:null,oppGap:null,worstPGap:null,partners:0,g:myMatches.length,maxWait:null,avgWait:null};
     if(!myMatches.length){mqMap[sp.id]=mq;return;}
-    // Wait gaps: completed matches by other courts while this player sat in the queue.
-    // Use m.matchIdx (recorded at submit time) rather than indexOf — indexOf relies on
-    // object reference identity which breaks after Firebase roundtrips that spread-copy
-    // match objects ({...m}), causing inflated gap values (e.g. WAIT=8 when real max=6).
-    if(allMatches.length>1&&myMatches.length>1){
-      const indices=myMatches.map(m=>m.matchIdx??allMatches.indexOf(m));
+    // Wait gaps: use sessionMaxWait/sessionWaitSum tracked live at game time (applyScore +
+    // _applyLog). This matches the console metric exactly — both use cfMatchCount-based gap
+    // at the moment each game is played. Avoids the matchIdx/indexOf Firebase roundtrip bug.
+    if(sp.sessionMaxWait!=null){
+      mq.maxWait=sp.sessionMaxWait;
+      const games=myMatches.length;
+      mq.avgWait=games>0?parseFloat(((sp.sessionWaitSum||0)/games).toFixed(1)):null;
+    } else if(allMatches.length>1&&myMatches.length>1){
+      // Legacy fallback for sessions without sessionMaxWait (loaded from old Firebase data)
+      const indices=myMatches.map(m=>m.matchIdx!=null?m.matchIdx:allMatches.findIndex(x=>x.id===m.id));
       const gaps=[];for(let wi=1;wi<indices.length;wi++)gaps.push(indices[wi]-indices[wi-1]-1);
-      const validGaps=gaps.filter(g=>g>=0); // negative means bad index — skip
+      const validGaps=gaps.filter(g=>g>=0);
       mq.maxWait=validGaps.length?Math.max(...validGaps):null;
       mq.avgWait=validGaps.length?parseFloat((validGaps.reduce((a,b)=>a+b,0)/validGaps.length).toFixed(1)):null;
     }
@@ -4803,7 +4807,7 @@ function rebuildCFDerivedState(){
     S.session.cfMatchupHx[CF.matchupKey(m.t1,m.t2)]={id:m.id,at:mc};
     S.session.cfGroupHx[[...m.t1,...m.t2].sort().join(',')]={id:m.id,at:mc};
     S.session.cfMatchCount=mc;
-    [...m.t1,...m.t2].forEach(id=>{const sp=gsp(id);if(sp)sp.lastPlayedAtMatch=li;incGames(id);});
+    [...m.t1,...m.t2].forEach(id=>{const sp=gsp(id);if(sp){const _w=li-(sp.lastPlayedAtMatch||0);sp.sessionMaxWait=Math.max(sp.sessionMaxWait||0,_w);sp.sessionWaitSum=(sp.sessionWaitSum||0)+_w;sp.lastPlayedAtMatch=li;incGames(id);}});
     // P2: reset ALL pair consec for every player BEFORE incrementing the new pair.
     // Matches live-submit semantics: stepping on court clears prior streaks first.
     // Without this, rebuild inflates consec for pairs that didn't play back-to-back.
@@ -7264,9 +7268,15 @@ const CF={
       const[a,b]=k.split('|');
       if(allPlayed.has(a)||allPlayed.has(b))S.session.cfPairConsec[k]=0;
     });
-    // Record lastPlayedAtMatch for MGL system (before cfMatchCount increments)
+    // Record lastPlayedAtMatch + sessionMaxWait for MGL system (before cfMatchCount increments)
     [...m.t1,...m.t2].forEach(id=>{
-      const sp=gsp(id);if(sp)sp.lastPlayedAtMatch=S.session.cfMatchCount||0;
+      const sp=gsp(id);if(sp){
+        const _mc=S.session.cfMatchCount||0;
+        const _wait=_mc-(sp.lastPlayedAtMatch||0);
+        sp.sessionMaxWait=Math.max(sp.sessionMaxWait||0,_wait);
+        sp.sessionWaitSum=(sp.sessionWaitSum||0)+_wait;
+        sp.lastPlayedAtMatch=_mc;
+      }
     });
     // Matchup history — store {id, at} so delete uses match.id and scoring uses cfMatchCount for decay
     if(!S.session.cfMatchupHx)S.session.cfMatchupHx={};
