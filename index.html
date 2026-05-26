@@ -6213,13 +6213,13 @@ const CF={
     });
     if(eligibleCounts.length){
       const minGames=Math.min(...eligibleCounts);
-      // Emergency exception: never filter out players with matchGap >= critThresh — they must
-      // stay in the pool so the nuclear fallback can reach them regardless of game count.
-      const _pcCapEmerg=(S.session?.courts||1)*2-1;
-      const tight=queue.filter(q=>this.matchGap(q.id)>=_pcCapEmerg||(gsp(q.id)?.matchesPlayed||0)<=minGames+1);
+      // Progressive priority exception: any player with gap>=4 (MGL threshold) stays in the
+      // pool regardless of game count — starvation relief trumps play-count fairness.
+      // This prevents high-gap players from being silently excluded from the queue.
+      const tight=queue.filter(q=>this.matchGap(q.id)>=4||(gsp(q.id)?.matchesPlayed||0)<=minGames+1);
       if(tight.length>=4)queue=tight;
       else{
-        const capped=queue.filter(q=>this.matchGap(q.id)>=_pcCapEmerg||(gsp(q.id)?.matchesPlayed||0)<=minGames+2);
+        const capped=queue.filter(q=>this.matchGap(q.id)>=4||(gsp(q.id)?.matchesPlayed||0)<=minGames+2);
         if(capped.length>=4)queue=capped;
       }
     }
@@ -6251,7 +6251,13 @@ const CF={
         // guarantees 0-game / far-behind players are in the search window.
         const ha=this.hungerBoost(a.id),hb=this.hungerBoost(b.id);
         if(Math.abs(ha-hb)>10)return hb-ha;
-        // Secondary: composite wait+skill priority
+        // Progressive gap priority: players with gap>=4 float to top by gap desc.
+        // Each additional wait round increases priority continuously — no binary jump.
+        const ga=this.matchGap(a.id),gb=this.matchGap(b.id);
+        const aWait=ga>=4,bWait=gb>=4;
+        if(aWait!==bWait)return aWait?-1:1;
+        if(aWait&&bWait&&ga!==gb)return gb-ga;
+        // Fallback: composite wait+skill priority
         return this.queuePriority(b.qEntry,courtAvg)-this.queuePriority(a.qEntry,courtAvg);
       });
 
@@ -6302,10 +6308,14 @@ const CF={
     }
 
     // Multi-court joint path
-    // Re-sort pool so hungry players (played far fewer games than avg) come FIRST.
-    // This ensures they're within the searchCap window even with large queues.
-    const topHungry=pool.filter(p=>this.hungerBoost(p.id)>10)
-                        .sort((a,b)=>this.hungerBoost(b.id)-this.hungerBoost(a.id));
+    // Re-sort pool: high-gap players (gap>=4) AND hungry players (hungerBoost>10) come FIRST.
+    // Both groups are sorted by gap desc so longer waits always rank ahead within the group.
+    const topHungry=pool.filter(p=>this.hungerBoost(p.id)>10||this.matchGap(p.id)>=4)
+                        .sort((a,b)=>{
+                          const ga=this.matchGap(a.id),gb=this.matchGap(b.id);
+                          if(ga!==gb)return gb-ga; // higher gap first
+                          return this.hungerBoost(b.id)-this.hungerBoost(a.id);
+                        });
     const topHungryIds=new Set(topHungry.map(p=>p.id));
     const topNormal=pool.filter(p=>!topHungryIds.has(p.id));
     const top=[...topHungry,...topNormal];
@@ -6326,13 +6336,12 @@ const CF={
           (gsp(p.id)?.matchesPlayed||0)===0||
           this.matchGap(p.id)>=4  // must-play hard anchor
         );
-        // Sort subPriority: critical starvation (gap>=critT) first, then by gap desc
+        // Progressive gap priority: higher gap = higher anchor priority (continuous, no binary step).
+        // Tie-break by fewest games played so equity and starvation both matter.
         const _nNeedCritT=(S.session?.courts||1)*2-1;
         subPriority.sort((a,b)=>{
           const ga=this.matchGap(a.id),gb=this.matchGap(b.id);
-          const aCrit=ga>=_nNeedCritT,bCrit=gb>=_nNeedCritT;
-          if(aCrit!==bCrit)return aCrit?-1:1;
-          if(ga!==gb)return gb-ga;
+          if(ga!==gb)return gb-ga; // higher gap wins continuously
           return (gsp(a.id)?.matchesPlayed||0)-(gsp(b.id)?.matchesPlayed||0);
         });
         let best=null;
@@ -6515,15 +6524,13 @@ const CF={
                                       tier2c.some(t=>t.id===p.id));
         let best=null;
         if(unserved.length>0){
-          // Sort unserved by critical starvation (gap≥2×starvThresh) first, then by gap desc.
-          // Mirrors single-court STEP 2 anchor selection so the most urgent player anchors.
+          // Progressive gap priority: higher gap = higher anchor priority (continuous).
+          // Longer wait always wins the anchor slot — no binary threshold step.
           const _greedyCritT=(S.session?.courts||1)*2-1;
           unserved.sort((a,b)=>{
             const ga2=this.matchGap(a.id),gb2=this.matchGap(b.id);
-            const aCrit2=ga2>=_greedyCritT,bCrit2=gb2>=_greedyCritT;
-            if(aCrit2!==bCrit2)return aCrit2?-1:1;
-            if(ga2!==gb2)return gb2-ga2;
-            return 0;
+            if(ga2!==gb2)return gb2-ga2; // higher gap wins continuously
+            return (gsp(a.id)?.matchesPlayed||0)-(gsp(b.id)?.matchesPlayed||0);
           });
           const anchor=unserved[0];
           const others=rem.filter(p=>p.id!==anchor.id);
@@ -6871,25 +6878,19 @@ const CF={
       if((gsp(p.id)?.matchesPlayed||0)<=minG)return true;
       return false;
     });
-    // Critical-starvation override: a player who has waited 2× the starvation threshold
-    // (e.g. gap≥8 at 3c, gap≥10 at 4c) overrides game-count equity and jumps to anchor.
-    // Rationale: game-count equity is the RIGHT tie-breaker most of the time, but if
-    // someone has played 9 games while others are at 6, their 9-round consecutive wait
-    // is genuinely urgent and must not be de-prioritised just because others are "behind"
-    // on game count. The 2× multiplier prevents false positives from normal variance.
-    const _starvTCrit=(S.session?.courts||1)*2-1; // 2c→3, 3c→5, 4c→7 — fires early to cover concurrent match drift
+    // Progressive gap priority: within mustPlayCandidates, longer wait = higher anchor priority.
+    // No binary threshold — every additional round waiting continuously escalates priority.
+    // Gap ties broken by game equity (fewer games = higher priority), then wait minutes.
+    const _starvTCrit=(S.session?.courts||1)*2-1; // used for cap=500 rescue + nuclear checks below
     mustPlayCandidates.sort((a,b)=>{
       const ga=this.matchGap(a.id), gb=this.matchGap(b.id);
-      const aCrit=ga>=_starvTCrit, bCrit=gb>=_starvTCrit;
-      // Tier 1: critical starvation (gap≥2×starvThresh) → always wins anchor slot
-      if(aCrit!==bCrit)return aCrit?-1:1;
-      if(aCrit&&bCrit&&ga!==gb)return gb-ga; // both critical: higher gap wins
-      // Tier 2: normal equity — fewest games relative to min first
+      // Primary: higher gap wins unconditionally (gap=6 always beats gap=5 beats gap=4)
+      if(ga!==gb)return gb-ga;
+      // Tie-break: fewest games relative to min (equity)
       const minG=a._minGames!=null?a._minGames:0;
       const aPC=(gsp(a.id)?.matchesPlayed||0)-minG;
       const bPC=(gsp(b.id)?.matchesPlayed||0)-minG;
       if(aPC!==bPC)return aPC-bPC;
-      if(ga!==gb)return gb-ga;
       return (b.waitMin||0)-(a.waitMin||0);
     });
     const anchor=mustPlayCandidates[0]||null;
