@@ -1744,14 +1744,24 @@ function _maxPartnerGap(n,nc,waitMatches){
   const ceil=Math.max(5,Math.ceil(n*(_PARTNER_GAP_CEIL[phase]?.[key]||0.55)));
   const relaxSteps=Math.floor(waitMatches/2);
   const relax=Math.ceil(n*0.08)*relaxSteps;
-  // Starvation override: lift ceiling by phase×court % of N when player is starving.
-  // Threshold: max(nc+1, 4) — scales with courts but never fires before gap=4.
-  // 2c=4, 3c=4, 4c=5. Fires early enough to prevent long blocks without
-  // disrupting normal scheduling (gap=3 at 2c was too aggressive).
-  // Binary (on/off) is simpler and more predictable than scaled — the multi-court
-  // greedy fallback handles extreme cases via its own relaxed-cap rescue path.
+  // Starvation override: lift ceiling when player has been waiting too long.
+  // Threshold: max(nc+1, 4) — fires at gap=4 (2c/3c) or gap=5 (4c).
+  //
+  // Scaling strategy (two-phase):
+  //   gap=starvThresh..critThresh-1: binary 1× lift — gentle widening, no disruption
+  //   gap≥critThresh (=2×starvThresh): scales with severity (2× at critThresh, 3× cap)
+  //     This only fires when the critical anchor override also fires, so widening is
+  //     coordinated with forced scheduling — not applied to moderate-wait players.
+  //
+  // Example 20p/3c Phase 3 (starvThresh=4, critThresh=8, base lift=4 ranks):
+  //   gap=4–7:  starvCeil = 6+4 = 10  (50% pool — normal rescue)
+  //   gap=8:    starvCeil = 6+8 = 14  (70% pool — strong rescue, anchor forced)
+  //   gap=12+:  starvCeil = 6+12 = 18 (90% pool — anyone, last resort)
   const starvThresh=Math.max(nc+1,4);
-  const starvLift=waitMatches>=starvThresh?Math.ceil(n*(_STARV_LIFT[phase]?.[key]||0.15)):0;
+  const critThresh=starvThresh*2; // mirrors critTStarv in anchor/greedy overrides
+  const baseLift=waitMatches>=starvThresh?Math.ceil(n*(_STARV_LIFT[phase]?.[key]||0.15)):0;
+  const starvMult=waitMatches>=critThresh?Math.min(3,waitMatches/starvThresh):1;
+  const starvLift=baseLift*starvMult;
   const starvCeil=ceil+starvLift;
   return Math.min(starvCeil,base+relax);
 }
