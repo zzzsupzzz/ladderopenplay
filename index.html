@@ -6324,7 +6324,7 @@ const CF={
           this.matchGap(p.id)>=4  // must-play hard anchor
         );
         // Sort subPriority: critical starvation (gap>=critT) first, then by gap desc
-        const _nNeedCritT=Math.max((S.session?.courts||1)+1,4)*2;
+        const _nNeedCritT=(S.session?.courts||1)*2+1;
         subPriority.sort((a,b)=>{
           const ga=this.matchGap(a.id),gb=this.matchGap(b.id);
           const aCrit=ga>=_nNeedCritT,bCrit=gb>=_nNeedCritT;
@@ -6489,7 +6489,7 @@ const CF={
       // The original condition `tier2a.length < allSelected.size` silently fails when ALL
       // queue members have gap≥4 (common in Phase 3) — tier2a.length=8, allSelected=8,
       // 8<8=false → override skips → critical player excluded for another round.
-      const _critTJoint=Math.max((S.session?.courts||1)+1,4)*2;
+      const _critTJoint=(S.session?.courts||1)*2+1;
       const hasCritExcluded=unservedPrio.some(p=>this.matchGap(p.id)>=_critTJoint);
       if(hasCritExcluded||(unservedPrio.length>0&&(tier1.length+tier2a.length)<allSelected.size)){
         bestAlloc=null;
@@ -6514,7 +6514,7 @@ const CF={
         if(unserved.length>0){
           // Sort unserved by critical starvation (gap≥2×starvThresh) first, then by gap desc.
           // Mirrors single-court STEP 2 anchor selection so the most urgent player anchors.
-          const _greedyCritT=Math.max((S.session?.courts||1)+1,4)*2;
+          const _greedyCritT=(S.session?.courts||1)*2+1;
           unserved.sort((a,b)=>{
             const ga2=this.matchGap(a.id),gb2=this.matchGap(b.id);
             const aCrit2=ga2>=_greedyCritT,bCrit2=gb2>=_greedyCritT;
@@ -6874,7 +6874,7 @@ const CF={
     // someone has played 9 games while others are at 6, their 9-round consecutive wait
     // is genuinely urgent and must not be de-prioritised just because others are "behind"
     // on game count. The 2× multiplier prevents false positives from normal variance.
-    const _starvTCrit=Math.max((S.session?.courts||1)+1,4)*2; // 2c/3c→8, 4c→10
+    const _starvTCrit=(S.session?.courts||1)*2+1; // 2c→5, 3c→7, 4c→9 — matches hardMaxWait
     mustPlayCandidates.sort((a,b)=>{
       const ga=this.matchGap(a.id), gb=this.matchGap(b.id);
       const aCrit=ga>=_starvTCrit, bCrit=gb>=_starvTCrit;
