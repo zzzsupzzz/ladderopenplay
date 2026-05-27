@@ -6362,8 +6362,12 @@ const CF={
           return (gsp(a.id)?.matchesPlayed||0)-(gsp(b.id)?.matchesPlayed||0);
         });
         let best=null;
+        // CRITICAL: Skip all-priority group if any player has critical-starvation gap.
+        // Same reasoning as STEP 1 in _generateSingleSuggestion: all-priority search can
+        // pick a group excluding the critical player, bypassing the anchor+nuclear below.
+        const _nNeedHasCrit=subRaw.some(p=>this.matchGap(p.id)>=_nNeedCritT);
         // Try all-priority group first (same logic as single-court path)
-        if(subPriority.length>=4){
+        if(subPriority.length>=4&&!_nNeedHasCrit){
           const sp2=subPriority.slice(0,Math.min(8,subPriority.length));
           const spn=sp2.length;let bScore=Infinity;
           for(let i=0;i<spn-3;i++)for(let j=i+1;j<spn-2;j++)for(let k=j+1;k<spn-1;k++)for(let l=k+1;l<spn;l++){
@@ -6865,7 +6869,14 @@ const CF={
     // Quality gate: only use this path if the group passes a reasonable skill spread check.
     // If the priority players span too wide a rating range (e.g. 700 + 1300), skip to STEP 2
     // so that one of them gets a good match and the other waits one more turn.
-    if(priorityPool.length>=4){
+    // CRITICAL: Skip STEP 1 entirely if any player has a critical-starvation gap (>= nc*2-1).
+    // STEP 1 can select a high-quality group that EXCLUDES the critical-gap player, then
+    // return early — bypassing STEP 2's anchor+nuclear guarantee entirely. This is the
+    // root cause of players reaching gap=12+ despite nuclear at 5. When a critical waiter
+    // exists, force STEP 2 (anchor = critical player, nuclear guarantees placement).
+    const _starvTCrit=(S.session?.courts||1)*2-1;
+    const _hasCritWaiter=orderedPool.some(p=>this.matchGap(p.id)>=_starvTCrit);
+    if(priorityPool.length>=4&&!_hasCritWaiter){
       const pp=priorityPool.slice(0,Math.min(8,priorityPool.length));
       const pn=pp.length;
       let best=null,bestScore=Infinity;
