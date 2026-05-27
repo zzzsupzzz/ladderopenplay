@@ -3523,19 +3523,23 @@ function renderSessStd(){
     // Here: _joinedAtMatch>0 means late joiner (count first gap); 0/unset means session-start (skip it).
     // anchor = _joinedAtMatch, then anchor=matchIdx+1 after each game (= _courtConfirmMc = _mc+1).
     if(myMatches.length>0){
-      // Sort player's matches by cfLog position for correct ordering
-      const idxOf=m=>m.matchIdx!=null?m.matchIdx:allMatches.findIndex(x=>x.id===m.id);
-      const sorted=[...myMatches].sort((a,b)=>idxOf(a)-idxOf(b));
+      // Use confirmMc (cfMatchCount at game START) not matchIdx (cfMatchCount at score SUBMIT).
+      // simulate.js records gap = cfMatchCount_at_confirm - _lastGameEndMc. matchIdx is set at
+      // submit time when other courts may have already incremented cfMatchCount, inflating it.
+      // confirmMc matches simulate.js exactly. Falls back to matchIdx for legacy log entries.
+      const cmcOf=m=>m.confirmMc!=null?m.confirmMc:(m.matchIdx!=null?m.matchIdx:allMatches.findIndex(x=>x.id===m.id));
+      const sorted=[...myMatches].sort((a,b)=>cmcOf(a)-cmcOf(b));
       const joinMc=sp._joinedAtMatch??0;
       let anchor=joinMc,maxW=0,sumW=0,gapCount=0;
-      // firstDone: true if we've already played one game AND should count subsequent gaps.
-      // For late joiners (joinMc>0), count from first game. For session-start (joinMc=0), skip first.
+      // firstDone: true = count this gap. For late joiners (joinMc>0) count first gap (simulate.js
+      // initialises _lastGameEndMc at join). For session-start players (joinMc=0) skip first gap
+      // (simulate.js leaves _lastGameEndMc undefined, so condition `!==undefined` fails first time).
       let firstDone=joinMc>0;
       for(const gm of sorted){
-        const idx=idxOf(gm);if(idx<0)continue;
-        if(firstDone){const gap=idx-anchor;if(gap>maxW)maxW=gap;sumW+=gap;gapCount++;}
+        const cmc=cmcOf(gm);if(cmc<0)continue;
+        if(firstDone){const gap=cmc-anchor;if(gap>maxW)maxW=gap;sumW+=gap;gapCount++;}
         firstDone=true;
-        anchor=idx+1; // simulate.js: _lastGameEndMc = _courtConfirmMc = _mc+1 = idx+1
+        anchor=cmc+1; // simulate.js: _courtConfirmMc = _mc+1 = confirmMc+1 → _lastGameEndMc=confirmMc+1
       }
       mq.maxWait=maxW;
       mq.avgWait=gapCount>0?parseFloat((sumW/gapCount).toFixed(1)):0;
@@ -7091,7 +7095,11 @@ const CF={
     const idleMs=prevCourt.idleStart?Math.max(0,now-prevCourt.idleStart):0;
     const match={id:uid(),courtNum,t1:sug.t1,t2:sug.t2,
       s1:null,s2:null,status:'pending',eloDeltas:null,startTime:now,extended:false,
-      queueSince:queueSinceMap}; // preserve original queue times for cancel-priority restore
+      queueSince:queueSinceMap,
+      confirmMc:S.session.cfMatchCount||0}; // cfMatchCount at game START — used for wait gap accuracy.
+      // simulate.js records gap = cfMatchCount_at_confirm - _lastGameEndMc.
+      // matchIdx is set at score SUBMIT time when cfMatchCount may be higher (other courts submitted).
+      // confirmMc matches simulate.js exactly since confirmSuggestion never increments cfMatchCount.
     S.session.cfCourts[courtNum]={status:'playing',match,
       totalIdleMs:(prevCourt.totalIdleMs||0)+idleMs,
       matchCount:prevCourt.matchCount||0};
