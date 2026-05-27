@@ -6909,7 +6909,7 @@ const CF={
     // Progressive gap priority: within mustPlayCandidates, longer wait = higher anchor priority.
     // No binary threshold — every additional round waiting continuously escalates priority.
     // Gap ties broken by game equity (fewer games = higher priority), then wait minutes.
-    const _starvTCrit=(S.session?.courts||1)*2-1; // used for cap=500 rescue + nuclear checks below
+    // _starvTCrit already declared above (before STEP 1) — reuse it here.
     mustPlayCandidates.sort((a,b)=>{
       const ga=this.matchGap(a.id), gb=this.matchGap(b.id);
       // Primary: higher gap wins unconditionally (gap=6 always beats gap=5 beats gap=4)
