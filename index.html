@@ -3517,24 +3517,28 @@ function renderSessStd(){
     const mq={avgOpp:null,oppGap:null,worstPGap:null,partners:0,g:myMatches.length,maxWait:null,avgWait:null};
     if(!myMatches.length){mqMap[sp.id]=mq;return;}
     // Wait gaps: mirrors simulate.js _waitGaps algorithm exactly.
-    // anchor = _joinedAtMatch (same as _lastGameEndMc[id]=cfMatchCount at join in simulate.js),
-    // then anchor=matchIdx+1 after each game (same as _courtConfirmMc = _mc+1 → _lastGameEndMc).
-    // gap = matchIdx - anchor. Late joiners use their join-time cfMatchCount, not 0.
-    // This is reliable across Firebase roundtrips since it reads from cfLog, not player fields.
+    // simulate.js records gap = _mc - _lastGameEndMc[id] only if _lastGameEndMc[id] !== undefined.
+    // For session-start players _lastGameEndMc starts undefined → first game gap is NOT recorded.
+    // For mid-session joiners _lastGameEndMc[id] = cfMatchCount at join → first game gap IS recorded.
+    // Here: _joinedAtMatch>0 means late joiner (count first gap); 0/unset means session-start (skip it).
+    // anchor = _joinedAtMatch, then anchor=matchIdx+1 after each game (= _courtConfirmMc = _mc+1).
     if(myMatches.length>0){
       // Sort player's matches by cfLog position for correct ordering
       const idxOf=m=>m.matchIdx!=null?m.matchIdx:allMatches.findIndex(x=>x.id===m.id);
       const sorted=[...myMatches].sort((a,b)=>idxOf(a)-idxOf(b));
-      let anchor=sp._joinedAtMatch??0,maxW=0,sumW=0;
+      const joinMc=sp._joinedAtMatch??0;
+      let anchor=joinMc,maxW=0,sumW=0,gapCount=0;
+      // firstDone: true if we've already played one game AND should count subsequent gaps.
+      // For late joiners (joinMc>0), count from first game. For session-start (joinMc=0), skip first.
+      let firstDone=joinMc>0;
       for(const gm of sorted){
         const idx=idxOf(gm);if(idx<0)continue;
-        const gap=idx-anchor;
-        if(gap>maxW)maxW=gap;
-        sumW+=gap;
+        if(firstDone){const gap=idx-anchor;if(gap>maxW)maxW=gap;sumW+=gap;gapCount++;}
+        firstDone=true;
         anchor=idx+1; // simulate.js: _lastGameEndMc = _courtConfirmMc = _mc+1 = idx+1
       }
       mq.maxWait=maxW;
-      mq.avgWait=parseFloat((sumW/sorted.length).toFixed(1));
+      mq.avgWait=gapCount>0?parseFloat((sumW/gapCount).toFixed(1)):0;
     }
     const oppGaps=[];
     let worstPGap=0;
