@@ -385,11 +385,7 @@ const SIM = (() => {
       // and their next game starting. Measures queue fairness under staggered court finishes.
       const _lastGameEndMc = {}; // player id → cfMatchCount anchor for gap calculation
       const _waitGaps = {};      // player id → array of completed-match waits
-      // Per-court: cfMatchCount immediately AFTER this court's last confirm. Used at
-      // score-submission to anchor _lastGameEndMc correctly — using cfMatchCount at
-      // submit time is wrong because other courts may have confirmed more matches since,
-      // inflating the value and making all subsequent gaps appear smaller than reality.
-      const _courtConfirmMc = {};
+      // (Removed: _courtConfirmMc no longer needed — _lastGameEndMc is now set AFTER submit.)
 
       // Per-court tick counters — each court independently counts down before submitting.
       // 80%: each court gets a fresh 2–5 tick game length (staggered finish).
@@ -449,9 +445,6 @@ const SIM = (() => {
                   _waitGaps[id].push(_mc - _lastGameEndMc[id]);
                 }
               });
-              // Snapshot cfMatchCount+1 (= value after this confirm) keyed by court.
-              // Used at score-submission time to anchor _lastGameEndMc correctly.
-              _courtConfirmMc[c] = _mc + 1;
             }
             CF.confirmSuggestion(c);
             courtTicks[c] = assignGameLen(c);
@@ -485,20 +478,17 @@ const SIM = (() => {
           const ct = S.session.cfCourts?.[c];
           if (ct?.status === 'playing' && ct.match) {
             if (courtTicks[c] > 0) { courtTicks[c]--; continue; }
-            // Anchor _lastGameEndMc to the cfMatchCount captured at THIS court's
-            // confirm time (stored in _courtConfirmMc[c] = cfMatchCount right after
-            // confirm). Using cfMatchCount at submit time is wrong — by then, other
-            // courts may have confirmed more matches, inflating the value.
+            // Queue-time-only anchor: set _lastGameEndMc AFTER _doSubmitScore so we capture
+            // cfMatchCount = matchIdx+1 (game-end time, not game-start/confirm time).
+            // This matches index.html WAIT column: gap = confirmMc_next - matchIdx_prev - 1.
+            // In-game submits from other courts are excluded from the WAIT metric.
             const _ct = S.session.cfCourts?.[c];
-            if (_ct?.match) {
-              const _endAnchor = _courtConfirmMc[c] ?? (S.session.cfMatchCount || 0);
-              [...(_ct.match.t1||[]), ...(_ct.match.t2||[])].forEach(id => {
-                _lastGameEndMc[id] = _endAnchor;
-              });
-            }
+            const _submitPlayers = _ct?.match ? [...(_ct.match.t1||[]), ...(_ct.match.t2||[])] : [];
             const [s1, s2] = randomScore();
             const _submitT0 = performance.now();
             CF._doSubmitScore(c, s1, s2);
+            // After submit: S.session.cfMatchCount = matchIdx+1 (game-end anchor for queue-only WAIT).
+            _submitPlayers.forEach(id => { _lastGameEndMc[id] = S.session.cfMatchCount; });
             const _submitMs = performance.now() - _submitT0;
             totalMatches++;
             log(`Round ${r+1}: court ${c} score ${s1}-${s2}${_submitMs > 500 ? ` (${Math.round(_submitMs)}ms!)` : ''}`);
