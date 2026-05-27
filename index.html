@@ -3517,14 +3517,15 @@ function renderSessStd(){
     const mq={avgOpp:null,oppGap:null,worstPGap:null,partners:0,g:myMatches.length,maxWait:null,avgWait:null};
     if(!myMatches.length){mqMap[sp.id]=mq;return;}
     // Wait gaps: mirrors simulate.js _waitGaps algorithm exactly.
-    // anchor=0 (same as _lastGameEndMc[id]=0 on join), then anchor=matchIdx+1 after each game
-    // (same as _courtConfirmMc = _mc+1 → _lastGameEndMc = anchor). gap = matchIdx - anchor.
+    // anchor = _joinedAtMatch (same as _lastGameEndMc[id]=cfMatchCount at join in simulate.js),
+    // then anchor=matchIdx+1 after each game (same as _courtConfirmMc = _mc+1 → _lastGameEndMc).
+    // gap = matchIdx - anchor. Late joiners use their join-time cfMatchCount, not 0.
     // This is reliable across Firebase roundtrips since it reads from cfLog, not player fields.
     if(myMatches.length>0){
       // Sort player's matches by cfLog position for correct ordering
       const idxOf=m=>m.matchIdx!=null?m.matchIdx:allMatches.findIndex(x=>x.id===m.id);
       const sorted=[...myMatches].sort((a,b)=>idxOf(a)-idxOf(b));
-      let anchor=0,maxW=0,sumW=0;
+      let anchor=sp._joinedAtMatch??0,maxW=0,sumW=0;
       for(const gm of sorted){
         const idx=idxOf(gm);if(idx<0)continue;
         const gap=idx-anchor;
