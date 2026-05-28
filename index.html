@@ -6174,7 +6174,20 @@ const CF={
         }
       }
     }
-    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+rankBandPen+neverPairPen,meta,t1,t2,group};
+    // ── Graduated phase skill penalty (UNCAPPED) ─────────────────────────
+    // Always prefer the TIGHTEST available partner+team match; widen only when nothing
+    // tighter exists. Unlike rankBandPen (capped, saturates) this never saturates, so a
+    // 14-rank pairing always scores worse than an 8-rank one — fixes P.GAP spikes from the
+    // old tight-or-very-loose fallback. Targets (_phaseSkillCaps) tighten as players accrue
+    // games, so late-session matches are tighter (true ladder arc).
+    let phaseGapPen=0;
+    {
+      const _pc=this._phaseSkillCaps(group.map(p=>p.id));
+      const _partnerOver=Math.max(0,Math.max(rawT1gap,rawT2gap)-_pc.partner);
+      const _teamOver=Math.max(0,crossImb-_pc.team);
+      phaseGapPen=_partnerOver*1.2+_teamOver*1.0;
+    }
+    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+rankBandPen+neverPairPen+phaseGapPen,meta,t1,t2,group};
   },
 
   /* Generate a suggestion for a court */
@@ -6781,15 +6794,18 @@ const CF={
     const teamRanks=(phase==='A'?5:phase==='B'?4:3)+slack;
     return {partner:Math.round(partnerRanks*srPerRank),team:Math.round(teamRanks*srPerRank),partnerRanks,teamRanks,phase};
   },
-  // Back-compat: within-team partner-gap cap only.
-  _phaseGapCap(groupIds){return this._phaseSkillCaps(groupIds).partner;},
-  // Combined phase check: BOTH partner (within-team) and team (opponent) gaps must fit.
-  _phaseSkillOk(t1,t2,groupIds){
-    const c=this._phaseSkillCaps(groupIds);
-    if(!this._withinTeamGapOk(t1,t2,c.partner))return false;
-    const teamGap=Math.abs((t1[0].sr+t1[1].sr)/2-(t2[0].sr+t2[1].sr)/2);
-    return teamGap<=c.team;
+  // Loose hard outer guard (~11 ranks) — blocks only egregious carry pairings. Graduated
+  // tightness is driven by the phaseGapPen score term in _scoreGroup (NOT a tight gate), so
+  // hard-to-match players are never deselected into wait-cap-breaching clusters.
+  _looseGuardCap(){
+    const N=_totalRanked()||S.session?.activePlayers?.length||20;
+    const srPerRank=500/Math.max(N-1,1);
+    return Math.round(Math.min(11,Math.max(6,N*0.55))*srPerRank);
   },
+  // Back-compat: loose partner-gap guard (tightness handled by score, not this cap).
+  _phaseGapCap(groupIds){return this._looseGuardCap();},
+  // Pass-1 guard: block only egregious within-team carries; phase tightness via score.
+  _phaseSkillOk(t1,t2,groupIds){return this._withinTeamGapOk(t1,t2,this._looseGuardCap());},
 
   // Phase-aware overlap window
   _phaseOverlapWindow(activePlCount){
