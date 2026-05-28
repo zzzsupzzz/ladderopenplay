@@ -8354,18 +8354,26 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       :``;
 
     // ── Team average gap (graduated, not binary) ────────────────────────
+    // Matchmaking is rank-based (_rankSr), so show the gap in RANK positions, not
+    // the rank-derived sr "points" (which read like ELO and mislead). meta.gap (sr)
+    // is kept only as the threshold trigger so tier behaviour is unchanged.
+    const _teamGapTxt=teamRkGap!=null?`${Math.round(teamRkGap)} rank${Math.round(teamRkGap)===1?'':'s'}`:`${meta.gap}pts`;
     const balanceTag=
-      meta.gap<=30  ?`<span class="cf-chip cf-chip-ok" title="Teams within ${meta.gap}pts">⚖️ Even</span>`
-      :meta.gap<=80 ?`<span class="cf-chip cf-chip-ok" title="Team avg gap: ${meta.gap}pts">✓ ${meta.gap}pts</span>`
-      :meta.gap<=150?`<span class="cf-chip cf-chip-info" title="Team avg gap: ${meta.gap}pts">~ ${meta.gap}pts</span>`
-      :              `<span class="cf-chip cf-chip-warn" title="Team avg gap: ${meta.gap}pts — notable gap">⚠ ${meta.gap}pts</span>`;
+      meta.gap<=30  ?`<span class="cf-chip cf-chip-ok" title="Teams within ${_teamGapTxt}">⚖️ Even</span>`
+      :meta.gap<=80 ?`<span class="cf-chip cf-chip-ok" title="Team avg gap: ${_teamGapTxt}">✓ ${_teamGapTxt}</span>`
+      :meta.gap<=150?`<span class="cf-chip cf-chip-info" title="Team avg gap: ${_teamGapTxt}">~ ${_teamGapTxt}</span>`
+      :              `<span class="cf-chip cf-chip-warn" title="Team avg gap: ${_teamGapTxt} — notable gap">⚠ ${_teamGapTxt}</span>`;
 
     // ── Partner (within-team) gap — 150/180/220 tiers ──────────────────
-    const pgapTag=(pgap,label)=>
-      pgap>=220?`<span class="cf-chip cf-chip-warn" style="border-color:rgba(248,113,113,.5)" title="${label} gap: ${pgap}pts — carry risk, reshuffle recommended">🔴 ${label} carry ${pgap}</span>`
-      :pgap>=180?`<span class="cf-chip cf-chip-warn" title="${label} gap: ${pgap}pts — high carry risk">🟠 ${label} ${pgap}</span>`
-      :pgap>=150?`<span class="cf-chip cf-chip-info" title="${label} gap: ${pgap}pts — noticeable">🟡 ${label} ${pgap}</span>`
+    // pgap (sr) drives the tier (unchanged); rkGap (rank positions) is what we show,
+    // since "carry" is about rank distance between partners, not ELO points.
+    const pgapTag=(pgap,rkGap,label)=>{
+      const g=rkGap!=null?`${rkGap} rank${rkGap===1?'':'s'}`:`${pgap}pts`;
+      return pgap>=220?`<span class="cf-chip cf-chip-warn" style="border-color:rgba(248,113,113,.5)" title="${label} gap: ${g} — carry risk, reshuffle recommended">🔴 ${label} carry ${g}</span>`
+      :pgap>=180?`<span class="cf-chip cf-chip-warn" title="${label} gap: ${g} — high carry risk">🟠 ${label} ${g}</span>`
+      :pgap>=150?`<span class="cf-chip cf-chip-info" title="${label} gap: ${g} — noticeable">🟡 ${label} ${g}</span>`
       :``;
+    };
 
     // ── Wait time (graduated) ────────────────────────────────────────────
     const waitTag=meta.maxWait>=20
@@ -8399,7 +8407,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     const chips=[
       qualityTag, skillGapTag, balanceTag, winProbTag, waitTag,
       t1CoolChip, t2CoolChip,
-      pgapTag(t1pgap,'P1'), pgapTag(t2pgap,'P2'),
+      pgapTag(t1pgap,hasRanks?t1pgapRk:null,'P1'), pgapTag(t2pgap,hasRanks?t2pgapRk:null,'P2'),
       sug.allIds.map(id=>formTag(id)).filter(Boolean).join(''),
       repeatTag, fairnessTag,
       meta.splitOverride?`<span class="cf-chip cf-chip-warn">⚠ Win pair kept</span>`:'',
