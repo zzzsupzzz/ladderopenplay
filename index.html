@@ -6775,8 +6775,10 @@ const CF={
     const N=_totalRanked()||S.session?.activePlayers?.length||20;
     const srPerRank=500/Math.max(N-1,1);
     const slack=(S.session?.courts||1)<=2?1:0;
-    const partnerRanks=(phase==='A'?8:phase==='B'?5:3)+slack;
-    const teamRanks=(phase==='A'?5:phase==='B'?3:2)+slack;
+    // Tightening tuned to avoid deselection clusters in a sparse queue (too tight => certain
+    // hard-to-match players pile up at the must-play threshold and breach the wait cap).
+    const partnerRanks=(phase==='A'?8:phase==='B'?6:4)+slack;
+    const teamRanks=(phase==='A'?5:phase==='B'?4:3)+slack;
     return {partner:Math.round(partnerRanks*srPerRank),team:Math.round(teamRanks*srPerRank),partnerRanks,teamRanks,phase};
   },
   // Back-compat: within-team partner-gap cap only.
