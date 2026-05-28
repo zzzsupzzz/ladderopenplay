@@ -524,6 +524,10 @@ body.observer-mode .qs-row{display:none!important}
             <option value="60">60s</option>
             <option value="90">90s</option>
           </select>
+          <select id="cf-waitcap" class="inp adv-only" style="width:auto;font-size:.72rem;padding:4px 6px" onchange="S.session&&(S.session.cfWaitCapMult=+this.value)" title="Max wait vs skill priority. Skill: the system waits longer (up to courts×2+1) to find a level-matched game. Fast: shorter max wait (courts+1) but more mismatched/forced games.">
+            <option value="2">🎯 Skill priority</option>
+            <option value="1">⏱ Short wait</option>
+          </select>
           <span style="width:1px;height:20px;background:var(--bd);display:inline-block;margin:0 2px"></span>
           <button class="btn bd2" onclick="doEndSession()" title="End this session and save all results">🏁 End</button>
         </div>
@@ -6213,7 +6217,7 @@ const CF={
     // stale guard regenerates the other court's suggestion, so no double-booking.
     const readySet=new Set(readyCourts);
     const reservedIds=new Set();
-    const _noReserveT=(S.session?.courts||1)+1;
+    const _noReserveT=(S.session?.courts||1)*(S.session?.cfWaitCapMult??2); // ≈ cap-1: free a reserved player only when approaching the wait cap (less churn = better skill matches)
     Object.entries(S.session.cfSuggestions||{}).forEach(([c,sug])=>{
       if(sug&&!readySet.has(+c))sug.allIds.forEach(id=>{if(this.matchGap(id)<_noReserveT)reservedIds.add(id);});
     });
@@ -6485,9 +6489,9 @@ const CF={
         // NR-pair: soft penalty only — never block.
         // Handled as a scoring penalty in _scoreGroup via nrProtPen.
         const{score,meta,t1,t2}=this._scoreGroup(group,mustSplit);
-        // Use phase-aware cap (same as _findBestGroup pass 1) instead of fixed 350.
+        // Phase-aware partner+team skill caps (tighten as players accrue games).
         // Prevents carry matches in joint multi-court search.
-        if(!this._withinTeamGapOk(t1,t2,this._phaseGapCap(group.map(p=>p.id))))continue;
+        if(!this._phaseSkillOk(t1,t2,group.map(p=>p.id)))continue;
         if(!_ranksCompatible([t1[0].id,t1[1].id],[t2[0].id,t2[1].id],Math.max(t1[0].mg||0,t1[1].mg||0,t2[0].mg||0,t2[1].mg||0)))continue;
         // Hard pair cooldown filter
         if(this.isPairOnCooldown(t1[0].id,t1[1].id)||this.isPairOnCooldown(t2[0].id,t2[1].id))continue;
@@ -6756,16 +6760,33 @@ const CF={
     return phases[1]||'B';
   },
 
-  // Phase-aware gap cap for _withinTeamGapOk (within-team partner ELO gap).
-  // Small sessions (≤2 courts): slightly wider since fewer valid groups exist,
-  // but capped below the 🔴 Avoid threshold (220) to avoid flooding avoid chips.
-  // Large sessions — A=280, B=320, C=360.
-  // Small sessions — A=300, B=330, C=360.
-  _phaseGapCap(groupIds){
+  // Phase-aware skill caps — TIGHTEN as players accumulate games. Ladder model: the
+  // more you play, the more accurate ranks become, so the system can be trusted to match
+  // tighter. Expressed in RANK positions (the engine is rank-based) then converted to sr
+  // for the gap checks. Moderate tightening (organizer decision):
+  //   Phase A (warm-up, ranks uncertain): partner 8 / team 5 ranks  (loose, forgiving)
+  //   Phase B (settling):                 partner 5 / team 3 ranks
+  //   Phase C (competitive):              partner 3 / team 2 ranks   (tight, true ladder)
+  // +1 rank slack for small (≤2 court) sessions where the pool is thin.
+  // These are PASS-1 caps only — pass 2/3 relax and the wait cap force-seats as the hard
+  // backstop, so tightening can never deadlock (just falls back to a looser match + wait).
+  _phaseSkillCaps(groupIds){
     const phase=this._sessionPhase(groupIds);
-    const small=(S.session?.courts||1)<=2;
-    if(small)return phase==='A'?300:phase==='B'?330:360;
-    return phase==='A'?280:phase==='B'?320:360;
+    const N=_totalRanked()||S.session?.activePlayers?.length||20;
+    const srPerRank=500/Math.max(N-1,1);
+    const slack=(S.session?.courts||1)<=2?1:0;
+    const partnerRanks=(phase==='A'?8:phase==='B'?5:3)+slack;
+    const teamRanks=(phase==='A'?5:phase==='B'?3:2)+slack;
+    return {partner:Math.round(partnerRanks*srPerRank),team:Math.round(teamRanks*srPerRank),partnerRanks,teamRanks,phase};
+  },
+  // Back-compat: within-team partner-gap cap only.
+  _phaseGapCap(groupIds){return this._phaseSkillCaps(groupIds).partner;},
+  // Combined phase check: BOTH partner (within-team) and team (opponent) gaps must fit.
+  _phaseSkillOk(t1,t2,groupIds){
+    const c=this._phaseSkillCaps(groupIds);
+    if(!this._withinTeamGapOk(t1,t2,c.partner))return false;
+    const teamGap=Math.abs((t1[0].sr+t1[1].sr)/2-(t2[0].sr+t2[1].sr)/2);
+    return teamGap<=c.team;
   },
 
   // Phase-aware overlap window
@@ -6793,7 +6814,7 @@ const CF={
       const group=[candidates[i],candidates[j],candidates[k],candidates[l]];
       if(isShownFn&&isShownFn(group))continue;
       const res=this._scoreGroup(group,mustSplit);
-      if(!this._withinTeamGapOk(res.t1,res.t2,_phaseCap))continue;
+      if(!this._phaseSkillOk(res.t1,res.t2,candidates.map(p=>p.id)))continue;
       if(hasCooldownPair(res)){_blockedByCooldown=true;continue;}
       if(isBackToBack(res)){_blockedByBTB=true;continue;}
       if(res.score<bestScore){bestScore=res.score;best=res;}
@@ -6859,15 +6880,15 @@ const CF={
   // suggestions for the ready courts (caller returns early); false when nobody is
   // under wait pressure (caller runs the normal skill engine).
   //
-  //   cap        = max(nc+2, ceil(bench/4)+1)     — bench-depth-bounded hard cap
-  //   must-play  = wait counter >= cap-1          — seat now to keep <= cap
+  //   cap        = max(nc*mult+1, ceil(bench/4)+1)  — bench-bounded hard cap (mult default 2)
+  //   must-play  = wait counter >= cap-1            — seat now to keep <= cap
   //
-  // cap is nc+2 (not nc+1): with nc courts all submitting, a benched player sees
-  // ~nc other-court finishes per wait even under perfect aging, so nc+1 sits on the
-  // physical floor with no slack. nc+2 is the realistic achievable bound and leaves
-  // room for skill-balanced fill. A player can never exceed the cap because they are
-  // force-seated the moment they would breach it; when the room is too full to honour
-  // nc+2 the cap rises with bench depth — feasibility, not a bug (see spec §3).
+  // Default cap = nc*2+1 (7 for 3 courts): a generous patience budget so the skill engine
+  // can hold out for a level-appropriate match (the phase caps tighten as players accrue
+  // games). Configurable via S.session.cfWaitCapMult (2 = competitive default; 1 = nc+1 for
+  // casual — shorter waits but more forced/relaxed matches). A player can never exceed the
+  // cap: they are force-seated the moment they would breach it; when the room is too full to
+  // honour the target the cap rises with bench depth (feasibility, not a bug — see spec §3).
   _scheduleMandatory(readyCourts,pool,mustSplit,nrIds,finishedMatchByCourtNum){
     if(!S.session||!pool||pool.length<4)return false;
     const ncTotal=S.session?.courts||1;
@@ -6879,7 +6900,7 @@ const CF={
     }).length;
     const bench=Math.max(0,activeN-4*ncTotal);
     const fairFloor=Math.ceil(bench/4);
-    const cap=Math.max(ncTotal+2,fairFloor+1);
+    const cap=Math.max(ncTotal*(S.session?.cfWaitCapMult??2)+1,fairFloor+1);
     // Effective wait counter: max(matchGap, cmg). cmg surfaces long-game players
     // whose queue-only gap is high even if matchGap looks moderate.
     const eff=p=>Math.max(this.matchGap(p.id),p.cmg??0);
@@ -7150,8 +7171,8 @@ const CF={
         const group=[pp[i],pp[j],pp[k],pp[l]];
         if(_isShown(group))continue; // skip previously shown combos
         const res=this._scoreGroup(group,mustSplit);
-        // Quality gate: reject priority groups with carry-level within-team gap
-        if(!this._withinTeamGapOk(res.t1,res.t2,300))continue;
+        // Quality gate: phase-aware partner+team skill caps (tighten as players accrue games)
+        if(!this._phaseSkillOk(res.t1,res.t2,group.map(p=>p.id)))continue;
             if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
         if(res.score<bestScore){bestScore=res.score;best={...res,group};}
       }
@@ -7197,7 +7218,7 @@ const CF={
         const group=[anchor,...[others[i],others[j],others[k]]];
         if(_isShown(group))continue; // skip previously shown combos
         const res=this._scoreGroup(group,mustSplit);
-        if(!this._withinTeamGapOk(res.t1,res.t2,300))continue;
+        if(!this._phaseSkillOk(res.t1,res.t2,group.map(p=>p.id)))continue;
             if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
         if(res.score<bestScore){bestScore=res.score;best={...res,group};}
       }
@@ -8165,6 +8186,8 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
         // Pre-set duration from saved session value
         if(S.session.cfAutoConfirmDur)acDur.value=String(S.session.cfAutoConfirmDur);
       }
+      const wcSel=document.getElementById('cf-waitcap');
+      if(wcSel)wcSel.value=String(S.session.cfWaitCapMult??2);
     }
     if(isLobby){return;} // rest of renderLive is courts/queue — not relevant in lobby
 
