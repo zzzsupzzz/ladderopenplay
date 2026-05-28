@@ -6382,7 +6382,7 @@ const CF={
     }).map(sp=>sp.matchesPlayed||0);
     const _batchMinPlayed=_batchFloorCounts.length?Math.min(..._batchFloorCounts):0;
     const _batchMC=S.session.cfMatchCount||0;
-    pool.forEach(p=>{
+    const _stampPool=p=>{
       const sp=gsp(p.id);
       const _isLR2=S.session.cfRanks?.[p.id]?.isLateArrival||sp?.resumedFromPause;
       // Late arrivals / resumed with 0 games: mg=0 (no catch-up gap from session start)
@@ -6397,7 +6397,9 @@ const CF={
       // Late arrivals / resumed: cap catch-up pressure at 1 game — they queue normally
       p.pcg=_isLR2?Math.min(_rawPcg,1):_rawPcg;
       p._minGames=_batchMinPlayed;
-    });
+      return p;
+    };
+    pool.forEach(_stampPool);
 
     // ── TIER 1: mandatory seating (matchmaking-spec.md §2,§5) ────────────
     // Decide WHO must play before deciding matchups. Computes a global must-play
@@ -6424,6 +6426,36 @@ const CF={
             const splitTeam=aIn&&bIn&&(_t1.has(a)!==_t1.has(b));
             if((aIn&&!bIn&&!bLeft)||(bIn&&!aIn&&!aLeft)||splitTeam){S.session.cfSuggestions[c]=null;break;}
           }
+        }
+      }
+      // Hard WAIT bound (single-court mirror of the multi-court net at the joint path).
+      // The common case on score-submit regenerates ONE ready court at a time → nc===1 →
+      // this path returns before the multi-court Hard WAIT bound ever runs. _scheduleMandatory
+      // is the only upstream guard here, and it operates on the reservation-FILTERED `pool`,
+      // so a benched player held in reservation (or crowded out of the 4 seats by other
+      // overdue players) can keep aging unseen and breach the cap (observed gap 12 > cap 7).
+      // Guarantee: scan the FULL benched queue (ignoring reservations); if the most-overdue
+      // benched player is at/over the cap and not in this court's suggestion, force them in.
+      {
+        const c=readyCourts[0];
+        const _ncT=S.session?.courts||1;
+        const _activeN=S.session.players.filter(sp=>sp.status!=='left'&&!(S.session.cfPaused||[]).some(q=>q.id===sp.id)).length;
+        const _cap=Math.max(_ncT*(S.session?.cfWaitCapMult??2)+1,Math.ceil(Math.max(0,_activeN-4*_ncT)/4)+1);
+        const _sug=S.session.cfSuggestions[c];
+        const _asgn=new Set(_sug?[...(_sug.t1||[]),...(_sug.t2||[])]:[]);
+        const _onCourt=new Set(Object.values(S.session.cfCourts||{}).filter(ct=>ct?.status==='playing'&&ct.match).flatMap(ct=>[...ct.match.t1,...ct.match.t2]));
+        // Full benched pool, reservation-independent: everyone queued, not on court, not paused/left.
+        const _benched=S.session.cfQueue
+          .filter(q=>!_onCourt.has(q.id)&&gsp(q.id)?.status!=='left'&&!(S.session.cfPaused||[]).some(p=>p.id===q.id))
+          .map(q=>_stampPool({id:q.id,sr:this._rankSr(q.id),waitMin:(Date.now()-q.since)/60000,qEntry:q}));
+        const _eff=p=>Math.max(this.matchGap(p.id),p.cmg??0);
+        const _od=_benched.filter(p=>!_asgn.has(p.id)&&_eff(p)>=_cap).sort((a,b)=>_eff(b)-_eff(a))[0];
+        if(_od&&_benched.length>=4){
+          // Force the overdue player in deterministically (anchor selection alone could re-pick
+          // an already-seated higher-gap player and drop _od again). _bestGroupForcing guarantees
+          // placement: pass 1 honours skill filters, pass 2 drops them (hard cap > skill).
+          const _best=this._bestGroupForcing([_od],_benched.filter(p=>p.id!==_od.id),mustSplit);
+          if(_best){_best.constraintReason='hardwait';this._storeSuggestion(c,_best,finishedMatchByCourtNum?.[c]);}
         }
       }
       readyCourts.forEach(c=>setTimeout(()=>cfMaybeAutoConfirm(c),500));
