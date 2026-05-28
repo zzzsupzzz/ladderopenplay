@@ -5983,9 +5983,13 @@ const CF={
       const minG=p._minGames!=null?p._minGames:0;
       const ahead=myGames-minG;
 
-      if(pcGap>=4)playFairness-=120;
-      else if(pcGap>=3)playFairness-=70;
-      else if(pcGap>=2)playFairness-=35;
+      // Play-count fairness floor (blueprint §6.2): strengthen the catch-up pull for
+      // players who've fallen behind on games, so nobody finishes a 3-hour session far
+      // behind. Bounded (and p2 is capped) so it nudges fill choice but never overrides
+      // the wait cap (wait > games). Late arrivals carry pcg<=1 so they aren't over-pulled.
+      if(pcGap>=4)playFairness-=180;
+      else if(pcGap>=3)playFairness-=120;
+      else if(pcGap>=2)playFairness-=60;
 
       if(ahead>=2)playFairness+=160;
       else if(ahead>=1)playFairness+=50;
@@ -6752,15 +6756,18 @@ const CF={
   //   Phase A (0–45 min):   strict quality — pool is fresh, no excuse for bad matches
   //   Phase B (45–120 min): balanced — current default thresholds
   //   Phase C (120+ min):   relaxed — late session, repeats/mild mismatches acceptable
-  // Per-player phase based on matches played this session.
-  // A = first 2 matches (warm-up): gap cap 280, slightly relaxed.
-  // B = matches 3–5 (settling): gap cap 320, current balanced behavior.
-  // C = match 6+ (competitive): gap cap 360, tighter than current 380.
-  // Using match count (not clock) means late arrivals still get their warm-up,
-  // and competitive tightening only happens when the player is actually warmed up.
+  // Per-player phase based on matches played this session (ladder arc — loosen early,
+  // tighten late). Phase A doubles as the NEW-PLAYER CALIBRATION window: until 5 games
+  // a player's rank is still a DUPR/self-rating guess, so match them loosely (and ELO K
+  // is already high <5 games, so the rank converges fast). After calibration they settle
+  // (B) and then compete tight (C). Per-player count means late arrivals get their own
+  // warm-up regardless of session clock.
+  //   A = calibration / warm-up (0–4 games): loosest
+  //   B = settling (5–7 games)
+  //   C = competitive (8+ games): tightest
   _playerPhase(id){
     const mp=gsp(id)?.matchesPlayed||0;
-    return mp<2?'A':mp<6?'B':'C';
+    return mp<5?'A':mp<8?'B':'C';
   },
 
   // Group phase = median phase of the 4 players (2nd of 4 sorted A→C).
@@ -6926,13 +6933,18 @@ const CF={
     // Effective wait counter: max(matchGap, cmg). cmg surfaces long-game players
     // whose queue-only gap is high even if matchGap looks moderate.
     const eff=p=>Math.max(this.matchGap(p.id),p.cmg??0);
-    // Players under wait pressure: at or above cap-1 (seat now to stay <= cap).
-    const overdue=pool.filter(p=>eff(p)>=cap-1).sort((a,b)=>eff(b)-eff(a));
+    const seats=readyCourts.length*4;
+    // Cluster-aware trigger: normally must-play = cap-1. But if MORE players are already
+    // at cap-1 than there are seats this event, a cluster is forming and the overflow will
+    // breach next event — so drop the trigger to cap-2 and start force-seating one step
+    // earlier, draining the cluster before anyone exceeds the cap.
+    const _atEdge=pool.filter(p=>eff(p)>=cap-1).length;
+    const _trigger=_atEdge>seats?cap-2:cap-1;
+    const overdue=pool.filter(p=>eff(p)>=_trigger).sort((a,b)=>eff(b)-eff(a));
     if(overdue.length===0)return false; // nobody overdue — let the skill engine run
     // Perm-pair partner map — both partners must be seated together (same team).
     const permMap={};
     (S.session.cfPermPairs||[]).forEach(([a,b])=>{permMap[a]=b;permMap[b]=a;});
-    const seats=readyCourts.length*4;
     // Priority order: pinned players first (organizer's manual override — the normal
     // STEP 0 path is bypassed when mandatory fires, so honour pins here), then the
     // overdue players by descending wait. Both are force-seated as HARD units.
@@ -7040,7 +7052,19 @@ const CF={
       const res=this._scoreGroup(g,mustSplit);
       return {...res,group:g,fallbackPass:1};
     }
-    const cand=fillPool.slice(0,Math.min(14,fillPool.length));
+    // Buddy seating: ensure each forced player's nearest-rank peers are in the candidate
+    // set, so an extreme-/forced-rank player gets a similar-level partner instead of
+    // whatever leftover fill happens to rank highest in the pool order. The scorer
+    // (phaseGapPen) then prefers the tight pairing. Pulling a non-overdue peer as fill is
+    // safe — they simply play now. (Addresses P.GAP spikes on rank extremes.)
+    let cand=fillPool.slice(0,Math.min(14,fillPool.length));
+    const candIds=new Set(cand.map(p=>p.id));
+    forced.forEach(f=>{
+      [...fillPool].filter(p=>!candIds.has(p.id))
+        .sort((a,b)=>Math.abs((a.sr||0)-(f.sr||0))-Math.abs((b.sr||0)-(f.sr||0)))
+        .slice(0,2)
+        .forEach(p=>{cand.push(p);candIds.add(p.id);});
+    });
     const cn=cand.length;
     if(cn<need)return null;
     const combos=[];
