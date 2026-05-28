@@ -6311,6 +6311,15 @@ const CF={
       p._minGames=_batchMinPlayed;
     });
 
+    // ── TIER 1: mandatory seating (matchmaking-spec.md §2,§5) ────────────
+    // Decide WHO must play before deciding matchups. Computes a global must-play
+    // set from the wait counter and a bench-depth-derived cap, seats overdue
+    // players FIRST (distributed across all ready courts), then lets the skill
+    // optimizer fill the rest. Runs for single- AND multi-court events. If it
+    // produces suggestions (someone is under wait pressure), return early;
+    // otherwise fall through to the normal skill engine (TIER 2) below.
+    if(this._scheduleMandatory(readyCourts,pool,mustSplit,nrIds,finishedMatchByCourtNum))return;
+
     // Single court path (no need for joint search)
     if(nc===1){
       this._generateSingleSuggestion(readyCourts[0], pool, mustSplit, nrIds,
@@ -6828,6 +6837,170 @@ const CF={
             skillGapFlag,rankGap:Math.round(rankGap*10)/10,rankThresh:thresh,rankRatio:Math.round(rankRatio*100)},
       ts:Date.now()
     };
+  },
+
+  // ── TIER 1: mandatory seating (matchmaking-spec.md §2,§5) ──────────────
+  // Two-tier scheduler front-end. Computes a global must-play set and seats the
+  // most-overdue players FIRST — distributed across the ready courts so no court
+  // can repeatedly skip the same skill-outlier — then fills the remaining seats
+  // with the existing skill optimizer (TIER 2). Returns true if it produced
+  // suggestions for the ready courts (caller returns early); false when nobody is
+  // under wait pressure (caller runs the normal skill engine).
+  //
+  //   cap        = max(nc+1, ceil(bench/4)+1)     — bench-depth-bounded hard cap
+  //   must-play  = wait counter >= cap-1          — seat now to keep <= cap
+  //
+  // A player can never exceed the cap because they are force-seated the moment
+  // they would breach it. The cap is bounded by bench depth, so when the room is
+  // too full to honour nc+1, the cap (and thus the achievable wait) rises — that
+  // is feasibility, not a bug (see spec §3).
+  _scheduleMandatory(readyCourts,pool,mustSplit,nrIds,finishedMatchByCourtNum){
+    if(!S.session||!pool||pool.length<4)return false;
+    const ncTotal=S.session?.courts||1;
+    // Bench depth from active (non-left, non-paused) session players.
+    const activeN=S.session.players.filter(sp=>{
+      if(sp.status==='left')return false;
+      if((S.session.cfPaused||[]).some(q=>q.id===sp.id))return false;
+      return true;
+    }).length;
+    const bench=Math.max(0,activeN-4*ncTotal);
+    const fairFloor=Math.ceil(bench/4);
+    const cap=Math.max(ncTotal+1,fairFloor+1);
+    // Effective wait counter: max(matchGap, cmg). cmg surfaces long-game players
+    // whose queue-only gap is high even if matchGap looks moderate.
+    const eff=p=>Math.max(this.matchGap(p.id),p.cmg??0);
+    // Players under wait pressure: at or above cap-1 (seat now to stay <= cap).
+    const overdue=pool.filter(p=>eff(p)>=cap-1).sort((a,b)=>eff(b)-eff(a));
+    if(overdue.length===0)return false; // nobody overdue — let the skill engine run
+    // Perm-pair partner map — both partners must be seated together (same team).
+    const permMap={};
+    (S.session.cfPermPairs||[]).forEach(([a,b])=>{permMap[a]=b;permMap[b]=a;});
+    const seats=readyCourts.length*4;
+    // Priority order: pinned players first (organizer's manual override — the normal
+    // STEP 0 path is bypassed when mandatory fires, so honour pins here), then the
+    // overdue players by descending wait. Both are force-seated as HARD units.
+    const pinnedSet=new Set(S.session.cfPinnedIds||[]);
+    const pinnedPool=pool.filter(p=>pinnedSet.has(p.id));
+    const priorityList=[...pinnedPool,...overdue.filter(p=>!pinnedSet.has(p.id))];
+    // Build forced units (a unit = a solo player, or a perm pair) within the seat
+    // budget. A unit is HARD if pinned or at/over the cap (must play now or breach);
+    // SOFT if at cap-1 (proactive — seat early, but don't crowd out skill fill).
+    const forcedIds=new Set();const forcedUnits=[];
+    for(const p of priorityList){
+      if(forcedIds.size>=seats)break;
+      if(forcedIds.has(p.id))continue;
+      const hard=pinnedSet.has(p.id)||eff(p)>=cap;
+      const partnerId=permMap[p.id];
+      if(partnerId){
+        const partner=pool.find(q=>q.id===partnerId);
+        if(partner&&!forcedIds.has(partnerId)){
+          if(forcedIds.size+2>seats)continue; // pair won't fit this event — defer
+          forcedIds.add(p.id);forcedIds.add(partnerId);
+          forcedUnits.push({players:[p,partner],hard});
+          continue;
+        }
+      }
+      forcedIds.add(p.id);forcedUnits.push({players:[p],hard});
+    }
+    if(forcedUnits.length===0)return false;
+    // Distribute forced units across ready courts round-robin (HARD units first so
+    // the worst waiters land on different courts). HARD units may fill a court (up
+    // to 4); SOFT units are capped at 2 forced/court so ≥2 skill-fill slots remain.
+    const courtForced=readyCourts.map(()=>[]);
+    let ci=0;
+    const place=unit=>{
+      const limit=unit.hard?4:2;
+      for(let t=0;t<readyCourts.length;t++){
+        const idx=(ci+t)%readyCourts.length;
+        if(courtForced[idx].length+unit.players.length<=limit){courtForced[idx].push(...unit.players);ci=idx+1;return true;}
+      }
+      return false;
+    };
+    forcedUnits.filter(u=>u.hard).forEach(place);
+    forcedUnits.filter(u=>!u.hard).forEach(place);
+    // Fill each court: forced players + skill-best fill from the remaining pool.
+    // Exclude only players actually SEATED on a court — any forced unit that didn't
+    // fit stays eligible as skill-fill (and is caught next event as it reaches cap).
+    const placedIds=new Set(courtForced.flat().map(p=>p.id));
+    let remaining=pool.filter(p=>!placedIds.has(p.id));
+    const filled=[];
+    readyCourts.forEach((c,idx)=>{
+      const forced=courtForced[idx];
+      if(forced.length===0){
+        // No forced player here — use the normal skill optimizer over what's left.
+        const cand=remaining.slice(0,Math.min(14,remaining.length));
+        if(cand.length<4){S.session.cfSuggestions[c]=null;return;}
+        const best=this._findBestGroup(cand,mustSplit,nrIds,pool.length);
+        if(!best){S.session.cfSuggestions[c]=null;return;}
+        filled.push({c,best});
+        const used=new Set(best.group.map(g=>g.id));
+        remaining=remaining.filter(p=>!used.has(p.id));
+        return;
+      }
+      const best=this._bestGroupForcing(forced,remaining,mustSplit);
+      if(!best){S.session.cfSuggestions[c]=null;return;}
+      best.constraintReason='mandatory';
+      filled.push({c,best});
+      const used=new Set(best.group.map(g=>g.id));
+      remaining=remaining.filter(p=>!used.has(p.id));
+    });
+    if(filled.length===0)return false; // produced nothing — defer to skill engine
+    filled.forEach(({c,best})=>this._storeSuggestion(c,best,finishedMatchByCourtNum?.[c]));
+    // Perm-pair safety net (mirrors the multi-court path): clear any suggestion
+    // that splits a perm pair across teams or seats only one member.
+    const _ppCheck=S.session.cfPermPairs||[];
+    if(_ppCheck.length){
+      readyCourts.forEach(c=>{
+        const sug=S.session.cfSuggestions[c];if(!sug)return;
+        const _ct1=new Set(sug.t1||[]),_ct2=new Set(sug.t2||[]);
+        for(const[a,b]of _ppCheck){
+          const aIn=_ct1.has(a)||_ct2.has(a),bIn=_ct1.has(b)||_ct2.has(b);
+          const aLeft=gsp(a)?.status==='left',bLeft=gsp(b)?.status==='left';
+          const splitTeam=aIn&&bIn&&(_ct1.has(a)!==_ct1.has(b));
+          if((aIn&&!bIn&&!bLeft)||(bIn&&!aIn&&!aLeft)||splitTeam){S.session.cfSuggestions[c]=null;break;}
+        }
+      });
+    }
+    readyCourts.forEach(c=>setTimeout(()=>cfMaybeAutoConfirm(c),500));
+    return true;
+  },
+
+  // Build the best skill-balanced foursome that INCLUDES every forced player.
+  // Pass 1 honours the team-gap + rank-compatibility filters; pass 2 drops them to
+  // guarantee placement (the hard wait cap wins over skill when no balanced fill
+  // exists). Returns null only if fewer than 4 players are available.
+  _bestGroupForcing(forced,fillPool,mustSplit){
+    const need=4-forced.length;
+    if(need<=0){
+      const g=forced.slice(0,4);
+      const res=this._scoreGroup(g,mustSplit);
+      return {...res,group:g,fallbackPass:1};
+    }
+    const cand=fillPool.slice(0,Math.min(14,fillPool.length));
+    const cn=cand.length;
+    if(cn<need)return null;
+    const combos=[];
+    if(need===1){for(let i=0;i<cn;i++)combos.push([cand[i]]);}
+    else if(need===2){for(let i=0;i<cn-1;i++)for(let j=i+1;j<cn;j++)combos.push([cand[i],cand[j]]);}
+    else{for(let i=0;i<cn-2;i++)for(let j=i+1;j<cn-1;j++)for(let k=j+1;k<cn;k++)combos.push([cand[i],cand[j],cand[k]]);}
+    let best=null,bestScore=Infinity;
+    // Pass 1: skill filters honoured.
+    for(const add of combos){
+      const g=[...forced,...add];
+      const res=this._scoreGroup(g,mustSplit);
+      if(!this._withinTeamGapOk(res.t1,res.t2,400))continue;
+      const _mg=Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0);
+      if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],_mg))continue;
+      if(res.score<bestScore){bestScore=res.score;best={...res,group:g,fallbackPass:1};}
+    }
+    if(best)return best;
+    // Pass 2: unfiltered — guarantee placement (hard cap > skill).
+    for(const add of combos){
+      const g=[...forced,...add];
+      const res=this._scoreGroup(g,mustSplit);
+      if(res.score<bestScore){bestScore=res.score;best={...res,group:g,fallbackPass:3};}
+    }
+    return best;
   },
 
   _generateSingleSuggestion(courtNum,pool,mustSplit,nrIds,finishedMatch){

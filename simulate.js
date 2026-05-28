@@ -698,6 +698,36 @@ const SIM = (() => {
           if (stuckPlayers.length) log(`  🔴 ${stuckPlayers.length} player(s) had long waits back-to-back (long wait → played 1 game → long wait again)`)
         }
 
+        // ── WAIT CAP gate (matchmaking-spec.md §3, §8) ─────────────────────
+        // Hard regression gate the scheduler rewrite must satisfy: no player's
+        // max gap may exceed the cap. Cap is bounded by bench depth, so it is
+        // computed — not a fixed constant.
+        //   fair_floor = ceil((N - 4*nc) / 4)   — physical minimum under perfect aging
+        //   cap        = max(nc + 1, fair_floor + 1)
+        // When fair_floor + 1 > nc + 1 the room is too full to honour the nc+1
+        // target; that is a feasibility note, not a bug. Violations of `cap`
+        // ARE bugs and fail the suite (pushed to _errs via err()).
+        {
+          const _capN = arch.players.length;
+          const _capBench = Math.max(0, _capN - 4 * courts);
+          const _capFloor = Math.ceil(_capBench / 4);
+          const _waitCap = Math.max(courts + 1, _capFloor + 1);
+          const _roomTooFull = (_capFloor + 1) > (courts + 1);
+          log(`--- WAIT CAP gate (N=${_capN}, courts=${courts}, bench=${_capBench}, fairFloor=${_capFloor}, cap=${_waitCap}${_roomTooFull ? ' — room too full for nc+1 target' : ''}) ---`);
+          const _capViolators = waitEntries.filter(e => e.max > _waitCap);
+          if (_capViolators.length === 0) {
+            log(`  ✅ WAIT CAP PASS — all players' max gap ≤ ${_waitCap}`);
+          } else {
+            _capViolators
+              .sort((a, b) => b.max - a.max)
+              .forEach(({ name, max, gaps }) => {
+                const seq = gaps.map(g => g > _waitCap ? `[${g}]` : `${g}`).join('-');
+                err(`WAIT CAP breach: ${name} max gap ${max} > cap ${_waitCap}  (gaps: ${seq})`);
+              });
+            log(`  ❌ WAIT CAP FAIL — ${_capViolators.length} player(s) exceeded cap ${_waitCap}`);
+          }
+        }
+
         log('--- Player Stats ---');
         const sorted = [...arch.players].sort((a,b) => (b.sRating||0) - (a.sRating||0));
         sorted.forEach((sp, i) => {
