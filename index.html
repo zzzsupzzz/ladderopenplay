@@ -6418,6 +6418,18 @@ const CF={
                 const res=this._scoreGroup(g,mustSplit);
                 if(res.score<nScore){nScore=res.score;best={...res,group:g};}
               }
+              // Phase 2: force-include most-overdue 'other' (matchGap>=nc*2+1)
+              const _hwmTN3=(S.session?.courts||1)*2+1;
+              const _fOther3=subOthers.find(o=>this.matchGap(o.id)>=_hwmTN3);
+              if(_fOther3){
+                const _remO3=subOthers.filter(o=>o.id!==_fOther3.id);const _ro3=_remO3.length;
+                let _fScore3=Infinity;
+                for(let i=0;i<_ro3-1;i++)for(let j=i+1;j<_ro3;j++){
+                  const g=[subAnchor,_fOther3,_remO3[i],_remO3[j]];
+                  const res=this._scoreGroup(g,mustSplit);
+                  if(res.score<_fScore3){_fScore3=res.score;best={...res,group:g};}
+                }
+              }
             }
           }
         }
@@ -6593,6 +6605,18 @@ const CF={
               const g=[anchor,others[i],others[j],others[k]];
               const res=this._scoreGroup(g,mustSplit);
               if(res.score<nScore){nScore=res.score;best={...res,group:g};}
+            }
+            // Phase 2: force-include most-overdue 'other' (matchGap>=nc*2+1)
+            const _hwmTN2=(S.session?.courts||1)*2+1;
+            const _fOther2=others.slice(0,olen).find(o=>this.matchGap(o.id)>=_hwmTN2);
+            if(_fOther2){
+              const _remO2=others.slice(0,olen).filter(o=>o.id!==_fOther2.id);const _ro2=_remO2.length;
+              let _fScore2=Infinity;
+              for(let i=0;i<_ro2-1;i++)for(let j=i+1;j<_ro2;j++){
+                const g=[anchor,_fOther2,_remO2[i],_remO2[j]];
+                const res=this._scoreGroup(g,mustSplit);
+                if(res.score<_fScore2){_fScore2=res.score;best={...res,group:g};}
+              }
             }
           }
         }
