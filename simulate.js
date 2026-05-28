@@ -315,10 +315,11 @@ const SIM = (() => {
     const counts = settled.map(sp => (sp.matchesPlayed || 0) + (onCourt.has(sp.id) ? 1 : 0));
     const min = Math.min(...counts);
     const max = Math.max(...counts);
-    // With staggered court finishes (80/20 model), queue bursts on 3–4 courts can transiently
-    // leave one player 3 games behind before the hunger boost recovers them.
-    // Allow gap = max(2, nc-1): 1–2 courts → ≤2, 3 courts → ≤2, 4 courts → ≤3.
-    const maxAllowedGap = Math.max(2, nc - 1);
+    // Wait wins over play-count: the scheduler now guarantees bounded wait and lets
+    // game counts drift (a player who plays often by skill-fit racks up more games).
+    // So tolerate a wider game-count spread before flagging — only egregious drift is
+    // a real problem. Allow gap = max(4, nc+1): 3 courts → ≤4, 4 courts → ≤5.
+    const maxAllowedGap = Math.max(4, nc + 1);
     if (max - min > maxAllowedGap) {
       // Use same on-court +1 offset as the counts array above so names always resolve.
       const behind = settled.filter(sp => (sp.matchesPlayed || 0) + (onCourt.has(sp.id) ? 1 : 0) === min).map(sp => sp.name);

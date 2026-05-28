@@ -6206,11 +6206,16 @@ const CF={
         if(!S.session.cfRanks[q.id])_insertLateArrival(q.id);
       });
     }
-    // Exclude players already in pending suggestions for OTHER courts
+    // Exclude players already in pending suggestions for OTHER courts — UNLESS they
+    // are overdue (matchGap >= nc+1). Wait wins: keeping an overdue player reserved on
+    // a not-yet-ready (often slow) court strands them past the wait cap (observed stuck
+    // 9-10 gaps). Freeing them lets a ready court force-seat them now; confirmSuggestion's
+    // stale guard regenerates the other court's suggestion, so no double-booking.
     const readySet=new Set(readyCourts);
     const reservedIds=new Set();
+    const _noReserveT=(S.session?.courts||1)+1;
     Object.entries(S.session.cfSuggestions||{}).forEach(([c,sug])=>{
-      if(sug&&!readySet.has(+c))sug.allIds.forEach(id=>reservedIds.add(id));
+      if(sug&&!readySet.has(+c))sug.allIds.forEach(id=>{if(this.matchGap(id)<_noReserveT)reservedIds.add(id);});
     });
     let queue=S.session.cfQueue.filter(q=>!reservedIds.has(q.id));
     const nc=readyCourts.length;
