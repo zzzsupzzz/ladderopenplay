@@ -6890,15 +6890,21 @@ const CF={
     // overdue players by descending wait. Both are force-seated as HARD units.
     const pinnedSet=new Set(S.session.cfPinnedIds||[]);
     const pinnedPool=pool.filter(p=>pinnedSet.has(p.id));
-    const priorityList=[...pinnedPool,...overdue.filter(p=>!pinnedSet.has(p.id))];
+    // First-game guarantee: 0-game players (typically late arrivals) must be seated
+    // promptly even when mandatory fires for OTHER overdue players — mandatory bypasses
+    // the normal engine's tier-1 first-game path, so without this a late joiner waits
+    // behind the entire overdue backlog for their first game (observed first-game wait 9).
+    const firstGamers=pool.filter(p=>!pinnedSet.has(p.id)&&(gsp(p.id)?.matchesPlayed||0)===0);
+    const fgIds=new Set(firstGamers.map(p=>p.id));
+    const priorityList=[...pinnedPool,...firstGamers,...overdue.filter(p=>!pinnedSet.has(p.id)&&!fgIds.has(p.id))];
     // Build forced units (a unit = a solo player, or a perm pair) within the seat
-    // budget. A unit is HARD if pinned or at/over the cap (must play now or breach);
-    // SOFT if at cap-1 (proactive — seat early, but don't crowd out skill fill).
+    // budget. A unit is HARD if pinned, a first-gamer, or at/over the cap (must play
+    // now or breach); SOFT if at cap-1 (proactive — seat early, don't crowd out fill).
     const forcedIds=new Set();const forcedUnits=[];
     for(const p of priorityList){
       if(forcedIds.size>=seats)break;
       if(forcedIds.has(p.id))continue;
-      const hard=pinnedSet.has(p.id)||eff(p)>=cap;
+      const hard=pinnedSet.has(p.id)||fgIds.has(p.id)||eff(p)>=cap;
       const partnerId=permMap[p.id];
       if(partnerId){
         const partner=pool.find(q=>q.id===partnerId);
