@@ -9646,9 +9646,15 @@ function renderPlayerView(){
     const d=sp.sRating-sp.startRating;
     const pd=sp.ptsFor-sp.ptsAgainst;
     const nrTag=sp.isNR?`<span class="nr-badge">NR</span>`:sp.isSeeding?`<span class="nr-seed">~${Math.round(sp.sRating)}</span>`:'';
+    // Live session ranking (excludes paused/left). Only meaningful once rated.
+    const _rk=_sessionRank(id), _tot=_totalRanked();
+    const rankHtml=(_rk&&_tot&&!sp.isNR)
+      ?`<div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--go);margin:2px 0 4px">RANK #${_rk} <span style="font-size:.8rem;color:var(--mu)">of ${_tot}</span></div>`
+      :'';
     sessHtml=`<div class="pv-hero">
       <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;color:var(--tx)">${esc(p.name)}${p.tag?`<span class="ptag">${esc(p.tag)}</span>`:''}</div>
       <div class="pv-sub">TODAY'S SESSION</div>
+      ${rankHtml}
       <div style="font-family:'Bebas Neue',sans-serif;font-size:2.4rem;color:var(--cy);margin:6px 0">${sp.isNR?'NR':Math.round(sp.sRating)} ${nrTag}</div>
       <div style="display:flex;gap:10px;justify-content:center;margin-top:6px">
         <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--gr)">${sp.wins}</div><div style="font-size:.62rem;color:var(--mu)">WINS</div></div>
