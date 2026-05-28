@@ -6615,6 +6615,38 @@ const CF={
         this._storeSuggestion(c,item.b,finishedMatchByCourtNum?.[c]);
       });
     }
+    // Hard WAIT bound: after all suggestions stored, force any overdue unserved player in.
+    // Root cause of WAIT>nc*2+1: skill-outlier players get excluded from other anchors' nuclear
+    // groups (_scoreGroup favours groups without the outlier), so matchGap keeps growing.
+    // Fix: if matchGap >= nc*2+1 (7 for 3 courts) and player unserved, take over one court.
+    {
+      const _hwmT=(S.session?.courts||1)*2+1; // 7 for 3c, 9 for 4c
+      const _nowAsgn=new Set(readyCourts.flatMap(c=>{const s=S.session.cfSuggestions[c];return s?[...(s.t1||[]),...(s.t2||[])]:[];}));
+      const _odList=pool.filter(p=>this.matchGap(p.id)>=_hwmT&&!_nowAsgn.has(p.id));
+      if(_odList.length>0){
+        _odList.sort((a,b)=>this.matchGap(b.id)-this.matchGap(a.id));
+        const _od=_odList[0]; // most overdue
+        // Target court: prefer null suggestion; else court with lowest-priority players
+        const _nullC=readyCourts.find(c=>!S.session.cfSuggestions[c]);
+        const _tgtC=_nullC??readyCourts.reduce((best,c)=>{
+          const ids=S.session.cfSuggestions[c]?[...(S.session.cfSuggestions[c].t1||[]),...(S.session.cfSuggestions[c].t2||[])]:[];
+          const maxG=ids.length?Math.max(...ids.map(id=>this.matchGap(id))):Infinity;
+          const bids=S.session.cfSuggestions[best]?[...(S.session.cfSuggestions[best].t1||[]),...(S.session.cfSuggestions[best].t2||[])]:[];
+          const bestG=bids.length?Math.max(...bids.map(id=>this.matchGap(id))):Infinity;
+          return maxG<bestG?c:best;
+        },readyCourts[0]);
+        // Collect players released from the cleared court (pool objects for them)
+        const _prevSug=S.session.cfSuggestions[_tgtC];
+        const _relIds=_prevSug?[...(_prevSug.t1||[]),...(_prevSug.t2||[])]:[];
+        S.session.cfSuggestions[_tgtC]=null;
+        // Injection pool: od first (→ anchor), then unassigned pool players + released players
+        const _stillAsgn=new Set(readyCourts.flatMap(c=>{const s=S.session.cfSuggestions[c];return s?[...(s.t1||[]),...(s.t2||[])]:[];}));
+        const _injPool=[_od,...pool.filter(p=>p.id!==_od.id&&(!_stillAsgn.has(p.id)||_relIds.includes(p.id)))];
+        if(_injPool.length>=4){
+          this._generateSingleSuggestion(_tgtC,_injPool,mustSplit,nrIds,finishedMatchByCourtNum?.[_tgtC]);
+        }
+      }
+    }
     // Safety net: after all suggestions are stored, scan for perm pair violations.
     // Clears any suggestion with: only one member present (split-court), or both present
     // but on different teams (split-team). Catches stale suggestions and pass-3 fallbacks.
