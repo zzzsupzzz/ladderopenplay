@@ -730,6 +730,34 @@ const SIM = (() => {
           }
         }
 
+        // ── Skill Quality by phase (ladder-arc verification) ───────────────
+        // Buckets completed matches into session thirds (a proxy for phase — later third =
+        // more games played = more confident ranks) and reports avg partner gap + team gap
+        // in RANK positions, using final standings rank. If the ladder arc works, the
+        // numbers should DROP left→right (P1 loose → P3 tight). Partner = teammate rank
+        // distance (lower = play with your level); Team = opponent-pair rank distance.
+        {
+          const _rankOf = {};
+          [...arch.players].sort((a,b)=>(b.sRating||0)-(a.sRating||0)).forEach((p,i)=>{_rankOf[p.id]=i+1;});
+          const _qlog = arch.cfLog || [];
+          const _third = Math.max(1, Math.ceil(_qlog.length/3));
+          const _pBuckets = [[],[],[]], _tBuckets = [[],[],[]];
+          _qlog.forEach((m,i)=>{
+            const t1=m.t1||[], t2=m.t2||[];
+            if(t1.length<2||t2.length<2)return;
+            const r=id=>_rankOf[id]||0;
+            if(!r(t1[0])||!r(t1[1])||!r(t2[0])||!r(t2[1]))return;
+            const pg=Math.max(Math.abs(r(t1[0])-r(t1[1])),Math.abs(r(t2[0])-r(t2[1])));
+            const tg=Math.abs((r(t1[0])+r(t1[1]))/2-(r(t2[0])+r(t2[1]))/2);
+            const b=Math.min(2,Math.floor(i/_third));
+            _pBuckets[b].push(pg); _tBuckets[b].push(tg);
+          });
+          const _avg=a=>a.length?(a.reduce((s,x)=>s+x,0)/a.length).toFixed(1):'–';
+          log('--- Skill Quality by phase (rank gaps; should DROP P1→P3 if ladder arc works) ---');
+          log(`  Partner gap (teammate):  P1=${_avg(_pBuckets[0])}  P2=${_avg(_pBuckets[1])}  P3=${_avg(_pBuckets[2])}`);
+          log(`  Team gap (vs opponents): P1=${_avg(_tBuckets[0])}  P2=${_avg(_tBuckets[1])}  P3=${_avg(_tBuckets[2])}`);
+        }
+
         log('--- Player Stats ---');
         const sorted = [...arch.players].sort((a,b) => (b.sRating||0) - (a.sRating||0));
         sorted.forEach((sp, i) => {

@@ -5854,8 +5854,12 @@ const CF={
       // Secondary: minimize within-team gap + cross-team imbalance
       const maxGapX=Math.max(Math.abs(x.t1[0].sr-x.t1[1].sr),Math.abs(x.t2[0].sr-x.t2[1].sr));
       const maxGapY=Math.max(Math.abs(y.t1[0].sr-y.t1[1].sr),Math.abs(y.t2[0].sr-y.t2[1].sr));
-      const gx=Math.abs((x.t1[0].sr+x.t1[1].sr)-(x.t2[0].sr+x.t2[1].sr))+(Math.abs(x.t1[0].sr-x.t1[1].sr)+Math.abs(x.t2[0].sr-x.t2[1].sr))/4+_splitCarry(maxGapX);
-      const gy=Math.abs((y.t1[0].sr+y.t1[1].sr)-(y.t2[0].sr+y.t2[1].sr))+(Math.abs(y.t1[0].sr-y.t1[1].sr)+Math.abs(y.t2[0].sr-y.t2[1].sr))/4+_splitCarry(maxGapY);
+      // Ladder "tight partners": weight within-team partner gap ABOVE cross-team balance,
+      // so teammates are similar level (you play WITH a peer) rather than strong+weak carry
+      // splits. Narrow foursomes (driven by phaseGapPen) keep teams balanced too; only forced
+      // wide foursomes trade some team balance for tighter partners.
+      const gx=Math.abs((x.t1[0].sr+x.t1[1].sr)-(x.t2[0].sr+x.t2[1].sr))*0.5+(Math.abs(x.t1[0].sr-x.t1[1].sr)+Math.abs(x.t2[0].sr-x.t2[1].sr))*1.0+_splitCarry(maxGapX);
+      const gy=Math.abs((y.t1[0].sr+y.t1[1].sr)-(y.t2[0].sr+y.t2[1].sr))*0.5+(Math.abs(y.t1[0].sr-y.t1[1].sr)+Math.abs(y.t2[0].sr-y.t2[1].sr))*1.0+_splitCarry(maxGapY);
       return gx-gy;
     });
     let{t1,t2}=_splits[0];
