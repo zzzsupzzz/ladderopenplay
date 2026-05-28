@@ -6285,8 +6285,20 @@ const CF={
     const nc=readyCourts.length;
     const need=nc*4;
 
-    // Not enough players for even one court
-    if(queue.length<4){readyCourts.forEach(c=>{S.session.cfSuggestions[c]=null;});return;}
+    // Not enough players for even one court — but rescue critically overdue players first.
+    // Root cause of WAIT CAP breach: all queue players except the overdue one are reserved for
+    // pending suggestions on non-ready courts (their gap < _noReserveT so they stay reserved).
+    // The overdue player is freed (gap >= _noReserveT) but can't form a 4-player group alone.
+    // The hard WAIT bound below never runs because the early return fires first.
+    // Fix: when an overdue player (gap >= cap) is stranded in a thin queue, release all
+    // reservations — confirmSuggestion's stale guard will regenerate the displaced courts.
+    if(queue.length<4){
+      const _hwmTQ=(S.session?.courts||1)*2+1;
+      if(queue.some(q=>this.matchGap(q.id)>=_hwmTQ)){
+        queue=S.session.cfQueue.slice(); // drop reservations — rescue the overdue player
+      }
+      if(queue.length<4){readyCourts.forEach(c=>{S.session.cfSuggestions[c]=null;});return;}
+    }
 
     // Hard play-count cap: no player should be more than 2 games ahead of the
     // least-played eligible player (in queue or on court, not paused/left).
