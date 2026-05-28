@@ -10,13 +10,27 @@
 
 | Dimension | Value |
 |-----------|-------|
-| Players per session | **16–22** (design for 20) |
-| Courts | **3** typical (2 for ~14, 3 for ~20). Ratio ≈ **6–7 players/court** |
-| Bench depth (N − 4·courts) | **8–10** |
-| Duration | **3 hours** (~45–55 matches total) |
+| Players per session | **14–26** (design for the whole range, not one point) |
+| Courts | **2, 3, or 4** — chosen by headcount at ≈ **6–7 players/court** |
+| Bench depth (N − 4·courts) | **6–10** |
+| Duration | **3 hours** (~40–60 matches total) |
 | Crowd | **Mixed** (some competitive, some social) |
 | Devices | **Organizer admins on their own device; players get a read-only player view** |
 | Initial ratings | **DUPR or self-rating, entered by admin** at player creation |
+
+**The app must self-scale across court counts.** Court count is a function of headcount; everything
+downstream (wait cap, phase slack, bench math) derives from `courts` and `N` at runtime — never
+hard-code "3". The three canonical configurations to design and test against:
+
+| Config | Players (N) | Courts (nc) | On court (4·nc) | Bench (N−4·nc) | Wait cap (default = nc·2+1) |
+|--------|-------------|-------------|-----------------|----------------|------------------------------|
+| Small  | ~14 | **2** | 8  | ~6  | **5** |
+| Mid    | ~20 | **3** | 12 | ~8  | **7** |
+| Large  | ~26 | **4** | 16 | ~10 | **9** |
+
+> The default cap `nc·2+1` is **constant in "rounds"** (~2–2.25 rounds of play) regardless of court
+> count, so the *wall-clock* wait feels similar at 2, 3, or 4 courts even though the match-count number
+> differs (5 vs 7 vs 9). More courts = matches complete faster, so a bigger number is the same wait.
 
 **Priority order (the north star):** **bounded WAIT > tight SKILL > equal GAMES**, with a hard rule:
 *skill may relax under wait pressure but must never go egregiously loose.* Equal-games is a soft
@@ -66,20 +80,27 @@ late-joiners handled, tight-partner split + graduated penalty landed. Validate e
 
 ## 4. Configuration parameters (single source of truth)
 
-Expose these as named constants/session settings. **Recommended** column is tuned to the 16–22p / 3c envelope.
+Expose these as named constants/session settings. **Recommended** column spans the 14–26p / 2–4c
+envelope. Everything rank-based scales with `N` automatically; everything wait-based scales with `nc`.
 
 | Param | Location | Current | Recommended | Meaning |
 |-------|----------|---------|-------------|---------|
-| `cfWaitCapMult` | session | 2 | **2** (cap = nc·2+1 = 7@3c, 5@2c) | wait/skill dial; 1 = short wait |
+| `cfWaitCapMult` | session | 2 | **2** → cap = nc·2+1 = **5 @2c / 7 @3c / 9 @4c** | wait/skill dial; 1 = short wait (nc+1) |
 | Phase **partner** targets (ranks) | `_phaseSkillCaps` | A8 / B6 / C4 | **A7 / B5 / C3** | teammate rank gap target by phase |
 | Phase **team** targets (ranks) | `_phaseSkillCaps` | A5 / B4 / C3 | **A5 / B3 / C2** | opponent-pair rank gap target |
+| Small-field slack | `_phaseSkillCaps` | +1 rank @ ≤2 courts | keep | widen targets when the bench is thin |
 | `phaseGapPen` weights | `_scoreGroup` | partner 1.2 / team 1.0 | keep | graduated skill penalty strength |
 | Split weights | `_scoreGroup` split sort | team 0.5 / partner 1.0 | keep | tight-partner bias |
-| `_looseGuardCap` | helper | ~11 ranks | keep | hard outer carry block |
+| `_looseGuardCap` | helper | `min(11, max(6, N·0.55))` ranks | keep | hard outer carry block (scales with N) |
 | Phase boundaries (games) | `_playerPhase` | A<2, B<6, C≥6 | **A≤2, B 3–6, C≥7** | per-player phase by games played |
 | Calibration games | NEW | — | **5** | games before a player is "calibrated" |
 | ELO K (calibrating) | ELO engine | — | **~2× normal** | faster convergence for first 5 games |
-| Court auto-suggest | NEW | manual | `round(N / 6.5)` clamp 1–6 | suggest courts from headcount |
+| Court auto-suggest | NEW | manual | `clamp(round(N/6.5), 2, 4)` → 14→2, 20→3, 26→4 | suggest courts from headcount |
+
+**Rank targets are absolute ranks (not % of field) on purpose:** a 3-rank partner gap is *easier* to
+satisfy with 26 players (more peers within 3 ranks) than with 14, so Phase 3 naturally gets closer to
+"true competitive" as the field grows. The small-field slack (+1 rank at ≤2 courts) covers the thin-bench
+case so a 14p/2c session doesn't deadlock on tight targets.
 
 > **Phase 3 = true competitive.** With the graduated *soft* penalty (not a hard gate), Phase C targets of
 > 3 partner / 2 team ranks are safe to aim for — the engine pushes toward them and relaxes only when the
@@ -89,13 +110,14 @@ Expose these as named constants/session settings. **Recommended** column is tune
 
 ## 5. Validation (must pass before any matchmaking release)
 
-Run `SIM.run()` ×3 (and a 16p/2c + a 22p/3c variant). Check the console report:
+Run `SIM.run()` ×3 at **each of the three canonical corners — 14p/2c, 20p/3c, 26p/4c** (the matchmaking
+must hold at all court counts, not just 3). Check the console report:
 
-1. **WAIT CAP gate:** `✅ PASS` — no player's max gap exceeds `cap`. (`err()` fails the suite.)
-2. **Skill Quality by phase:** Partner gap and Team gap **decrease P1 → P2 → P3** (the ladder arc).
+1. **WAIT CAP gate:** `✅ PASS` — no player's max gap exceeds `cap` (5 / 7 / 9 respectively). (`err()` fails the suite.)
+2. **Skill Quality by phase:** Partner gap and Team gap **decrease P1 → P2 → P3** (the ladder arc) at every corner.
 3. **Play-count:** `verifyPlayCountBalance` within tolerance (see §6.2).
 4. **No regressions:** `SIM.runBugChecks()` green.
-5. **Quality bar (mixed crowd):** Phase-3 avg partner gap **≤ ~3 ranks**, Phase-1 **≤ ~7**. Worst-case single P.GAP should be rare and only on rank extremes / forced matches.
+5. **Quality bar (mixed crowd):** Phase-3 avg partner gap **≤ ~3 ranks**, Phase-1 **≤ ~7**. Worst-case single P.GAP should be rare and only on rank extremes / forced matches. (Larger fields should hit Phase-3 tightness more easily than the 14p/2c corner.)
 
 The sim is the gate. The simulator can't be run by the agent — a human runs it in-browser and reports.
 
@@ -155,7 +177,7 @@ The sim is the gate. The simulator can't be run by the agent — a human runs it
 
 **Behavior:** when the count of players at `matchGap ≥ cap−1` exceeds the seats available on ready courts, **start force-seating one event earlier** (lower the must-play trigger to `cap−2` for the overflow) so the cluster drains before anyone breaches.
 
-**Acceptance:** WAIT CAP gate `✅ PASS` in all 3 runs at 20p/3c and 22p/3c.
+**Acceptance:** WAIT CAP gate `✅ PASS` in all 3 runs at **all three corners (14p/2c, 20p/3c, 26p/4c)**.
 
 ---
 
@@ -185,7 +207,19 @@ Players use the read-only **player view** (`?view=player`). Make waiting feel fa
 ---
 
 ### 6.7 Court auto-suggest from headcount  ·  *priority: LOW*
-When the admin sets up / players check in, suggest `courts = clamp(round(N / 6.5), 1, 6)` (14→2, 20→3, 22→3). Admin can override. Surface a hint when the room is too full for the wait target (`fairFloor+1 > cap`).
+The number of courts is the main thing that changes between sessions, so make it effortless. When the
+admin sets up / as players check in, suggest `courts = clamp(round(N / 6.5), 2, 4)`:
+
+| Headcount N | Suggested courts |
+|-------------|------------------|
+| ≤ 16 | 2 |
+| 17–22 | 3 |
+| 23–26 | 4 |
+
+Admin can always override (engine supports 1–6). Re-suggest if headcount crosses a boundary mid-session
+(late arrivals / leavers). When the room is too full for the wait target (`fairFloor+1 > cap`, e.g. 26
+players on only 3 courts), surface a hint to add a court. Changing court count mid-session must recompute
+the wait cap and bench math live (no restart).
 
 ---
 
