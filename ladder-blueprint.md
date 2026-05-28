@@ -181,7 +181,7 @@ The sim is the gate. The simulator can't be run by the agent — a human runs it
 
 ---
 
-### 6.5 Organizer presets  ·  *priority: MEDIUM*
+### 6.5 Organizer presets  ·  *priority: MEDIUM*  ·  ✅ IMPLEMENTED
 **Behavior:** one control — **Competitive / Balanced / Social** — that sets the wait/skill/variety knobs together, instead of separate dials.
 
 | Preset | `cfWaitCapMult` | Phase C target | Variety (repeat penalty) |
@@ -194,7 +194,7 @@ Store `S.session.cfPreset`; applying it sets the underlying params. Keep advance
 
 ---
 
-### 6.6 Player view mode — wait transparency & trust  ·  *priority: MEDIUM (players have a view)*
+### 6.6 Player view mode — wait transparency & trust  ·  *priority: MEDIUM (players have a view)*  ·  ✅ IMPLEMENTED
 Players use the read-only **player view** (`?view=player`). Make waiting feel fair:
 
 1. **"You're up next" / "1 game until you play"** — derive from the player's position in the must-play/priority ordering and pending suggestions.
@@ -206,7 +206,7 @@ Players use the read-only **player view** (`?view=player`). Make waiting feel fa
 
 ---
 
-### 6.7 Court auto-suggest from headcount  ·  *priority: LOW*
+### 6.7 Court auto-suggest from headcount  ·  *priority: LOW*  ·  ✅ IMPLEMENTED
 The number of courts is the main thing that changes between sessions, so make it effortless. When the
 admin sets up / as players check in, suggest `courts = clamp(round(N / 6.5), 2, 4)`:
 

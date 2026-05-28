@@ -428,7 +428,8 @@ body.observer-mode .qs-row{display:none!important}
       <div class="cpill" data-c="3">3</div><div class="cpill" data-c="4">4</div>
       <div class="cpill" data-c="5">5</div><div class="cpill" data-c="6">6</div>
     </div>
-    
+    <div id="court-suggest" style="display:none;font-size:.74rem;margin-top:7px"></div>
+
   </div>
 
   <div class="card" id="admin-pin-card">
@@ -523,6 +524,11 @@ body.observer-mode .qs-row{display:none!important}
             <option value="30">30s</option>
             <option value="60">60s</option>
             <option value="90">90s</option>
+          </select>
+          <select id="cf-preset" class="inp" style="width:auto;font-size:.72rem;padding:4px 6px" onchange="setCFPreset(this.value)" title="Quick tuning for the crowd. Competitive = tightest skill, longer waits OK. Balanced = default. Social = shortest waits, most variety, loosest skill.">
+            <option value="balanced">⚖️ Balanced</option>
+            <option value="competitive">🏆 Competitive</option>
+            <option value="social">🎉 Social</option>
           </select>
           <select id="cf-waitcap" class="inp adv-only" style="width:auto;font-size:.72rem;padding:4px 6px" onchange="S.session&&(S.session.cfWaitCapMult=+this.value)" title="Max wait vs skill priority. Skill: the system waits longer (up to courts×2+1) to find a level-matched game. Fast: shorter max wait (courts+1) but more mismatched/forced games.">
             <option value="2">🎯 Skill priority</option>
@@ -3267,6 +3273,7 @@ function renderRoster(){
   const need=S.courts*4;const startingNow=Math.min(need,arr.length);const so=Math.max(0,arr.length-need);
   const hintText=so?`${so} player${so>1?'s':''} will queue first`:'Everyone plays first match!';
   document.getElementById('roster-stats').innerHTML=`<span class="sc"><b>${arr.length}</b> Players</span><span class="sc"><b>${S.courts}</b> Court${S.courts>1?'s':''}</span><span class="sc"><b>${startingNow}</b> Starting</span><span class="sc"><b>${avg}</b> Avg RTG</span>`;
+  renderCourtSuggest(arr.length);
   const btn=document.getElementById('start-btn');
   if(isActive){
     btn.style.display='none';
@@ -3286,6 +3293,38 @@ function renderRoster(){
       :`<span style="font-size:.74rem;color:var(--re)">⚠ Set admin code above to start a session</span>`;
   }
   
+}
+
+// Court auto-suggest from headcount: courts ≈ clamp(round(N/6.5), 2, 4).
+// Shows a one-tap hint on the Setup tab when the suggestion differs from the
+// current pick, plus a "too full for the wait target" nudge when even the
+// suggested court count can't keep the wait cap reachable (fairFloor+1 > cap).
+function suggestCourtsFor(n){return Math.max(2,Math.min(4,Math.round(n/6.5)));}
+function renderCourtSuggest(n){
+  const el=document.getElementById('court-suggest');
+  if(!el)return;
+  // Don't nag once a session is live (court changes go through changeCourtsMidSession).
+  if(S.session&&S.session.status){el.style.display='none';return;}
+  if(!n||n<8){el.style.display='none';return;}
+  const sug=suggestCourtsFor(n);
+  let html='';
+  if(sug!==S.courts){
+    html=`<span style="color:var(--cy)">💡 ${n} players → suggest <b>${sug}</b> court${sug>1?'s':''}.</span> <a href="#" style="color:var(--cy);font-weight:700;text-decoration:none" onclick="applyCourtSuggest(${sug});return false">Use ${sug} ↗</a>`;
+  }
+  // Wait-target reachability check at the chosen court count.
+  const nc=S.courts||1, mult=S.session?.cfWaitCapMult??2;
+  const bench=Math.max(0,n-4*nc), fairFloor=Math.ceil(bench/4), cap=Math.max(nc*mult+1,fairFloor+1);
+  if(fairFloor+1>nc*mult+1){
+    html+=`${html?'<br/>':''}<span style="color:var(--or)">⚠ ${n} on ${nc} court${nc>1?'s':''} is crowded — wait can reach ${cap}. Add a court to keep it short.</span>`;
+  }
+  el.innerHTML=html;
+  el.style.display=html?'block':'none';
+}
+function applyCourtSuggest(n){
+  S.courts=n;
+  syncCourtPills('cpills-setup',n);
+  syncCourtPills('cpills-live',n);
+  renderRoster();
 }
 
 /* ── RENDER: LIVE ────────────────────────────────── */
@@ -6009,7 +6048,7 @@ const CF={
     // Phase 1: 100% (fresh session, encourage variety)
     // Phase 2: 60%  (quality and variety balanced)
     // Phase 3: 30%  (accept repeats freely — a good rematch > a bad new match)
-    const _p3Mult=_phase===1?1.0:_phase===2?0.6:0.3;
+    const _p3Mult=(_phase===1?1.0:_phase===2?0.6:0.3)*this._presetParams().variety;
     const p3Raw=partRpt*3 + oppRpt*5 + matchRpt + groupRpt + overlapPen + splitPen + consecPen;
     const p3Base=p3Raw>200?Math.round(200*p3Raw/Math.max(p3Raw,1)):p3Raw;
     const p3=Math.round(p3Base*_p3Mult);
@@ -6770,6 +6809,19 @@ const CF={
     return mp<5?'A':mp<8?'B':'C';
   },
 
+  // Organizer preset — one knob that sets wait/skill/variety together for a mixed crowd.
+  //   Competitive: longer wait OK, Phase-C tight (3/2 ranks), repeats fine for level.
+  //   Balanced (default): current tuning (wait≤cap, Phase-C 4/3 ranks, medium variety).
+  //   Social: short wait (mult 1), Phase-C loose (6/4 ranks), high partner variety.
+  // cfWaitCapMult is still stored on the session (and overridable in advanced UI); the
+  // preset just seeds it. Phase-C caps and the repeat-avoidance weight read from here live.
+  _presetParams(){
+    const p=S.session?.cfPreset||'balanced';
+    if(p==='competitive')return{waitMult:2,cPartner:3,cTeam:2,variety:0.7};
+    if(p==='social')return{waitMult:1,cPartner:6,cTeam:4,variety:1.3};
+    return{waitMult:2,cPartner:4,cTeam:3,variety:1.0};
+  },
+
   // Group phase = median phase of the 4 players (2nd of 4 sorted A→C).
   // Prevents one new player forcing 3 warmed-up players into lax mode.
   // Also prevents one veteran dragging a newcomer straight into tight Phase C.
@@ -6801,8 +6853,9 @@ const CF={
     const slack=(S.session?.courts||1)<=2?1:0;
     // Tightening tuned to avoid deselection clusters in a sparse queue (too tight => certain
     // hard-to-match players pile up at the must-play threshold and breach the wait cap).
-    const partnerRanks=(phase==='A'?8:phase==='B'?6:4)+slack;
-    const teamRanks=(phase==='A'?5:phase==='B'?4:3)+slack;
+    const _pp=this._presetParams();
+    const partnerRanks=(phase==='A'?8:phase==='B'?6:_pp.cPartner)+slack;
+    const teamRanks=(phase==='A'?5:phase==='B'?4:_pp.cTeam)+slack;
     return {partner:Math.round(partnerRanks*srPerRank),team:Math.round(teamRanks*srPerRank),partnerRanks,teamRanks,phase};
   },
   // Loose hard outer guard (~11 ranks) — blocks only egregious carry pairings. Graduated
@@ -8234,6 +8287,8 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       }
       const wcSel=document.getElementById('cf-waitcap');
       if(wcSel)wcSel.value=String(S.session.cfWaitCapMult??2);
+      const psSel=document.getElementById('cf-preset');
+      if(psSel)psSel.value=S.session.cfPreset||'balanced';
     }
     if(isLobby){return;} // rest of renderLive is courts/queue — not relevant in lobby
 
@@ -8883,6 +8938,21 @@ function cfMaybeAutoConfirm(courtNum){
   startAutoConfirm(courtNum);
 }
 
+// Organizer preset — sets wait/skill/variety knobs together (CF._presetParams reads cfPreset).
+// Also seeds the advanced cfWaitCapMult override so the two stay consistent.
+function setCFPreset(p){
+  if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
+  if(!S.session)return;
+  if(!['balanced','competitive','social'].includes(p))p='balanced';
+  S.session.cfPreset=p;
+  S.session.cfWaitCapMult=(p==='social')?1:2;
+  const wc=document.getElementById('cf-waitcap');
+  if(wc)wc.value=String(S.session.cfWaitCapMult);
+  const lbl={balanced:'⚖️ Balanced',competitive:'🏆 Competitive',social:'🎉 Social'}[p];
+  toast('Preset: '+lbl,'ok');
+  STORE.save();
+}
+
 
 
 /* ══════════════════════════════════════════════════════════════════
@@ -9408,6 +9478,60 @@ function renderStandings(){
   renderSessStd();
 }
 
+// Player-view "why this match" — rank-based, mirrors the organiser quality chips.
+// Answers: matched on level? did I wait? fresh partner? No raw ELO points shown.
+function _pvWhyMatch(id,partnerId,oppIds){
+  try{
+    const n=_totalRanked()||20;
+    const myRank=_sessionRank(id)||Math.ceil(n/2);
+    const chips=[];
+    if(partnerId){
+      const pr=_sessionRank(partnerId)||myRank;
+      const gap=Math.abs(myRank-pr);
+      chips.push(`<span style="color:var(--gr)">⚖️ Partner within ${gap} rank${gap===1?'':'s'}</span>`);
+      const reps=(typeof CF!=='undefined'&&CF.pc)?CF.pc(id,partnerId):0;
+      chips.push(reps>0?`<span style="color:var(--mu)">🔁 Played ${reps}× before</span>`:`<span style="color:var(--cy)">✨ Fresh partner</span>`);
+    }
+    if(Array.isArray(oppIds)&&oppIds.length){
+      const oppRanks=oppIds.map(o=>_sessionRank(o)||myRank);
+      const oppAvg=oppRanks.reduce((s,r)=>s+r,0)/oppRanks.length;
+      const od=Math.round(Math.abs(myRank-oppAvg));
+      chips.push(`<span style="color:var(--gr)">🎯 Opponents ~${od} rank${od===1?'':'s'} off</span>`);
+    }
+    const wait=(typeof CF!=='undefined'&&CF.matchGap)?CF.matchGap(id):0;
+    if(wait>=2)chips.push(`<span style="color:var(--or)">⏳ You waited ${wait}</span>`);
+    return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;font-size:.66rem;font-weight:600">${chips.join('')}</div>`;
+  }catch(e){return '';}
+}
+
+// Personal ladder arc — shows the player their matches tighten as they accumulate
+// games (mirrors the sim's per-phase metric, per player). Phase A=calibrating, C=competitive.
+function _pvPhaseArc(id){
+  if(!(S.session?.status==='active'&&S.session.cfMode))return '';
+  const mp=gsp(id)?.matchesPlayed||0;
+  const phase=(typeof CF!=='undefined'&&CF._playerPhase)?CF._playerPhase(id):(mp<5?'A':mp<8?'B':'C');
+  const steps=[
+    {k:'A',lbl:'Calibrating',sub:'0–4 games · loose matches while we learn your level'},
+    {k:'B',lbl:'Settling',sub:'5–7 games · matches tightening'},
+    {k:'C',lbl:'Competitive',sub:'8+ games · tightest, true-ladder matches'}
+  ];
+  const dots=steps.map(s=>{
+    const active=s.k===phase;
+    const done=({A:0,B:1,C:2})[s.k]<({A:0,B:1,C:2})[phase];
+    const col=active?'var(--cy)':done?'var(--gr)':'var(--bd)';
+    return `<div style="flex:1;text-align:center">
+      <div style="height:6px;border-radius:3px;background:${col};margin-bottom:5px"></div>
+      <div style="font-size:.64rem;font-weight:700;color:${active?'var(--cy)':'var(--mu)'}">${s.lbl}</div>
+    </div>`;
+  }).join('');
+  const cur=steps.find(s=>s.k===phase);
+  return `<div class="card" style="margin-bottom:11px">
+    <div class="ct" style="margin-bottom:8px">📈 Your Ladder Arc <span style="font-size:.64rem;font-weight:600;color:var(--mu)">${mp} game${mp===1?'':'s'} tonight</span></div>
+    <div style="display:flex;gap:7px">${dots}</div>
+    <div style="font-size:.7rem;color:var(--mu);margin-top:8px">${cur?cur.sub:''}</div>
+  </div>`;
+}
+
 function renderPlayerView(){
   _assertOwner('pv-content','renderPlayerView');
   if(!isActiveTab('player')&&!PLAYER_MODE)return;
@@ -9472,12 +9596,14 @@ function renderPlayerView(){
         const offset=S.session.courtOffset||0;
         const courtLabel=offset+parseInt(sugCourt);
         const inT1=sg.t1.includes(id);
-        const partner=gp((inT1?sg.t1:sg.t2).find(x=>x!==id));
+        const partnerId=(inT1?sg.t1:sg.t2).find(x=>x!==id);
+        const partner=gp(partnerId);
         const opps=(inT1?sg.t2:sg.t1).map(x=>gp(x)?.name||'?').join(' & ');
         statusHtml=`<div class="pv-match-now" style="border-color:rgba(52,217,116,.35)">
           <div style="font-size:.68rem;font-weight:700;color:var(--gr);letter-spacing:.08em;margin-bottom:6px">🏓 SUGGESTED — COURT ${courtLabel}</div>
           <div style="font-size:.82rem;color:var(--mu);margin-bottom:3px">Partner: <strong style="color:var(--tx)">${partner?esc(partner.name):'?'}</strong></div>
           <div style="font-size:.82rem;color:var(--mu)">vs <strong style="color:var(--re)">${esc(opps)}</strong></div>
+          ${_pvWhyMatch(id,partnerId,(inT1?sg.t2:sg.t1))}
           <div style="font-size:.7rem;color:var(--mu);margin-top:5px">Waiting for organiser to confirm ⏳</div>
           <div style="font-size:.7rem;color:var(--mu);margin-top:3px">Games tonight: <strong style="color:var(--tx)">${sp?.matchesPlayed||0}</strong></div>
         </div>`;
@@ -9588,7 +9714,8 @@ function renderPlayerView(){
     matchHtml=`<div class="card"><div class="empty" style="padding:10px">${sessFilter?'No matches in this session yet.':'No match history yet.'}</div></div>`;
   }
 
-  el.innerHTML=statusHtml+sessHtml+matchHtml;
+  const arcHtml=sp?_pvPhaseArc(id):'';
+  el.innerHTML=statusHtml+sessHtml+arcHtml+matchHtml;
 
   // Show "Last updated N min ago" in player mode so users know if data is fresh
   if(PLAYER_MODE&&S._lastSaveTs){
