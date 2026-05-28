@@ -6240,13 +6240,14 @@ const CF={
     });
     if(eligibleCounts.length){
       const minGames=Math.min(...eligibleCounts);
-      // Progressive priority exception: any player with gap>=4 (MGL threshold) stays in the
-      // pool regardless of game count — starvation relief trumps play-count fairness.
-      // This prevents high-gap players from being silently excluded from the queue.
-      const tight=queue.filter(q=>this.matchGap(q.id)>=4||(gsp(q.id)?.matchesPlayed||0)<=minGames+1);
+      // Wait wins over play-count fairness: any player with gap>=3 (approaching the
+      // wait cap) stays in the pool regardless of game count, so the play-count
+      // balancer can never bench a waiting player and push them toward a breach.
+      // Game counts are allowed to drift; bounded wait is the hard guarantee.
+      const tight=queue.filter(q=>this.matchGap(q.id)>=3||(gsp(q.id)?.matchesPlayed||0)<=minGames+1);
       if(tight.length>=4)queue=tight;
       else{
-        const capped=queue.filter(q=>this.matchGap(q.id)>=4||(gsp(q.id)?.matchesPlayed||0)<=minGames+2);
+        const capped=queue.filter(q=>this.matchGap(q.id)>=3||(gsp(q.id)?.matchesPlayed||0)<=minGames+2);
         if(capped.length>=4)queue=capped;
       }
     }
@@ -6853,13 +6854,15 @@ const CF={
   // suggestions for the ready courts (caller returns early); false when nobody is
   // under wait pressure (caller runs the normal skill engine).
   //
-  //   cap        = max(nc+1, ceil(bench/4)+1)     — bench-depth-bounded hard cap
+  //   cap        = max(nc+2, ceil(bench/4)+1)     — bench-depth-bounded hard cap
   //   must-play  = wait counter >= cap-1          — seat now to keep <= cap
   //
-  // A player can never exceed the cap because they are force-seated the moment
-  // they would breach it. The cap is bounded by bench depth, so when the room is
-  // too full to honour nc+1, the cap (and thus the achievable wait) rises — that
-  // is feasibility, not a bug (see spec §3).
+  // cap is nc+2 (not nc+1): with nc courts all submitting, a benched player sees
+  // ~nc other-court finishes per wait even under perfect aging, so nc+1 sits on the
+  // physical floor with no slack. nc+2 is the realistic achievable bound and leaves
+  // room for skill-balanced fill. A player can never exceed the cap because they are
+  // force-seated the moment they would breach it; when the room is too full to honour
+  // nc+2 the cap rises with bench depth — feasibility, not a bug (see spec §3).
   _scheduleMandatory(readyCourts,pool,mustSplit,nrIds,finishedMatchByCourtNum){
     if(!S.session||!pool||pool.length<4)return false;
     const ncTotal=S.session?.courts||1;
@@ -6871,7 +6874,7 @@ const CF={
     }).length;
     const bench=Math.max(0,activeN-4*ncTotal);
     const fairFloor=Math.ceil(bench/4);
-    const cap=Math.max(ncTotal+1,fairFloor+1);
+    const cap=Math.max(ncTotal+2,fairFloor+1);
     // Effective wait counter: max(matchGap, cmg). cmg surfaces long-game players
     // whose queue-only gap is high even if matchGap looks moderate.
     const eff=p=>Math.max(this.matchGap(p.id),p.cmg??0);

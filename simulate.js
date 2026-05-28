@@ -703,17 +703,18 @@ const SIM = (() => {
         // max gap may exceed the cap. Cap is bounded by bench depth, so it is
         // computed — not a fixed constant.
         //   fair_floor = ceil((N - 4*nc) / 4)   — physical minimum under perfect aging
-        //   cap        = max(nc + 1, fair_floor + 1)
-        // When fair_floor + 1 > nc + 1 the room is too full to honour the nc+1
-        // target; that is a feasibility note, not a bug. Violations of `cap`
-        // ARE bugs and fail the suite (pushed to _errs via err()).
+        //   cap        = max(nc + 2, fair_floor + 1)
+        // cap is nc+2: with nc courts submitting, a benched player sees ~nc other-court
+        // finishes per wait even under perfect aging, so nc+1 has no slack. When
+        // fair_floor + 1 > nc + 2 the room is too full to honour the target; that is a
+        // feasibility note, not a bug. Violations of `cap` ARE bugs and fail the suite.
         {
           const _capN = arch.players.length;
           const _capBench = Math.max(0, _capN - 4 * courts);
           const _capFloor = Math.ceil(_capBench / 4);
-          const _waitCap = Math.max(courts + 1, _capFloor + 1);
-          const _roomTooFull = (_capFloor + 1) > (courts + 1);
-          log(`--- WAIT CAP gate (N=${_capN}, courts=${courts}, bench=${_capBench}, fairFloor=${_capFloor}, cap=${_waitCap}${_roomTooFull ? ' — room too full for nc+1 target' : ''}) ---`);
+          const _waitCap = Math.max(courts + 2, _capFloor + 1);
+          const _roomTooFull = (_capFloor + 1) > (courts + 2);
+          log(`--- WAIT CAP gate (N=${_capN}, courts=${courts}, bench=${_capBench}, fairFloor=${_capFloor}, cap=${_waitCap}${_roomTooFull ? ' — room too full for nc+2 target' : ''}) ---`);
           const _capViolators = waitEntries.filter(e => e.max > _waitCap);
           if (_capViolators.length === 0) {
             log(`  ✅ WAIT CAP PASS — all players' max gap ≤ ${_waitCap}`);
