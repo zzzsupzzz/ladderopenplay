@@ -5699,8 +5699,14 @@ const CF={
     const sp=gsp(id);if(!sp)return 0;
     const current=S.session?.cfMatchCount||0;
     if((sp.matchesPlayed||0)===0){
-      // Late arrivals / resumed: they just joined — gap starts at 0, no catch-up
-      if(S.session?.cfRanks?.[id]?.isLateArrival||sp.resumedFromPause)return 0;
+      // Late arrivals / resumed: accrue wait from when they JOINED (not session
+      // start — no catch-up debt), so they still become "overdue" and get seated
+      // for their first game. Returning a flat 0 made them invisible to starvation
+      // logic, so a late joiner could wait indefinitely for their first game.
+      if(S.session?.cfRanks?.[id]?.isLateArrival||sp.resumedFromPause){
+        const joinMc=sp._joinedAtMatch??current;
+        return Math.max(0,current-joinMc);
+      }
       // Present from session start — been waiting since game 0
       return current+1;
     }
@@ -6903,21 +6909,22 @@ const CF={
       forcedIds.add(p.id);forcedUnits.push({players:[p],hard});
     }
     if(forcedUnits.length===0)return false;
-    // Distribute forced units across ready courts round-robin (HARD units first so
-    // the worst waiters land on different courts). HARD units may fill a court (up
-    // to 4); SOFT units are capped at 2 forced/court so ≥2 skill-fill slots remain.
+    // Distribute forced units across ready courts round-robin in priority order
+    // (most-overdue first). Filling seats with overdue players is REQUIRED to hold
+    // the cap: a soft per-court limit lets skill-fill skip the 3rd+ overdue player,
+    // who then rots (observed waits of 11). So we seat overdue greedily, up to 4 per
+    // court; skill-fill only takes seats left over when overdue < seats. Round-robin
+    // still spreads the worst waiters across courts (multi-court) for better fill.
     const courtForced=readyCourts.map(()=>[]);
     let ci=0;
     const place=unit=>{
-      const limit=unit.hard?4:2;
       for(let t=0;t<readyCourts.length;t++){
         const idx=(ci+t)%readyCourts.length;
-        if(courtForced[idx].length+unit.players.length<=limit){courtForced[idx].push(...unit.players);ci=idx+1;return true;}
+        if(courtForced[idx].length+unit.players.length<=4){courtForced[idx].push(...unit.players);ci=idx+1;return true;}
       }
       return false;
     };
-    forcedUnits.filter(u=>u.hard).forEach(place);
-    forcedUnits.filter(u=>!u.hard).forEach(place);
+    forcedUnits.forEach(place);
     // Fill each court: forced players + skill-best fill from the remaining pool.
     // Exclude only players actually SEATED on a court — any forced unit that didn't
     // fit stays eligible as skill-fill (and is caught next event as it reaches cap).
