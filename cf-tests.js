@@ -73,7 +73,8 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   _totalRanked:typeof _totalRanked!=='undefined'?_totalRanked:null,
   _ranksCompatible:typeof _ranksCompatible!=='undefined'?_ranksCompatible:null,
   _initSessionRanks:typeof _initSessionRanks!=='undefined'?_initSessionRanks:null,
-  gp:typeof gp!=='undefined'?gp:null, gsp:typeof gsp!=='undefined'?gsp:null};`;
+  gp:typeof gp!=='undefined'?gp:null, gsp:typeof gsp!=='undefined'?gsp:null,
+  _seasonLadderHtml:typeof _seasonLadderHtml!=='undefined'?_seasonLadderHtml:null};`;
 
 vm.createContext(ctx);
 try {
@@ -171,6 +172,32 @@ try {
   ok(ids.length === 4, 'scoreGroup produces a 4-player split (2v2)');
 } catch (e) {
   fail++; console.error('  ❌ _scoreGroup threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
+// ── Tests: season ladder movement (snapshot diff) ──────────────────────────
+section('_seasonLadderHtml() — week-over-week movement from rank snapshots');
+if (APP._seasonLadderHtml) {
+  S.session = null;
+  S.db = [
+    { id: 'a', name: 'A', rating: 1300, gamesPlayed: 5, wins: 3, losses: 2 },
+    { id: 'b', name: 'B', rating: 1200, gamesPlayed: 5, wins: 2, losses: 3 },
+    { id: 'c', name: 'C', rating: 1100, gamesPlayed: 5, wins: 1, losses: 4 },
+  ];
+  // newest snapshot first (archive.unshift order): A climbed 2→1, B slipped 1→2
+  S.archive = [
+    { id: 's2', players: S.db.map(p => ({ id: p.id })), rankSnapshot: { a: 1, b: 2, c: 3 } },
+    { id: 's1', players: S.db.map(p => ({ id: p.id })), rankSnapshot: { a: 2, b: 1, c: 3 } },
+  ];
+  const h = APP._seasonLadderHtml();
+  ok(/SEASON LADDER/.test(h), 'renders a season ladder');
+  ok(/▲1/.test(h), 'A shows ▲1 (climbed from #2 to #1)');
+  ok(/▼1/.test(h), 'B shows ▼1 (slipped from #1 to #2)');
+  // first-season case: a single snapshot → no movement shown
+  S.archive = [{ id: 's1', players: S.db.map(p => ({ id: p.id })), rankSnapshot: { a: 1, b: 2, c: 3 } }];
+  const h1 = APP._seasonLadderHtml();
+  ok(!/▲|▼/.test(h1), 'single snapshot → no movement arrows yet');
+} else {
+  fail++; console.error('  ❌ _seasonLadderHtml not exported');
 }
 
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);

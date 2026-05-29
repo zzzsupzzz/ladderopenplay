@@ -3887,10 +3887,48 @@ function _updateLiveSavedBadge(){
 
 /* § RENDER:HISTORY */
 /* ── RENDER: HISTORY ─────────────────────────────── */
+// ── Season ladder ───────────────────────────────────────────────────────────
+// Cross-session standing: the persistent "ladder" players climb week to week.
+// Ranks the all-time DB by rating; movement (▲/▼) comes from the two most recent
+// end-of-session rank snapshots (see doEndSession). The truest progression signal —
+// it's why people come back. Read-only, derived from existing data.
+function _seasonLadderHtml(){
+  const ranked=[...S.db].filter(p=>(p.gamesPlayed||0)>0&&!p.isNR).sort((a,b)=>(b.rating||0)-(a.rating||0));
+  if(ranked.length<2)return '';
+  const snaps=S.archive.filter(s=>s.rankSnapshot).map(s=>s.rankSnapshot);
+  const lastSnap=snaps[0]||null, prevSnap=snaps[1]||null; // most recent two session-end snapshots
+  const sessCount={};
+  S.archive.forEach(s=>(s.players||[]).forEach(p=>{sessCount[p.id]=(sessCount[p.id]||0)+1;}));
+  const mvCell=id=>{
+    if(lastSnap&&prevSnap&&lastSnap[id]!=null){
+      if(prevSnap[id]==null)return `<span style="color:var(--cy);font-weight:700">NEW</span>`;
+      const d=prevSnap[id]-lastSnap[id]; // +climbed
+      return d>0?`<span style="color:var(--gr);font-weight:700">▲${d}</span>`
+        :d<0?`<span style="color:var(--re);font-weight:700">▼${-d}</span>`
+        :`<span style="color:var(--mu)">–</span>`;
+    }
+    return `<span style="color:var(--m2)">·</span>`;
+  };
+  const rows=ranked.map((p,i)=>{
+    const r=i+1;
+    return `<tr class="r${r}"><td><span class="rnk">${r}</span></td>`+
+      `<td style="font-weight:600;font-size:.79rem">${esc(p.name)}${p.tag?`<span class="ptag">${esc(p.tag)}</span>`:''}</td>`+
+      `<td style="font-size:.72rem">${mvCell(p.id)}</td>`+
+      `<td style="font-size:.71rem;color:var(--mu)">${sessCount[p.id]||0}</td>`+
+      `<td style="font-size:.71rem;color:var(--mu)">${p.wins||0}-${p.losses||0}</td>`+
+      `<td><span class="rv">${Math.round(p.rating||0)}</span></td></tr>`;
+  }).join('');
+  const _movementNote=snaps.length>=2?' · ▲▼ = movement in the latest session'
+    : (snaps.length===1?' · movement appears after the next session':'');
+  return `<div style="font-family:'Bebas Neue',sans-serif;font-size:1.25rem;letter-spacing:.5px;margin:4px 0 6px;color:var(--go)">🪜 SEASON LADDER</div>`+
+    `<div style="font-size:.63rem;color:var(--mu);margin-bottom:8px">All-time standing across ${S.archive.length} session${S.archive.length===1?'':'s'}${_movementNote}</div>`+
+    `<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Rank movement in the latest session">±</th><th title="Sessions played">SES</th><th title="All-time W-L">W-L</th><th title="All-time rating">RTG</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
 function renderArchive(){
   const el=document.getElementById('archive-wrap');if(!el)return;
   if(!S.archive.length){el.innerHTML='';return;}
-  el.innerHTML=`<div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:.5px;margin:16px 0 10px;color:var(--mu)">PREVIOUS SESSIONS</div>`+
+  const _ladder=_seasonLadderHtml();
+  el.innerHTML=(_ladder?_ladder+`<div style="height:1px;background:var(--bd);margin:14px 0"></div>`:'')+`<div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:.5px;margin:16px 0 10px;color:var(--mu)">PREVIOUS SESSIONS</div>`+
   S.archive.map(sess=>{
     const d=new Date(sess.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
     const top=[...sess.players].sort((a,b)=>b.sRating-a.sRating).slice(0,3);
@@ -4813,6 +4851,13 @@ function doEndSession(){
     const _nameEl=document.getElementById('sess-name-flow');
     if(_nameEl){_nameEl.value='';const _day=new Date().toLocaleDateString('en',{weekday:'long'});_nameEl.placeholder=`${_day} Open Play…`;}
     recalcAllTimeRatings();
+    // Season-ladder snapshot: each player's all-time rank at this session's end, so the next
+    // session can show week-over-week movement (▲/▼). Computed after recalc so it reflects the
+    // updated all-time ratings. (Existing archives without this just show no movement.)
+    {
+      const _rk=[...S.db].filter(p=>(p.gamesPlayed||0)>0&&!p.isNR).sort((a,b)=>(b.rating||0)-(a.rating||0));
+      arch.rankSnapshot={};_rk.forEach((p,i)=>{arch.rankSnapshot[p.id]=i+1;});
+    }
     STORE.save();stopTimer();stopElapsed();
     const pb=document.getElementById('prog-bar');if(pb)pb.style.width='0%';
     updateHeader();renderDB();renderRoster();renderHistory();renderArchive();renderStandings();updatePvSessFilter();
