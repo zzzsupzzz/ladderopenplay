@@ -551,6 +551,9 @@ const SIM = (() => {
           const pEntry = (S.session.cfPaused || []).find(q => q.id === pauseDone);
           if (pEntry) {
             cfResumePlayer(pauseDone);
+            // Reset the wait clock at resume — a voluntary pause is not queue wait, so the
+            // wait-cap gate should measure only the post-resume wait, not the pause span.
+            _lastGameEndMc[pauseDone] = S.session.cfMatchCount || 0;
             _disruptedAt[pauseDone] = S.session.cfMatchCount || 0;
             _disruptedType[pauseDone] = 'resume';
             log(`Resumed: ${gp(pauseDone)?.name} (round ${r+1})`);
@@ -582,6 +585,8 @@ const SIM = (() => {
           const pEntry2 = (S.session.cfPaused || []).find(q => q.id === pauseDone2);
           if (pEntry2) {
             cfResumePlayer(pauseDone2);
+            // Reset the wait clock at resume (see note above) — pause span is not queue wait.
+            _lastGameEndMc[pauseDone2] = S.session.cfMatchCount || 0;
             _disruptedAt[pauseDone2] = S.session.cfMatchCount || 0;
             _disruptedType[pauseDone2] = 'resume';
             log(`Resumed #2: ${gp(pauseDone2)?.name} (round ${r+1})`);

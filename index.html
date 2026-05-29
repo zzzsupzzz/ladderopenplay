@@ -3104,10 +3104,12 @@ function cfResumePlayer(id){
   // Compress ranks after resume — re-numbers including the returning player without resetting tonight's positions.
   if(S.session?.cfRanks)_compressRanks();
   const [entry]=S.session.cfPaused.splice(pi,1);
-  // Re-enter queue preserving wait time (since is kept from original)
-  S.session.cfQueue.push({id:entry.id,since:entry.since,consec:entry.consec||0});
-  // Mark resumed so catch-up pressure is capped — don't force continuous play to recoup missed games
-  const _spResume=gsp(id);if(_spResume)_spResume.resumedFromPause=true;
+  // Re-enter queue with a FRESH wait clock — a voluntary pause is not queue wait, so the
+  // resumed player's wait (and the wait-cap) should count from NOW, not from before the pause.
+  S.session.cfQueue.push({id:entry.id,since:Date.now(),consec:entry.consec||0});
+  // Mark resumed so catch-up pressure is capped + matchGap anchors to the resume point
+  // (_joinedAtMatch), so they don't show as instantly breaching the wait cap on resume.
+  const _spResume=gsp(id);if(_spResume){_spResume.resumedFromPause=true;_spResume._joinedAtMatch=S.session.cfMatchCount||0;}
   STORE.save('session');renderLive();toast(`${p.name} back in queue ✓`,'ok');
 }
 
@@ -5754,6 +5756,13 @@ const CF={
       return current+1;
     }
     const lastAt=sp.lastPlayedAtMatch??0;
+    // Resumed-from-pause players (WITH games): a voluntary pause is NOT queue wait. Anchor to
+    // the resume point so matchGap reflects only the post-resume wait — otherwise the entire
+    // pause counts and the player shows as breaching the wait cap the instant they resume.
+    // Self-correcting: once they play post-resume, lastPlayedAtMatch >= _joinedAtMatch.
+    if(sp.resumedFromPause&&sp._joinedAtMatch!=null){
+      return Math.max(0,current-Math.max(lastAt,sp._joinedAtMatch));
+    }
     return current-lastAt;
   },
 
@@ -6879,68 +6888,59 @@ const CF={
     const seated=c=>{const s=S.session.cfSuggestions[c];return s?[...(s.t1||[]),...(s.t2||[])]:[];};
     const maxGapOf=c=>{const ids=seated(c);return ids.length?Math.max(...ids.map(id=>this.matchGap(id))):-Infinity;};
     const usedTargets=new Set();
-    // Benched pool = UNION of cfQueue + every current suggestion member + activePlayers, minus
-    // on-court / paused / left. Critical: generateSuggestion (the stale-guard regen path) strips
-    // players sitting in other courts' suggestions out of cfQueue before calling here, so a
-    // cfQueue-only pool is blind to exactly the stranded outliers. The union always sees them.
     const qById={};(S.session.cfQueue||[]).forEach(q=>{qById[q.id]=q;});
-    const _idSet=new Set([
-      ...(S.session.cfQueue||[]).map(q=>q.id),
-      ...Object.values(S.session.cfSuggestions||{}).flatMap(s=>s?[...(s.t1||[]),...(s.t2||[])]:[]),
-      ...(S.session.activePlayers||[])
-    ]);
-    const benchedIds=[..._idSet].filter(id=>{
-      const sp=gsp(id);
-      return sp&&sp.status!=='left'&&!onCourt.has(id)&&!(S.session.cfPaused||[]).some(p=>p.id===id);
-    });
+    // Seatable pool = FREE players only: in cfQueue, not on a playing court, not paused/left,
+    // and NOT already in ANY court's suggestion. Excluding all suggestion members is what keeps
+    // the net from double-booking a player onto a second court (the cause of the stale-guard
+    // ping-pong). A player sitting in another court's pending suggestion is already spoken for.
+    const _freeIds=()=>{
+      const sugg=new Set(Object.values(S.session.cfSuggestions||{}).flatMap(s=>s?[...(s.t1||[]),...(s.t2||[])]:[]));
+      return (S.session.cfQueue||[]).map(q=>q.id).filter(id=>{
+        const sp=gsp(id);
+        return sp&&sp.status!=='left'&&!onCourt.has(id)&&!(S.session.cfPaused||[]).some(p=>p.id===id)&&!sugg.has(id);
+      });
+    };
     if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG)){
-      const risk=benchedIds.map(id=>({id,n:gsp(id)?.name||id,g:this.matchGap(id),c:(()=>{const sp=gsp(id);const lc=sp?.lastConfirmedAtMatch??sp?.lastPlayedAtMatch??0;return sp?.matchesPlayed>0?mc-lc:0;})()}))
-        .filter(x=>Math.max(x.g,x.c)>=seatAt-1).sort((a,b)=>Math.max(b.g,b.c)-Math.max(a.g,a.c));
-      if(risk.length)console.warn(`[HWDBG] enter mc=${mc} ready=[${readyCourts}] cap=${cap} seatAt=${seatAt} bench=${benchedIds.length} atRisk=`+risk.map(x=>`${x.n}(g${x.g}/c${x.c})`).join(','));
+      const risk=_freeIds().map(id=>({n:gsp(id)?.name||id,g:this.matchGap(id)})).filter(x=>x.g>=seatAt-1).sort((a,b)=>b.g-a.g);
+      if(risk.length)console.warn(`[HWDBG] enter mc=${mc} ready=[${readyCourts}] cap=${cap} seatAt=${seatAt} freeAtRisk=`+risk.map(x=>`${x.n}(g${x.g})`).join(','));
+      const _shadow=(S.session.activePlayers||[]).filter(id=>gsp(id)?.status!=='left'&&this.matchGap(id)>=cap).map(id=>{
+        const onC=Object.entries(S.session.cfCourts||{}).find(([,ct])=>ct?.status==='playing'&&ct.match&&[...ct.match.t1,...ct.match.t2].includes(id));
+        const pausd=(S.session.cfPaused||[]).some(p=>p.id===id);
+        const inSug=Object.entries(S.session.cfSuggestions||{}).find(([,s])=>s&&[...(s.t1||[]),...(s.t2||[])].includes(id));
+        return `${gsp(id)?.name||id}(g${this.matchGap(id)} @${onC?('court'+onC[0]):pausd?'paused':inSug?('sug'+inSug[0]):'FREE'})`;
+      });
+      if(_shadow.length)console.warn(`[HWDBG] ⚠ over-cap mc=${mc}: `+_shadow.join(','));
     }
     // At most one pass per ready court — each pass seats up to a full court of overdue players.
     for(let pass=0;pass<readyCourts.length;pass++){
-      const assigned=new Set(readyCourts.flatMap(seated));
-      const benched=benchedIds.map(id=>{const q=qById[id];return stamp({id,sr:this._rankSr(id),waitMin:q?(Date.now()-q.since)/60000:0,qEntry:q||{id,since:Date.now()}});});
-      if(benched.length<4)break;
-      // odList = at-risk players (eff >= seatAt) NOT already in a ready-court suggestion
-      // (anyone at risk who is already suggested is about to play, so they're safe).
-      const odList=benched.filter(p=>!assigned.has(p.id)&&eff(p)>=seatAt).sort((a,b)=>eff(b)-eff(a));
+      const free=_freeIds();
+      const odList=free.map(id=>({id,g:eff({id,cmg:(()=>{const sp=gsp(id);const lc=sp?.lastConfirmedAtMatch??sp?.lastPlayedAtMatch??0;return sp?.matchesPlayed>0?mc-lc:this.matchGap(id);})()})}))
+        .filter(x=>x.g>=seatAt).sort((a,b)=>b.g-a.g);
       if(!odList.length)break;
       // Pick a target court not used yet this call: prefer an empty suggestion; else the
       // least-overdue court (lowest seated max-gap = least disruptive to displace).
       const candidates=readyCourts.filter(c=>!usedTargets.has(c));
-      if(!candidates.length){if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG))console.warn(`[HWDBG] no candidate courts left, od=`+odList.map(p=>gsp(p.id)?.name||p.id+`(${eff(p)})`).join(','));break;}
+      if(!candidates.length){if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG))console.warn(`[HWDBG] no candidate courts left, od=`+odList.map(x=>gsp(x.id)?.name||x.id).join(','));break;}
       let tgtC=candidates.find(c=>!S.session.cfSuggestions[c]);
       if(!tgtC)tgtC=candidates.reduce((best,c)=>maxGapOf(c)<maxGapOf(best)?c:best,candidates[0]);
       usedTargets.add(tgtC);
-      // Clear the target. Its previously-suggested players stay in cfQueue (only confirm
-      // removes them), so they re-enter `avail` below — any over-cap player seated there is
-      // re-forced, never dropped. Only UNDER-cap players can be displaced ⇒ no new breach.
+      // Capture tgtC's current members, then clear it — they rejoin the free pool so an over-cap
+      // player seated there is re-forced (never dropped); only UNDER-cap players can be displaced.
+      const released=seated(tgtC);
       S.session.cfSuggestions[tgtC]=null;
-      const stillAssigned=new Set(readyCourts.flatMap(seated)); // OTHER ready courts now
-      const avail=benched.filter(p=>!stillAssigned.has(p.id));
-      // Force the worst waiters (eff >= seatAt, whether stranded or released from tgtC), up to
-      // a full court; fill the rest by skill. _bestGroupForcing guarantees placement.
+      // avail = free players + tgtC's released members. Both are now outside every OTHER court's
+      // suggestion, so nothing here can be double-booked.
+      const availIds=[...new Set([..._freeIds(),...released])];
+      const avail=availIds.map(id=>{const q=qById[id];return stamp({id,sr:this._rankSr(id),waitMin:q?(Date.now()-q.since)/60000:0,qEntry:q||{id,since:Date.now()}});});
+      if(avail.length<4)break;
       const forced=avail.filter(p=>eff(p)>=seatAt).sort((a,b)=>eff(b)-eff(a)).slice(0,4);
       const forcedIds=new Set(forced.map(p=>p.id));
       const fill=avail.filter(p=>!forcedIds.has(p.id));
       const best=this._bestGroupForcing(forced,fill,mustSplit);
-      if(!best){if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG))console.warn(`[HWDBG] _bestGroupForcing FAILED tgt=${tgtC} forced=`+forced.map(p=>gsp(p.id)?.name||p.id).join(',')+` fill=${fill.length}`);break;}
+      if(!best){if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG))console.warn(`[HWDBG] _bestGroupForcing FAILED tgt=${tgtC} forced=`+forced.map(p=>gsp(p.id)?.name||p.id).join(',')+` avail=${avail.length}`);break;}
       best.constraintReason='hardwait';
       this._storeSuggestion(tgtC,best,finishedMatchByCourtNum?.[tgtC]);
-      if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG))console.warn(`[HWDBG] SEATED court ${tgtC} <- `+[...(best.t1||[]),...(best.t2||[])].map(id=>`${gsp(id)?.name||id}(g${this.matchGap(id)})`).join(','));
-      // De-dupe: overdue players aren't reserved (matchGap >= _noReserveT), so a forced player
-      // may ALSO be sitting in another court's pending suggestion. Leaving both means one court
-      // confirms, the other hits confirmSuggestion's stale guard and regenerates WITHOUT them —
-      // the exact ping-pong that produced the back-to-back STUCK breaches. Clear the duplicate
-      // suggestion(s); those courts regenerate cleanly when next ready.
-      const placedIds=new Set([...(best.t1||[]),...(best.t2||[])]);
-      Object.keys(S.session.cfSuggestions||{}).forEach(c=>{
-        if(+c===tgtC)return;
-        const s=S.session.cfSuggestions[c];
-        if(s&&[...(s.t1||[]),...(s.t2||[])].some(id=>placedIds.has(id)))S.session.cfSuggestions[c]=null;
-      });
+      if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG))console.warn(`[HWDBG] SEATED court ${tgtC} <- `+[...(best.t1||[]),...(best.t2||[])].map(p=>{const id=p&&p.id?p.id:p;return `${gsp(id)?.name||id}(g${this.matchGap(id)})`;}).join(','));
     }
   },
 
@@ -7641,6 +7641,10 @@ const CF={
           return;
         }
       }
+    }
+    if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG)){
+      const _hi=sug.allIds.filter(id=>this.matchGap(id)>=(S.session?.courts||1)*(S.session?.cfWaitCapMult??2)+1-1);
+      if(_hi.length)console.warn(`[HWDBG] CONFIRM court ${courtNum} START — at-risk seated: `+_hi.map(id=>`${gsp(id)?.name||id}(g${this.matchGap(id)})`).join(','));
     }
     // Track time in queue for each player + capture original since BEFORE dequeue
     const now=Date.now();
