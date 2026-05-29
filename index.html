@@ -6210,6 +6210,25 @@ const CF={
       const hasHotOpp=oppTeam.some(o=>spFn(o.id)?._hotFlag);
       if(hasHotOpp)hotColdPen+=isCold&&isPlayingUp?70:isPlayingUp?50:40;
     });
+    // ── Anti-blowout nudge ───────────────────────────────────────────────
+    // A player in a genuine slump (cold form AND net record ≤ -3) gets a gentle preference
+    // for a WINNABLE match: a real (non-hot) partner stronger than them, and not being stacked
+    // on the much-weaker side. Soft (bounded ~±60), so it tilts selection without overriding
+    // team balance. Self-limiting: one win clears the trigger, so it can't snowball into easy
+    // matches. ELO already gives tiny gains vs weaker opponents, so rating integrity holds.
+    let blowoutNudge=0;
+    allIds4.forEach(p=>{
+      const sp=spFn(p.id);
+      if(!sp?._coldFlag||((sp.losses||0)-(sp.wins||0))<3)return;
+      const inT1=[t1[0].id,t1[1].id].includes(p.id);
+      const myTeam=inT1?t1:t2,oppTeam2=inT1?t2:t1;
+      const mate=myTeam.find(x=>x.id!==p.id);
+      const myAvg=(myTeam[0].sr+myTeam[1].sr)/2,oppAvg=(oppTeam2[0].sr+oppTeam2[1].sr)/2;
+      // Real, non-hot support — they won't be the sole carry
+      if(mate&&mate.sr>p.sr+40&&!spFn(mate.id)?._hotFlag)blowoutNudge-=25;
+      // Don't stack the deck against them (their team much weaker = blowout risk)
+      if(oppAvg-myAvg>60)blowoutNudge+=Math.min(60,(oppAvg-myAvg-60)*0.4);
+    });
     // ── Phase-aware rank-band spread penalty ──────────────────────────
     // Replaces static bandPen (ELO quartile, redundant with P1+ranks) and old rankBandPen.
     // Two-tier: hard limit blocks crazy mismatches always; soft target tightens by phase.
@@ -6265,7 +6284,7 @@ const CF={
       const _teamOver=Math.max(0,crossImb-_pc.team);
       phaseGapPen=_partnerOver*1.2+_teamOver*1.0;
     }
-    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+rankBandPen+neverPairPen+phaseGapPen,meta,t1,t2,group};
+    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+blowoutNudge+rankBandPen+neverPairPen+phaseGapPen,meta,t1,t2,group};
   },
 
   /* Generate a suggestion for a court */
@@ -9365,8 +9384,20 @@ function _trackConnection(db){
   });
 }
 
+// Firebase rejects `undefined` ANYWHERE in a write payload and throws, killing the whole
+// update (this is how a single new archive field once crashed all saves). Deep-clean every
+// payload at the one choke point: omit undefined object props, null out undefined array slots
+// (Firebase has no holes), so adding a new field can never take the app down again.
+function _fbClean(v){
+  if(v===undefined)return null;
+  if(v===null||typeof v!=='object')return v;
+  if(Array.isArray(v))return v.map(x=>x===undefined?null:_fbClean(x));
+  const o={};for(const k in v){if(Object.prototype.hasOwnProperty.call(v,k)&&v[k]!==undefined)o[k]=_fbClean(v[k]);}
+  return o;
+}
 function _pushWithRetry(updates,attempt=0,onComplete=null){
   if(!SYNC.ready||!SYNC.ref)return;
+  if(attempt===0){const c={};for(const k in updates)c[k]=_fbClean(updates[k]);updates=c;}
   SYNC.ref.update(updates)
     .then(()=>{
       _setSaveStatus('saved');
