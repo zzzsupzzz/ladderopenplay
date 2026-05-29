@@ -5922,6 +5922,12 @@ const CF={
 
   /* Score a candidate group of 4 — lower is better */
   _scoreGroup(group,mustSplitPair){
+    // Progression weight: how hard PARTNER-skill tightness is enforced, by phase.
+    // Loose early (0.35) → full late (1.0). Lowers the early floor to create a felt ladder
+    // arc (casual early → competitive late); we can't raise the late ceiling (availability-
+    // bound). Applied to the within-team gap terms only; TEAM balance (crossImb) is never
+    // scaled, so opponents stay balanced (competitive games) in every phase.
+    const _skillW=(p=>p===1?0.35:p===2?0.65:1.0)(this._sessPhaseNum());
     const[_a,_b,_c,_d]=group;
     const _splits=[{t1:[_a,_b],t2:[_c,_d]},{t1:[_a,_c],t2:[_b,_d]},{t1:[_a,_d],t2:[_b,_c]}];
     const _splitCarry=g=>g>120?Math.pow((g-120)/80,2)*40:0;
@@ -6063,7 +6069,10 @@ const CF={
     // P1: Match balance — primary, capped at 350
     const maxTeamGap=Math.max(rawT1gap,rawT2gap);
     const carryPen=maxTeamGap>120?Math.pow((maxTeamGap-120)/80,2)*40:0;
-    const p1Raw=crossImb*1.5 + (t1gap+t2gap)*1.5 + spreadPen*1.5 + carryPen;
+    // crossImb (cross-team balance) full weight every phase = competitive games always.
+    // Within-team partner gap + spread + carry scaled by _skillW = loose partners early,
+    // tight late (the felt progression). This is the DOMINANT partner-tightness term.
+    const p1Raw=crossImb*1.5 + ((t1gap+t2gap)*1.5 + spreadPen*1.5 + carryPen)*_skillW;
     const p1=Math.min(350,p1Raw);
 
     // P2: Play count fairness — strong 2nd priority but can't override P1 skill balance
@@ -6270,12 +6279,7 @@ const CF={
     //
     // Phase 3 guard: if any player has <4 games, treat that group as Phase 2
     // (ranks not calibrated enough yet to enforce tightest bands).
-    // Progression weight: how hard we enforce SKILL tightness (partner/spread), by phase.
-    // Loose early (ranks unknown — casual, varied warmup), full late (level-matched play).
-    // This LOWERS the early bar to create a felt ladder arc (P1 loose → P3 tight); we can't
-    // raise the late ceiling (availability-bound), but lowering the early floor works fine.
-    // Team balance (crossImb / _teamOver) is NOT scaled — games stay competitive every phase.
-    const _skillW=_phase===1?0.35:_phase===2?0.65:1.0;
+    // (_skillW — the phase progression weight — is defined at the top of _scoreGroup.)
     let rankBandPen=0;
     {
       const _rks=group.map(p=>_sessionRank(p.id)).filter(r=>r>0);
