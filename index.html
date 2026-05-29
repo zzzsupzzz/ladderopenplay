@@ -5782,6 +5782,27 @@ const CF={
     }
     return current-lastAt;
   },
+  // ── Phase-graduated WAIT CAP (single source of truth) ────────────────────
+  // The max matches a player should wait between games. Phase-graduated so early session
+  // plays fast (tight cap) and late session can hold out for a level-appropriate match
+  // (looser cap) — this is what lets the ladder arc tighten skill late without breaching.
+  // cap = floor(courts × mult × phaseFactor) + 1, raised to the bench feasibility floor.
+  // phaseFactor: P1 0.75 / P2 1.0 / P3 1.5. Every forcing threshold + the sim gate reads this.
+  _sessPhaseNum(){
+    const np=S.session?.activePlayers?.length||8;
+    const mc=S.session?.cfMatchCount||0;
+    return mc<np*0.6?1:mc<np*1.2?2:3;
+  },
+  waitCapForPhase(phase){
+    const nc=S.session?.courts||1;
+    const mult=S.session?.cfWaitCapMult??2;
+    const activeN=(S.session?.players||[]).filter(sp=>sp.status!=='left'&&!(S.session.cfPaused||[]).some(q=>q.id===sp.id)).length||nc*4;
+    const bench=Math.max(0,activeN-4*nc);
+    const pf=phase===1?0.75:phase===2?1:1.5;
+    return Math.max(Math.floor(nc*mult*pf)+1, Math.ceil(bench/4)+1);
+  },
+  waitCap(){return this.waitCapForPhase(this._sessPhaseNum());},
+  maxWaitCap(){return this.waitCapForPhase(3);}, // absolute ceiling (loosest phase) — used by the sim gate
 
   /* Keep waitDebt as legacy alias — used for backwards compat in display only */
   waitDebt(id){return this.matchGap(id);},
@@ -6327,7 +6348,7 @@ const CF={
     // stale guard regenerates the other court's suggestion, so no double-booking.
     const readySet=new Set(readyCourts);
     const reservedIds=new Set();
-    const _noReserveT=(S.session?.courts||1)*(S.session?.cfWaitCapMult??2); // ≈ cap-1: free a reserved player only when approaching the wait cap (less churn = better skill matches)
+    const _noReserveT=this.waitCap()-1; // free a reserved player only when approaching the (phase) wait cap
     Object.entries(S.session.cfSuggestions||{}).forEach(([c,sug])=>{
       if(sug&&!readySet.has(+c))sug.allIds.forEach(id=>{if(this.matchGap(id)<_noReserveT)reservedIds.add(id);});
     });
@@ -6343,7 +6364,7 @@ const CF={
     // Fix: when an overdue player (gap >= cap) is stranded in a thin queue, release all
     // reservations — confirmSuggestion's stale guard will regenerate the displaced courts.
     if(queue.length<4){
-      const _hwmTQ=(S.session?.courts||1)*2+1;
+      const _hwmTQ=this.waitCap();
       if(queue.some(q=>this.matchGap(q.id)>=_hwmTQ)){
         queue=S.session.cfQueue.slice(); // drop reservations — rescue the overdue player
       }
@@ -6516,8 +6537,8 @@ const CF={
         const subRaw=remaining.slice(0,Math.min(12,remaining.length));
         // Anchor: pinned > 0-game first-timer > MGL player (matchGap>=4)
         // Same logic as _generateSingleSuggestion — ensures MGL is honoured in all paths
-        const _nNeedCritT=(S.session?.courts||1)*2-1;
-        const _nNeedHmwT=(S.session?.courts||1)*2; // cmg threshold (same as _hmwT_sg)
+        const _nNeedCritT=this.waitCap()-2;
+        const _nNeedHmwT=this.waitCap()-1; // cmg threshold (same as _hmwT_sg)
         const subPriority=subRaw.filter(p=>
           (S.session.cfPinnedIds||[]).includes(p.id)||
           (gsp(p.id)?.matchesPlayed||0)===0||
@@ -6570,7 +6591,7 @@ const CF={
               }
             }
             // NUCLEAR: matchGap>=nc*2-1 OR cmg>=nc*2 → skip ALL skill filters.
-            if(!best&&(this.matchGap(subAnchor.id)>=(S.session?.courts||1)*2-1||(subAnchor.cmg??0)>=_nNeedHmwT)){
+            if(!best&&(this.matchGap(subAnchor.id)>=_nNeedCritT||(subAnchor.cmg??0)>=_nNeedHmwT)){
               let nScore=Infinity;
               for(let i=0;i<so-2;i++)for(let j=i+1;j<so-1;j++)for(let k=j+1;k<so;k++){
                 const g=[subAnchor,subOthers[i],subOthers[j],subOthers[k]];
@@ -6578,7 +6599,7 @@ const CF={
                 if(res.score<nScore){nScore=res.score;best={...res,group:g};}
               }
               // Phase 2: force-include most-overdue 'other' (matchGap>=nc*2+1)
-              const _hwmTN3=(S.session?.courts||1)*2+1;
+              const _hwmTN3=this.waitCap();
               const _fOther3=subOthers.find(o=>this.matchGap(o.id)>=_hwmTN3);
               if(_fOther3){
                 const _remO3=subOthers.filter(o=>o.id!==_fOther3.id);const _ro3=_remO3.length;
@@ -6647,7 +6668,7 @@ const CF={
     //   gap>=3 missed matches → strong boost (tier 2b, anchor position)
     //   gap>=4 missed matches → must-play (tier 2a, hard force-include)
     // Also includes cmg-based players (confirm gap >= nc*2) to catch long-game players.
-    const _hmwT_joint=(S.session?.courts||1)*2;
+    const _hmwT_joint=this.waitCap()-1;
     const tier2a=pool.filter(p=>!tier1Ids.has(p.id)&&(this.matchGap(p.id)>=4||(p.cmg??0)>=_hmwT_joint));  // must-play
     const tier2b=pool.filter(p=>!tier1Ids.has(p.id)&&!tier2a.some(t=>t.id===p.id)&&this.matchGap(p.id)>=3); // strong boost
     const tier2c=pool.filter(p=>!tier1Ids.has(p.id)&&!tier2a.some(t=>t.id===p.id)&&!tier2b.some(t=>t.id===p.id)&&this.matchGap(p.id)>=2); // mild boost
@@ -6703,7 +6724,7 @@ const CF={
       // The original condition `tier2a.length < allSelected.size` silently fails when ALL
       // queue members have gap≥4 (common in Phase 3) — tier2a.length=8, allSelected=8,
       // 8<8=false → override skips → critical player excluded for another round.
-      const _critTJoint=(S.session?.courts||1)*2-1;
+      const _critTJoint=this.waitCap()-2;
       // hasCritExcluded: matchGap OR cmg threshold — catches long-game players in tier2a
       const hasCritExcluded=unservedPrio.some(p=>this.matchGap(p.id)>=_critTJoint||(p.cmg??0)>=_hmwT_joint);
       if(hasCritExcluded||(unservedPrio.length>0&&(tier1.length+tier2a.length)<allSelected.size)){
@@ -6728,8 +6749,8 @@ const CF={
         let best=null;
         if(unserved.length>0){
           // Progressive gap priority: use effective gap = max(matchGap, cmg) for ordering.
-          const _greedyCritT=(S.session?.courts||1)*2-1;
-          const _greedyHmwT=(S.session?.courts||1)*2;
+          const _greedyCritT=this.waitCap()-2;
+          const _greedyHmwT=this.waitCap()-1;
           unserved.sort((a,b)=>{
             const ga2=Math.max(this.matchGap(a.id),a.cmg??0),gb2=Math.max(this.matchGap(b.id),b.cmg??0);
             if(ga2!==gb2)return gb2-ga2;
@@ -6758,7 +6779,7 @@ const CF={
             }
           }
           // NUCLEAR: matchGap>=nc*2-1 OR cmg>=nc*2 → skip ALL skill filters.
-          if(!best&&(this.matchGap(anchor.id)>=(S.session?.courts||1)*2-1||(anchor.cmg??0)>=_greedyHmwT)){
+          if(!best&&(this.matchGap(anchor.id)>=_greedyCritT||(anchor.cmg??0)>=_greedyHmwT)){
             let nScore=Infinity;
             for(let i=0;i<olen-2;i++)for(let j=i+1;j<olen-1;j++)for(let k=j+1;k<olen;k++){
               const g=[anchor,others[i],others[j],others[k]];
@@ -6766,7 +6787,7 @@ const CF={
               if(res.score<nScore){nScore=res.score;best={...res,group:g};}
             }
             // Phase 2: force-include most-overdue 'other' (matchGap>=nc*2+1)
-            const _hwmTN2=(S.session?.courts||1)*2+1;
+            const _hwmTN2=this.waitCap();
             const _fOther2=others.slice(0,olen).find(o=>this.matchGap(o.id)>=_hwmTN2);
             if(_fOther2){
               const _remO2=others.slice(0,olen).filter(o=>o.id!==_fOther2.id);const _ro2=_remO2.length;
@@ -6803,7 +6824,7 @@ const CF={
     // groups (_scoreGroup favours groups without the outlier), so matchGap keeps growing.
     // Fix: if matchGap >= nc*2+1 (7 for 3 courts) and player unserved, take over one court.
     {
-      const _hwmT=(S.session?.courts||1)*2+1; // 7 for 3c, 9 for 4c
+      const _hwmT=this.waitCap(); // phase-graduated
       const _nowAsgn=new Set(readyCourts.flatMap(c=>{const s=S.session.cfSuggestions[c];return s?[...(s.t1||[]),...(s.t2||[])]:[];}));
       const _odList=pool.filter(p=>this.matchGap(p.id)>=_hwmT&&!_nowAsgn.has(p.id));
       if(_odList.length>0){
@@ -6886,8 +6907,7 @@ const CF={
     // so skip the generic sweep here rather than risk a perm-pair violation.
     if((S.session.cfPermPairs||[]).length)return;
     const ncT=S.session?.courts||1;
-    const activeN=S.session.players.filter(sp=>sp.status!=='left'&&!(S.session.cfPaused||[]).some(q=>q.id===sp.id)).length;
-    const cap=Math.max(ncT*(S.session?.cfWaitCapMult??2)+1,Math.ceil(Math.max(0,activeN-4*ncT)/4)+1);
+    const cap=this.waitCap(); // phase-graduated single source of truth
     // Seating-vs-confirmation lag: this net seats a player into a SUGGESTION at submit time,
     // but the court isn't confirmed until the next round, and the remaining courts in the
     // current submit loop each increment cfMatchCount first. The recorded WAIT works out to
@@ -7161,9 +7181,7 @@ const CF={
       if((S.session.cfPaused||[]).some(q=>q.id===sp.id))return false;
       return true;
     }).length;
-    const bench=Math.max(0,activeN-4*ncTotal);
-    const fairFloor=Math.ceil(bench/4);
-    const cap=Math.max(ncTotal*(S.session?.cfWaitCapMult??2)+1,fairFloor+1);
+    const cap=this.waitCap(); // phase-graduated single source of truth
     // Effective wait counter: max(matchGap, cmg). cmg surfaces long-game players
     // whose queue-only gap is high even if matchGap looks moderate.
     const eff=p=>Math.max(this.matchGap(p.id),p.cmg??0);
@@ -7395,7 +7413,7 @@ const CF={
     // tier2ap includes cmg-based hard-max-wait players (cmg >= nc*2) alongside matchGap>=4.
     // cmg = confirm-based gap: fires earlier than matchGap for players who had long games.
     const _nc_sg=S.session?.courts||1;
-    const _hmwT_sg=_nc_sg*2; // hard-max-wait threshold (6 for 3c, 8 for 4c)
+    const _hmwT_sg=this.waitCap()-1; // hard-max-wait threshold (phase-graduated; = cap-1)
     const tier2ap=pool.filter(p=>!tier0pIds.has(p.id)&&!tier1pIds.has(p.id)&&(this.matchGap(p.id)>=4||(p.cmg??0)>=_hmwT_sg)); // must-play
     const tier2bp=pool.filter(p=>!tier0pIds.has(p.id)&&!tier1pIds.has(p.id)&&!tier2ap.some(t=>t.id===p.id)&&this.matchGap(p.id)>=3); // strong boost
     const tier2cp=pool.filter(p=>!tier0pIds.has(p.id)&&!tier1pIds.has(p.id)&&!tier2ap.some(t=>t.id===p.id)&&!tier2bp.some(t=>t.id===p.id)&&this.matchGap(p.id)>=2); // mild boost
@@ -7440,7 +7458,7 @@ const CF={
     // CRITICAL: Skip STEP 1 entirely if any player has a critical-starvation gap (>= nc*2-1)
     // OR a hard-max-wait confirm gap (cmg >= nc*2). Either signals a player who must be placed
     // via STEP 2's anchor+nuclear path to prevent unbounded WAIT.
-    const _starvTCrit=(S.session?.courts||1)*2-1; // matchGap threshold (existing)
+    const _starvTCrit=this.waitCap()-2; // matchGap nuclear threshold (phase-graduated; = cap-2)
     // _hmwT_sg already declared above via tier2ap — reuse for cmg check
     const _hasCritWaiter=orderedPool.some(p=>this.matchGap(p.id)>=_starvTCrit||(p.cmg??0)>=_hmwT_sg);
     if(priorityPool.length>=4&&!_hasCritWaiter){
@@ -7518,7 +7536,7 @@ const CF={
       // NUCLEAR fallback: matchGap>=nc*2-1 OR cmg>=nc*2 → skip ALL skill filters, guarantee placement.
       // cmg (confirm-based gap) fires sooner for long-game players: bounds actual WAIT at nc*2+1.
       // For 3 courts: matchGap nuclear at 5, cmg nuclear at 6 → WAIT ≤ 7.
-      if(!best&&(this.matchGap(anchor.id)>=(S.session?.courts||1)*2-1||(anchor.cmg??0)>=_hmwT_sg)){
+      if(!best&&(this.matchGap(anchor.id)>=_starvTCrit||(anchor.cmg??0)>=_hmwT_sg)){
         let nScore=Infinity;
         for(let i=0;i<n-2;i++)for(let j=i+1;j<n-1;j++)for(let k=j+1;k<n;k++){
           const group=[anchor,...[others[i],others[j],others[k]]];
