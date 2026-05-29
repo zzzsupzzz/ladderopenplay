@@ -3107,9 +3107,11 @@ function cfResumePlayer(id){
   // Re-enter queue with a FRESH wait clock — a voluntary pause is not queue wait, so the
   // resumed player's wait (and the wait-cap) should count from NOW, not from before the pause.
   S.session.cfQueue.push({id:entry.id,since:Date.now(),consec:entry.consec||0});
-  // Mark resumed so catch-up pressure is capped + matchGap anchors to the resume point
-  // (_joinedAtMatch), so they don't show as instantly breaching the wait cap on resume.
-  const _spResume=gsp(id);if(_spResume){_spResume.resumedFromPause=true;_spResume._joinedAtMatch=S.session.cfMatchCount||0;}
+  // Mark resumed so catch-up pressure is capped + reset ALL three wait clocks to the resume
+  // point: _joinedAtMatch (matchGap/scheduler) and sessionWaitAnchor (the standings WAIT column
+  // + MGL). Without the sessionWaitAnchor reset the UI WAIT column counts the voluntary pause
+  // and disagrees with the wait-cap gate (e.g. shows 10 when the real post-resume wait is ≤7).
+  const _spResume=gsp(id);if(_spResume){_spResume.resumedFromPause=true;_spResume._joinedAtMatch=S.session.cfMatchCount||0;_spResume.sessionWaitAnchor=(S.session.cfMatchCount||0)+1;}
   STORE.save('session');renderLive();toast(`${p.name} back in queue ✓`,'ok');
 }
 
@@ -6306,13 +6308,7 @@ const CF={
       if(queue.some(q=>this.matchGap(q.id)>=_hwmTQ)){
         queue=S.session.cfQueue.slice(); // drop reservations — rescue the overdue player
       }
-      if(queue.length<4){
-        if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG)){
-          const od=S.session.cfQueue.filter(q=>this.matchGap(q.id)>=(S.session?.courts||1)*2).map(q=>`${gsp(q.id)?.name||q.id}(g${this.matchGap(q.id)})`);
-          if(od.length)console.warn(`[HWDBG] EARLY-RETURN queue<4 (q=${queue.length}) but overdue exist: `+od.join(','));
-        }
-        readyCourts.forEach(c=>{S.session.cfSuggestions[c]=null;});return;
-      }
+      if(queue.length<4){readyCourts.forEach(c=>{S.session.cfSuggestions[c]=null;});return;}
     }
 
     // Hard play-count cap: no player should be more than 2 games ahead of the
@@ -6900,17 +6896,6 @@ const CF={
         return sp&&sp.status!=='left'&&!onCourt.has(id)&&!(S.session.cfPaused||[]).some(p=>p.id===id)&&!sugg.has(id);
       });
     };
-    if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG)){
-      const risk=_freeIds().map(id=>({n:gsp(id)?.name||id,g:this.matchGap(id)})).filter(x=>x.g>=seatAt-1).sort((a,b)=>b.g-a.g);
-      if(risk.length)console.warn(`[HWDBG] enter mc=${mc} ready=[${readyCourts}] cap=${cap} seatAt=${seatAt} freeAtRisk=`+risk.map(x=>`${x.n}(g${x.g})`).join(','));
-      const _shadow=(S.session.activePlayers||[]).filter(id=>gsp(id)?.status!=='left'&&this.matchGap(id)>=cap).map(id=>{
-        const onC=Object.entries(S.session.cfCourts||{}).find(([,ct])=>ct?.status==='playing'&&ct.match&&[...ct.match.t1,...ct.match.t2].includes(id));
-        const pausd=(S.session.cfPaused||[]).some(p=>p.id===id);
-        const inSug=Object.entries(S.session.cfSuggestions||{}).find(([,s])=>s&&[...(s.t1||[]),...(s.t2||[])].includes(id));
-        return `${gsp(id)?.name||id}(g${this.matchGap(id)} @${onC?('court'+onC[0]):pausd?'paused':inSug?('sug'+inSug[0]):'FREE'})`;
-      });
-      if(_shadow.length)console.warn(`[HWDBG] ⚠ over-cap mc=${mc}: `+_shadow.join(','));
-    }
     // At most one pass per ready court — each pass seats up to a full court of overdue players.
     for(let pass=0;pass<readyCourts.length;pass++){
       const free=_freeIds();
@@ -6920,7 +6905,7 @@ const CF={
       // Pick a target court not used yet this call: prefer an empty suggestion; else the
       // least-overdue court (lowest seated max-gap = least disruptive to displace).
       const candidates=readyCourts.filter(c=>!usedTargets.has(c));
-      if(!candidates.length){if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG))console.warn(`[HWDBG] no candidate courts left, od=`+odList.map(x=>gsp(x.id)?.name||x.id).join(','));break;}
+      if(!candidates.length)break;
       let tgtC=candidates.find(c=>!S.session.cfSuggestions[c]);
       if(!tgtC)tgtC=candidates.reduce((best,c)=>maxGapOf(c)<maxGapOf(best)?c:best,candidates[0]);
       usedTargets.add(tgtC);
@@ -6937,10 +6922,9 @@ const CF={
       const forcedIds=new Set(forced.map(p=>p.id));
       const fill=avail.filter(p=>!forcedIds.has(p.id));
       const best=this._bestGroupForcing(forced,fill,mustSplit);
-      if(!best){if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG))console.warn(`[HWDBG] _bestGroupForcing FAILED tgt=${tgtC} forced=`+forced.map(p=>gsp(p.id)?.name||p.id).join(',')+` avail=${avail.length}`);break;}
+      if(!best)break;
       best.constraintReason='hardwait';
       this._storeSuggestion(tgtC,best,finishedMatchByCourtNum?.[tgtC]);
-      if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG))console.warn(`[HWDBG] SEATED court ${tgtC} <- `+[...(best.t1||[]),...(best.t2||[])].map(p=>{const id=p&&p.id?p.id:p;return `${gsp(id)?.name||id}(g${this.matchGap(id)})`;}).join(','));
     }
   },
 
@@ -7007,12 +6991,13 @@ const CF={
     // Tightening tuned to avoid deselection clusters in a sparse queue (too tight => certain
     // hard-to-match players pile up at the must-play threshold and breach the wait cap).
     const _pp=this._presetParams();
-    // Phase C (late session) loosened by +1 rank: the old targets (4 partner / 3 team for the
-    // balanced preset) made the soft phaseGapPen defer skill outliers so aggressively they piled
-    // up near the wait cap. A rank-5 partner / rank-4 team target keeps late-session matches
-    // tight without starving hard-to-pair players. (Soft target — the hard guard is ~11 ranks.)
-    const partnerRanks=(phase==='A'?8:phase==='B'?6:_pp.cPartner+1)+slack;
-    const teamRanks=(phase==='A'?5:phase==='B'?4:_pp.cTeam+1)+slack;
+    // Phase C (late session) uses the preset targets directly (4 partner / 3 team balanced).
+    // NOTE: an earlier +1 loosening here was reverted — it made P3 matches looser (rising
+    // partner gap into late session), which is backwards from the intended ladder arc (P3 should
+    // be the TIGHTEST). The wait-cap is now held by the pause fix + hard-wait net, so the soft
+    // skill targets don't need loosening to avoid starvation. (Soft target; hard guard ~11 ranks.)
+    const partnerRanks=(phase==='A'?8:phase==='B'?6:_pp.cPartner)+slack;
+    const teamRanks=(phase==='A'?5:phase==='B'?4:_pp.cTeam)+slack;
     return {partner:Math.round(partnerRanks*srPerRank),team:Math.round(teamRanks*srPerRank),partnerRanks,teamRanks,phase};
   },
   // Loose hard outer guard (~11 ranks) — blocks only egregious carry pairings. Graduated
@@ -7590,11 +7575,6 @@ const CF={
     const notInQueue=sug.allIds.filter(id=>!S.session.cfQueue.some(q=>q.id===id));
     const stolen=sug.allIds.filter(id=>onCourtIds.has(id));
     if(stolen.length>0||notInQueue.length>0){
-      if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG)){
-        const _capDbg=(S.session?.courts||1)*(S.session?.cfWaitCapMult??2)+1;
-        const _overInSug=sug.allIds.filter(id=>this.matchGap(id)>=_capDbg-1);
-        if(_overInSug.length)console.warn(`[HWDBG] STALE-GUARD court ${courtNum} regenerating; stolen=[${stolen}] notInQueue=[${notInQueue}] — at-risk members at stake: `+_overInSug.map(id=>`${gsp(id)?.name||id}(g${this.matchGap(id)})`).join(','));
-      }
       if(this._confirmDepth>=2){
         console.warn(`[CF] confirmSuggestion recursion limit hit for court ${courtNum}`);
         renderLive();return;
@@ -7610,11 +7590,6 @@ const CF={
       }
       const fresh=S.session.cfSuggestions[courtNum];
       if(!fresh){toast(`Court ${courtNum} — refreshing, queue too small`,'warn');renderLive();return;}
-      if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG)){
-        const _capD=(S.session?.courts||1)*(S.session?.cfWaitCapMult??2)+1;
-        const _dropped=sug.allIds.filter(id=>this.matchGap(id)>=_capD-1&&!fresh.allIds.includes(id)&&S.session.cfQueue.some(q=>q.id===id));
-        if(_dropped.length)console.warn(`[HWDBG] STALE-GUARD DROPPED at-risk (still benched): `+_dropped.map(id=>`${gsp(id)?.name||id}(g${this.matchGap(id)})`).join(',')+` from court ${courtNum}`);
-      }
       this._confirmDepth++;
       try{CF.confirmSuggestion(courtNum);}finally{this._confirmDepth--;}
       return;
@@ -7641,10 +7616,6 @@ const CF={
           return;
         }
       }
-    }
-    if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG)){
-      const _hi=sug.allIds.filter(id=>this.matchGap(id)>=(S.session?.courts||1)*(S.session?.cfWaitCapMult??2)+1-1);
-      if(_hi.length)console.warn(`[HWDBG] CONFIRM court ${courtNum} START — at-risk seated: `+_hi.map(id=>`${gsp(id)?.name||id}(g${this.matchGap(id)})`).join(','));
     }
     // Track time in queue for each player + capture original since BEFORE dequeue
     const now=Date.now();
