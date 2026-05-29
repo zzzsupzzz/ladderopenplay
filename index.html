@@ -8669,9 +8669,10 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     // since "carry" is about rank distance between partners, not ELO points.
     const pgapTag=(pgap,rkGap,label)=>{
       const g=rkGap!=null?`${rkGap} rank${rkGap===1?'':'s'}`:`${pgap}pts`;
+      // Only flag genuine carry risk (🔴/🟠). The old 🟡 "noticeable" tier (150-180) fired on
+      // ordinary matches and was noise — removed so a partner-gap chip actually means something.
       return pgap>=220?`<span class="cf-chip cf-chip-warn" style="border-color:rgba(248,113,113,.5)" title="${label} gap: ${g} — carry risk, reshuffle recommended">🔴 ${label} carry ${g}</span>`
       :pgap>=180?`<span class="cf-chip cf-chip-warn" title="${label} gap: ${g} — high carry risk">🟠 ${label} ${g}</span>`
-      :pgap>=150?`<span class="cf-chip cf-chip-info" title="${label} gap: ${g} — noticeable">🟡 ${label} ${g}</span>`
       :``;
     };
 
@@ -8682,9 +8683,9 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       ?`<span class="cf-chip cf-chip-info">⏱ ${meta.maxWait}min</span>`
       :`<span class="cf-chip cf-chip-ok">⏱ ${meta.maxWait}min</span>`;
 
-    // ── Repeat matchup ───────────────────────────────────────────────────
-    const repeatTag=meta.repeatMatchup
-      ?`<span class="cf-chip cf-chip-warn" title="Same 4-player matchup played before">🔁 Repeat</span>`:``;
+    // (Removed 🔁 Repeat chip: late-session repeats are an intentional design choice — the
+    // engine deliberately decays repeat-avoidance in Phase 3 — so flagging them was misleading
+    // noise. The rare genuinely-forced rematch is still surfaced via "⚠️ Back-to-back forced".)
 
     // ── Per-player form ──────────────────────────────────────────────────
     const formTag=id=>{
@@ -8701,15 +8702,16 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     const fairnessTag=sug.allIds.some(id=>CF.matchGap(id)>=4||CF.hungerBoost(id)>80)
       ?`<span class="cf-chip cf-chip-info" title="Includes overdue player">⏳ Fairness</span>`:``;
 
-    const skillGapTag=meta.skillGapFlag
-      ?`<span class="cf-chip cf-chip-warn" style="border-color:rgba(251,147,60,.6);background:rgba(251,147,60,.1)" title="Rank gap ${meta.rankGap} is ${meta.rankRatio}% of threshold (${meta.rankThresh}). Technically valid but borderline — consider reshuffling.">⚠️ Skill gap flagged (${meta.rankRatio}%)</span>`:'';
+    // (Removed "⚠️ Skill gap flagged" chip: it fired on borderline-but-valid matches — its own
+    // tooltip said "technically valid" — so it was alarm-fatigue noise and redundant with the
+    // balance chip. Team balance is still shown via balanceTag; real carry risk via pgapTag 🔴/🟠.)
 
     const chips=[
-      qualityTag, skillGapTag, balanceTag, winProbTag, waitTag,
+      qualityTag, balanceTag, winProbTag, waitTag,
       t1CoolChip, t2CoolChip,
       pgapTag(t1pgap,hasRanks?t1pgapRk:null,'P1'), pgapTag(t2pgap,hasRanks?t2pgapRk:null,'P2'),
       sug.allIds.map(id=>formTag(id)).filter(Boolean).join(''),
-      repeatTag, fairnessTag,
+      fairnessTag,
       meta.splitOverride?`<span class="cf-chip cf-chip-warn">⚠ Win pair kept</span>`:'',
       meta.shortGameBoost?`<span class="cf-chip cf-chip-info">⚡ Short game</span>`:'',
       staleWarn?`<span class="cf-chip cf-chip-warn">🕐 ${staleMin}min old</span>`:'',
