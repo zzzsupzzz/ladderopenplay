@@ -6297,7 +6297,13 @@ const CF={
       if(queue.some(q=>this.matchGap(q.id)>=_hwmTQ)){
         queue=S.session.cfQueue.slice(); // drop reservations — rescue the overdue player
       }
-      if(queue.length<4){readyCourts.forEach(c=>{S.session.cfSuggestions[c]=null;});return;}
+      if(queue.length<4){
+        if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG)){
+          const od=S.session.cfQueue.filter(q=>this.matchGap(q.id)>=(S.session?.courts||1)*2).map(q=>`${gsp(q.id)?.name||q.id}(g${this.matchGap(q.id)})`);
+          if(od.length)console.warn(`[HWDBG] EARLY-RETURN queue<4 (q=${queue.length}) but overdue exist: `+od.join(','));
+        }
+        readyCourts.forEach(c=>{S.session.cfSuggestions[c]=null;});return;
+      }
     }
 
     // Hard play-count cap: no player should be more than 2 games ahead of the
@@ -6873,15 +6879,25 @@ const CF={
     const seated=c=>{const s=S.session.cfSuggestions[c];return s?[...(s.t1||[]),...(s.t2||[])]:[];};
     const maxGapOf=c=>{const ids=seated(c);return ids.length?Math.max(...ids.map(id=>this.matchGap(id))):-Infinity;};
     const usedTargets=new Set();
-    // Benched pool is sourced from the ACTIVE ROSTER, not cfQueue. Critical: generateSuggestion
-    // (the stale-guard regen path) temporarily strips players who sit in other courts' pending
-    // suggestions out of cfQueue before calling here — so a cfQueue-based pool would be blind to
-    // exactly the stranded outliers we must rescue. The roster view always sees them.
+    // Benched pool = UNION of cfQueue + every current suggestion member + activePlayers, minus
+    // on-court / paused / left. Critical: generateSuggestion (the stale-guard regen path) strips
+    // players sitting in other courts' suggestions out of cfQueue before calling here, so a
+    // cfQueue-only pool is blind to exactly the stranded outliers. The union always sees them.
     const qById={};(S.session.cfQueue||[]).forEach(q=>{qById[q.id]=q;});
-    const benchedIds=(S.session.activePlayers||[]).filter(id=>{
+    const _idSet=new Set([
+      ...(S.session.cfQueue||[]).map(q=>q.id),
+      ...Object.values(S.session.cfSuggestions||{}).flatMap(s=>s?[...(s.t1||[]),...(s.t2||[])]:[]),
+      ...(S.session.activePlayers||[])
+    ]);
+    const benchedIds=[..._idSet].filter(id=>{
       const sp=gsp(id);
       return sp&&sp.status!=='left'&&!onCourt.has(id)&&!(S.session.cfPaused||[]).some(p=>p.id===id);
     });
+    if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG)){
+      const risk=benchedIds.map(id=>({id,n:gsp(id)?.name||id,g:this.matchGap(id),c:(()=>{const sp=gsp(id);const lc=sp?.lastConfirmedAtMatch??sp?.lastPlayedAtMatch??0;return sp?.matchesPlayed>0?mc-lc:0;})()}))
+        .filter(x=>Math.max(x.g,x.c)>=seatAt-1).sort((a,b)=>Math.max(b.g,b.c)-Math.max(a.g,a.c));
+      if(risk.length)console.warn(`[HWDBG] enter mc=${mc} ready=[${readyCourts}] cap=${cap} seatAt=${seatAt} bench=${benchedIds.length} atRisk=`+risk.map(x=>`${x.n}(g${x.g}/c${x.c})`).join(','));
+    }
     // At most one pass per ready court — each pass seats up to a full court of overdue players.
     for(let pass=0;pass<readyCourts.length;pass++){
       const assigned=new Set(readyCourts.flatMap(seated));
@@ -6894,7 +6910,7 @@ const CF={
       // Pick a target court not used yet this call: prefer an empty suggestion; else the
       // least-overdue court (lowest seated max-gap = least disruptive to displace).
       const candidates=readyCourts.filter(c=>!usedTargets.has(c));
-      if(!candidates.length)break;
+      if(!candidates.length){if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG))console.warn(`[HWDBG] no candidate courts left, od=`+odList.map(p=>gsp(p.id)?.name||p.id+`(${eff(p)})`).join(','));break;}
       let tgtC=candidates.find(c=>!S.session.cfSuggestions[c]);
       if(!tgtC)tgtC=candidates.reduce((best,c)=>maxGapOf(c)<maxGapOf(best)?c:best,candidates[0]);
       usedTargets.add(tgtC);
@@ -6910,9 +6926,10 @@ const CF={
       const forcedIds=new Set(forced.map(p=>p.id));
       const fill=avail.filter(p=>!forcedIds.has(p.id));
       const best=this._bestGroupForcing(forced,fill,mustSplit);
-      if(!best)break;
+      if(!best){if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG))console.warn(`[HWDBG] _bestGroupForcing FAILED tgt=${tgtC} forced=`+forced.map(p=>gsp(p.id)?.name||p.id).join(',')+` fill=${fill.length}`);break;}
       best.constraintReason='hardwait';
       this._storeSuggestion(tgtC,best,finishedMatchByCourtNum?.[tgtC]);
+      if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG))console.warn(`[HWDBG] SEATED court ${tgtC} <- `+[...(best.t1||[]),...(best.t2||[])].map(id=>`${gsp(id)?.name||id}(g${this.matchGap(id)})`).join(','));
       // De-dupe: overdue players aren't reserved (matchGap >= _noReserveT), so a forced player
       // may ALSO be sitting in another court's pending suggestion. Leaving both means one court
       // confirms, the other hits confirmSuggestion's stale guard and regenerates WITHOUT them —
@@ -7573,6 +7590,11 @@ const CF={
     const notInQueue=sug.allIds.filter(id=>!S.session.cfQueue.some(q=>q.id===id));
     const stolen=sug.allIds.filter(id=>onCourtIds.has(id));
     if(stolen.length>0||notInQueue.length>0){
+      if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG)){
+        const _capDbg=(S.session?.courts||1)*(S.session?.cfWaitCapMult??2)+1;
+        const _overInSug=sug.allIds.filter(id=>this.matchGap(id)>=_capDbg-1);
+        if(_overInSug.length)console.warn(`[HWDBG] STALE-GUARD court ${courtNum} regenerating; stolen=[${stolen}] notInQueue=[${notInQueue}] — at-risk members at stake: `+_overInSug.map(id=>`${gsp(id)?.name||id}(g${this.matchGap(id)})`).join(','));
+      }
       if(this._confirmDepth>=2){
         console.warn(`[CF] confirmSuggestion recursion limit hit for court ${courtNum}`);
         renderLive();return;
@@ -7588,6 +7610,11 @@ const CF={
       }
       const fresh=S.session.cfSuggestions[courtNum];
       if(!fresh){toast(`Court ${courtNum} — refreshing, queue too small`,'warn');renderLive();return;}
+      if(S.session?.cfHWDebug||(typeof window!=='undefined'&&window.HWDBG)){
+        const _capD=(S.session?.courts||1)*(S.session?.cfWaitCapMult??2)+1;
+        const _dropped=sug.allIds.filter(id=>this.matchGap(id)>=_capD-1&&!fresh.allIds.includes(id)&&S.session.cfQueue.some(q=>q.id===id));
+        if(_dropped.length)console.warn(`[HWDBG] STALE-GUARD DROPPED at-risk (still benched): `+_dropped.map(id=>`${gsp(id)?.name||id}(g${this.matchGap(id)})`).join(',')+` from court ${courtNum}`);
+      }
       this._confirmDepth++;
       try{CF.confirmSuggestion(courtNum);}finally{this._confirmDepth--;}
       return;
