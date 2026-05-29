@@ -674,7 +674,7 @@ const SIM = (() => {
         // A gap = completed matches by other courts while this player sat in queue.
         // Flag threshold: courts*2 (e.g. 4 for 2c, 6 for 3c, 8 for 4c).
         log('--- Wait Report (completed matches waited between games) ---');
-        const longWaitThreshold = courts * 3; // approaching the P3 (loosest) cap — late waits below this are now expected/acceptable
+        const longWaitThreshold = courts * 2; // 2 full rotation cycles = clearly too long
         const waitEntries = Object.entries(_waitGaps).map(([id, gaps]) => {
           const avg = gaps.length ? (gaps.reduce((a,b)=>a+b,0)/gaps.length).toFixed(1) : '–';
           const max = gaps.length ? Math.max(...gaps) : 0;
@@ -706,21 +706,19 @@ const SIM = (() => {
         }
 
         // ── WAIT CAP gate (matchmaking-spec.md §3, §8) ─────────────────────
-        // The wait cap is now PHASE-GRADUATED in the engine (tight early, loose late so the
-        // ladder arc can tighten skill late). The hard gate here uses the LOOSEST phase (P3)
-        // cap as the absolute ceiling — no player may ever exceed it. Early-phase caps are
-        // tighter and enforced by the engine, so early waits stay well under this ceiling.
-        //   P3 cap = max(floor(nc * mult * 1.5) + 1, fair_floor + 1)   (mult = cfWaitCapMult = 2)
-        //   → 7 (2c), 10 (3c), 13 (4c)
+        // Constant cap = max(nc*mult + 1, fair_floor + 1)  (mult = cfWaitCapMult = 2)
+        //   → 5 (2c), 7 (3c), 9 (4c)
+        // (A phase-graduated cap was tried and reverted — extra late wait-budget didn't tighten
+        // matches; the ladder arc is bounded by rotation structure, not wait budget.)
         {
           const _capN = arch.players.length;
           const _capBench = Math.max(0, _capN - 4 * courts);
           const _capFloor = Math.ceil(_capBench / 4);
           const _mult = 2; // cfWaitCapMult default (Competitive); Social would be 1
-          const _p3 = Math.floor(courts * _mult * 1.5) + 1;
-          const _waitCap = Math.max(_p3, _capFloor + 1);
-          const _roomTooFull = (_capFloor + 1) > _p3;
-          log(`--- WAIT CAP gate (N=${_capN}, courts=${courts}, bench=${_capBench}, fairFloor=${_capFloor}, P3 cap=${_waitCap}${_roomTooFull ? ' — room too full for P3 target' : ''}) ---`);
+          const _base = Math.floor(courts * _mult) + 1;
+          const _waitCap = Math.max(_base, _capFloor + 1);
+          const _roomTooFull = (_capFloor + 1) > _base;
+          log(`--- WAIT CAP gate (N=${_capN}, courts=${courts}, bench=${_capBench}, fairFloor=${_capFloor}, cap=${_waitCap}${_roomTooFull ? ' — room too full for nc*mult+1 target' : ''}) ---`);
           const _capViolators = waitEntries.filter(e => e.max > _waitCap);
           if (_capViolators.length === 0) {
             log(`  ✅ WAIT CAP PASS — all players' max gap ≤ ${_waitCap}`);

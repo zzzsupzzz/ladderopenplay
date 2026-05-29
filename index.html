@@ -5798,7 +5798,13 @@ const CF={
     const mult=S.session?.cfWaitCapMult??2;
     const activeN=(S.session?.players||[]).filter(sp=>sp.status!=='left'&&!(S.session.cfPaused||[]).some(q=>q.id===sp.id)).length||nc*4;
     const bench=Math.max(0,activeN-4*nc);
-    const pf=phase===1?0.75:phase===2?1:1.5;
+    // phaseFactor is 1.0 for ALL phases — i.e. a CONSTANT cap (= nc*mult+1, the proven value).
+    // A phase-GRADUATED cap (0.75/1.0/1.5) was tried to enable the ladder arc but the sim proved
+    // it useless: extra late wait-budget never produced tighter matches (the bottleneck is
+    // rotation structure — an outlier's rank-neighbours are rarely benched together — not wait
+    // budget), so it only lengthened waits. Reverted to constant; helper kept as the single
+    // source of truth that every forcing threshold + the sim gate read from.
+    const pf=1;
     return Math.max(Math.floor(nc*mult*pf)+1, Math.ceil(bench/4)+1);
   },
   waitCap(){return this.waitCapForPhase(this._sessPhaseNum());},
