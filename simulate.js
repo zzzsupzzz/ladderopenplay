@@ -653,7 +653,7 @@ const SIM = (() => {
               sRating: sp.sRating, startRating: sp.startRating,
               wins: sp.wins, losses: sp.losses, ties: sp.ties,
               matchesPlayed: sp.matchesPlayed, ptsFor: sp.ptsFor, ptsAgainst: sp.ptsAgainst,
-              _joinedAtMatch: sp._joinedAtMatch, _resumedAtMatch: sp._resumedAtMatch
+              _joinedAtMatch: sp._joinedAtMatch ?? null, _resumedAtMatch: sp._resumedAtMatch ?? null
             };
           }),
           cfRanks: JSON.parse(JSON.stringify(S.session.cfRanks || {})),
