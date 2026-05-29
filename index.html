@@ -1710,9 +1710,15 @@ function _totalRanked(){
 // Phase 2: 60–120 min — ranks settling, moderate tolerance
 // Phase 3: 120+ min  — ranks reliable, tightest tolerance
 function _sessionPhase(){
-  if(!S.session?.sessionStart)return 1;
-  const min=(Date.now()-S.session.sessionStart)/60000;
-  return min<60?1:min<120?2:3;
+  // Progress-based (matches played ÷ roster), mirroring the scoring-engine phase. Was
+  // wall-clock (<60/<120 min) — a leftover the earlier phase fix missed — so the hard partner
+  // cap (_maxPartnerGap, the only caller) never tightened in fast sessions or the simulator.
+  // The cap's own wait-relaxation still loosens it for anyone actually waiting, so tightening
+  // the base phase here improves non-forced late matches without spiralling into more forcing.
+  if(!S.session)return 1;
+  const np=S.session.activePlayers?.length||8;
+  const mc=S.session.cfMatchCount||0;
+  return mc<np*0.6?1:mc<np*1.2?2:3;
 }
 
 // ── Partner rank-gap caps (indexed by phase → court-count bucket) ─────────────
