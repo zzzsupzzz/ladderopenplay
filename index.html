@@ -33,6 +33,7 @@
 .cf-suggest-hd{font-family:'Bebas Neue',sans-serif;font-size:1rem;color:var(--cy);letter-spacing:.5px;margin-bottom:9px}
 .cf-chip{font-size:.65rem;font-weight:700;padding:2px 7px;border-radius:10px;display:inline-flex;align-items:center;gap:3px}
 .cf-chip-ok{background:rgba(52,217,116,.12);color:var(--gr)}.cf-chip-warn{background:rgba(251,147,60,.12);color:var(--or)}.cf-chip-info{background:var(--s2);color:var(--mu)}
+.sug-player-btn:hover{background:rgba(99,179,237,.18)}
 .court-card.extended{border-color:var(--or)!important}.court-card.extended .chead{background:linear-gradient(90deg,rgba(251,147,60,.1),var(--s3))!important}
 .cf-paused-item{display:flex;align-items:center;gap:7px;padding:5px 10px;background:var(--s2);border:1px dashed var(--bd);border-radius:var(--ra);margin-bottom:4px;opacity:.7}
 </style>
@@ -8796,8 +8797,9 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       const avgRk=rkA>0&&rkB>0?`Ranks #${rkA} · #${rkB}`:`avg ${avg}`;
       const _ttip=rkA>0&&rkB>0?`Ranks #${rkA} &amp; #${rkB} · avg ELO ${avg} · tap name to replace`:`avg ELO ${avg} · tap name to replace`;
       return`<div style="background:var(--s2);border:1px solid ${_pgapBdr};border-radius:var(--ra);padding:9px;text-align:center" title="${_ttip}">
-      ${ids.map(id=>`<span onclick="_sugPickerToggle(event,'${courtNum}','${id}')" style="font-weight:600;cursor:pointer;padding:2px 5px;border-radius:6px;transition:background .12s" class="sug-player-btn" data-id="${id}" title="Tap to replace">${gn(id)}</span>${S.session?.cfRanks?_rankBadge(id):''}`).join(' <span style="color:var(--m2)"> &amp; </span> ')}
-      <div style="font-size:.65rem;color:var(--cy);margin-top:4px;font-weight:700">${avgRk}</div></div>`;
+      ${ids.map(id=>`<span onclick="_sugPickerToggle(event,'${courtNum}','${id}')" style="font-weight:600;cursor:pointer;padding:2px 5px;border-radius:6px;border-bottom:1px dashed var(--ac);transition:background .12s" class="sug-player-btn" data-id="${id}" title="Tap to swap this player">${gn(id)}</span>${S.session?.cfRanks?_rankBadge(id):''}`).join(' <span style="color:var(--m2)"> &amp; </span> ')}
+      <div style="font-size:.65rem;color:var(--cy);margin-top:4px;font-weight:700">${avgRk}</div>
+      <div style="font-size:.55rem;color:var(--m2);margin-top:2px">tap a name to swap</div></div>`;
     };
     return `<div class="cf-suggest" data-court="${courtNum}">
       <div class="cf-suggest-hd">🏓 COURT ${(S.session?.courtOffset||0)+courtNum} — READY</div>
@@ -8811,7 +8813,6 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       <div style="display:flex;gap:7px;flex-wrap:wrap">
         <button class="btn bp" style="flex:1 1 100%" onclick="cancelAutoConfirm(${courtNum});CF.confirmSuggestion(${courtNum})">✓ Confirm — Start Court ${(S.session?.courtOffset||0)+courtNum}</button>
         <button class="btn bs sm" title="Full reshuffle" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleSuggestion(${courtNum})">↺ Reshuffle</button>
-        <button class="btn bs sm" title="Swap one player from queue" onclick="cancelAutoConfirm(${courtNum});CF.openSwapPlayer(${courtNum})">⇄ Swap</button>
         <button class="btn bs sm adv-only" title="Partial reshuffle — lock some players" onclick="cancelAutoConfirm(${courtNum});CF.openPartialReshuffle(${courtNum})">🔒 Lock+Shuffle</button>
         ${sug.meta?.constraintReason&&['wait-override','outlier-wait','playtime-catch-up'].includes(sug.meta.constraintReason)?`<button class="btn bs sm adv-only" style="color:var(--cy)" title="Regenerate prioritising match quality — ignores wait/fairness pressure this once" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleQualityFirst(${courtNum})">⚖ Quality</button>`:``}
       </div></div>`;
