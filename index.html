@@ -3540,6 +3540,18 @@ function renderSessStd(){
     :`<div style="font-size:.68rem;font-weight:700;color:var(--gr);letter-spacing:.05em;margin-bottom:8px">
         <span class="pulse" style="display:inline-block;margin-right:4px"></span>LIVE STANDINGS
       </div>`;
+  // Stakes banner — makes the session feel like it PROGRESSES (warm-up → matters → final stretch).
+  // Phase is progress-based (matches played ÷ roster); shown live only.
+  let stakesHtml='';
+  if(!isFinal&&S.session?.cfMode){
+    const _ph=(typeof _sessionPhase==='function')?_sessionPhase():1;
+    const _stk=_ph===1
+      ?{c:'var(--mu)',bg:'rgba(148,163,184,.08)',bd:'rgba(148,163,184,.2)',t:'🌱 Warm-up — ranks still settling. Play freely; standings firm up as the night goes.'}
+      :_ph===2
+      ?{c:'var(--cy)',bg:'rgba(34,211,238,.08)',bd:'rgba(34,211,238,.25)',t:'📈 Heating up — wins are starting to move you up the ladder.'}
+      :{c:'var(--or)',bg:'rgba(251,147,60,.1)',bd:'rgba(251,147,60,.35)',t:'🔥 Final stretch — every game counts for your final standing. Climb while you can!'};
+    stakesHtml=`<div style="font-size:.66rem;font-weight:600;color:${_stk.c};background:${_stk.bg};border:1px solid ${_stk.bd};border-radius:8px;padding:6px 9px;margin-bottom:8px">${_stk.t}</div>`;
+  }
 
   // Build per-player matchmaking quality stats from match log
   // Uses session rank ratings (what matchmaking actually uses), NOT ELO
@@ -3695,7 +3707,7 @@ function renderSessStd(){
     return `<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.79rem">${esc(name)}${tag?`<span class="ptag">${esc(tag)}</span>`:''}${nrTag}${courtTag}${sp.status==='left'?'<span class="tleft">LEFT</span>':''}</td><td style="font-size:.73rem;color:var(--mu)">${sp.wins}W/${sp.losses}L${sp.ties?'/'+sp.ties+'T':''}</td><td><span class="dl ${d>0?'du':d<0?'dd':'dz'}">${d>=0?'+':''}${d}</span></td><td><span class="rv">${rtgCell}</span></td><td style="font-size:.71rem;color:${oppGapColor};font-weight:600" title="Avg session rank gap vs opponents">${oppGapLabel}</td><td style="font-size:.71rem;color:${pGapColor}" title="Worst rating gap with a partner">${mq.worstPGap!=null?mq.worstPGap:'—'}</td><td style="font-size:.71rem;color:var(--mu)" title="Unique partners / games played">${mq.partners||0}/${mq.g}</td><td style="font-size:.71rem;color:${waitColor};font-weight:600" title="${waitTitle}">${waitLabel}</td></tr>`;
   }).join('');
 
-  el.innerHTML=labelHtml+`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Wins / Losses / Ties">W/L</th><th title="Rating change this session">+/−</th><th title="Current session rating">RTG</th><th title="Opponent gap: avg opponent session rank minus yours. Green = well matched, red = big mismatch">OPP Δ</th><th title="Worst partner gap: biggest session rank difference with a teammate">P.GAP</th><th title="Unique partners / total games played">P/G</th><th title="Worst wait: most completed matches by others while this player sat in queue between games. Green ≤ courts, orange ≤ courts×2, red = too long">WAIT</th></tr></thead><tbody>${rows}</tbody></table>
+  el.innerHTML=labelHtml+stakesHtml+`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Wins / Losses / Ties">W/L</th><th title="Rating change this session">+/−</th><th title="Current session rating">RTG</th><th title="Opponent gap: avg opponent session rank minus yours. Green = well matched, red = big mismatch">OPP Δ</th><th title="Worst partner gap: biggest session rank difference with a teammate">P.GAP</th><th title="Unique partners / total games played">P/G</th><th title="Worst wait: most completed matches by others while this player sat in queue between games. Green ≤ courts, orange ≤ courts×2, red = too long">WAIT</th></tr></thead><tbody>${rows}</tbody></table>
   <div style="font-size:.62rem;color:var(--m2);margin-top:5px;padding:0 2px">+/− = rating change · OPP Δ = avg opponent session rank vs yours (<span style="color:var(--gr)">green</span>=close, <span style="color:var(--re)">red</span>=mismatch) · P.GAP = worst partner gap · P/G = unique partners / games · WAIT = max matches others played while you sat out between games</div>`;
 }
 // renderAllTime removed — all-time ratings visible in Setup player list
