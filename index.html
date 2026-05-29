@@ -6838,6 +6838,12 @@ const CF={
     const ncT=S.session?.courts||1;
     const activeN=S.session.players.filter(sp=>sp.status!=='left'&&!(S.session.cfPaused||[]).some(q=>q.id===sp.id)).length;
     const cap=Math.max(ncT*(S.session?.cfWaitCapMult??2)+1,Math.ceil(Math.max(0,activeN-4*ncT)/4)+1);
+    // Seating-vs-confirmation lag: this net seats a player into a SUGGESTION at submit time,
+    // but that court isn't confirmed until the next round — and the remaining courts in the
+    // current submit loop each increment cfMatchCount first. The WAIT metric counts matches
+    // submitted until confirmation, so a player seated at gap=cap can still record up to
+    // (nc-1) extra. Seat at cap-(nc-1) so the recorded gap stays within cap worst-case.
+    const seatAt=Math.max(2,cap-(ncT-1));
     const mc=S.session.cfMatchCount||0;
     const activeCounts=S.session.players.filter(sp=>sp.status!=='left').map(sp=>sp.matchesPlayed||0);
     const maxPlayed=activeCounts.length?Math.max(...activeCounts):0;
@@ -6871,9 +6877,9 @@ const CF={
         .filter(q=>!onCourt.has(q.id)&&gsp(q.id)?.status!=='left'&&!(S.session.cfPaused||[]).some(p=>p.id===q.id))
         .map(q=>stamp({id:q.id,sr:this._rankSr(q.id),waitMin:(Date.now()-q.since)/60000,qEntry:q}));
       if(benched.length<4)break;
-      // odList = over-cap players NOT already in a ready-court suggestion (genuinely stranded;
-      // anyone over-cap already suggested is about to play, so they're not at risk).
-      const odList=benched.filter(p=>!assigned.has(p.id)&&eff(p)>=cap).sort((a,b)=>eff(b)-eff(a));
+      // odList = at-risk players (eff >= seatAt) NOT already in a ready-court suggestion
+      // (anyone at risk who is already suggested is about to play, so they're safe).
+      const odList=benched.filter(p=>!assigned.has(p.id)&&eff(p)>=seatAt).sort((a,b)=>eff(b)-eff(a));
       if(!odList.length)break;
       // Pick a target court not used yet this call: prefer an empty suggestion; else the
       // least-overdue court (lowest seated max-gap = least disruptive to displace).
@@ -6888,9 +6894,9 @@ const CF={
       S.session.cfSuggestions[tgtC]=null;
       const stillAssigned=new Set(readyCourts.flatMap(seated)); // OTHER ready courts now
       const avail=benched.filter(p=>!stillAssigned.has(p.id));
-      // Force the worst waiters (over-cap, whether stranded or released from tgtC), up to a
-      // full court; fill the rest by skill. _bestGroupForcing guarantees placement.
-      const forced=avail.filter(p=>eff(p)>=cap).sort((a,b)=>eff(b)-eff(a)).slice(0,4);
+      // Force the worst waiters (eff >= seatAt, whether stranded or released from tgtC), up to
+      // a full court; fill the rest by skill. _bestGroupForcing guarantees placement.
+      const forced=avail.filter(p=>eff(p)>=seatAt).sort((a,b)=>eff(b)-eff(a)).slice(0,4);
       const forcedIds=new Set(forced.map(p=>p.id));
       const fill=avail.filter(p=>!forcedIds.has(p.id));
       const best=this._bestGroupForcing(forced,fill,mustSplit);
