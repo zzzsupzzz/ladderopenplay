@@ -200,5 +200,18 @@ if (APP._seasonLadderHtml) {
   fail++; console.error('  ❌ _seasonLadderHtml not exported');
 }
 
+// ── Tests: undo (snapshot + restore of pre-confirm suggestion state) ────────
+section('undo — _snapUndo / undoLast restore the pre-action suggestion');
+ctx.renderLive = () => {}; // silence the re-render side-effect during the test
+makeSession(20, 3);
+S.session.cfSuggestions = { 1: { t1: ['p0', 'p1'], t2: ['p2', 'p3'], allIds: ['p0', 'p1', 'p2', 'p3'] } };
+CF._snapUndo(1, 'Reshuffle');
+ok(CF._undo && CF._undo.court === 1, 'snapshot captured for court 1');
+// simulate a reshuffle replacing the whole suggestion
+S.session.cfSuggestions = { 1: { t1: ['p4', 'p5'], t2: ['p6', 'p7'], allIds: ['p4', 'p5', 'p6', 'p7'] } };
+try { CF.undoLast(); } catch (e) {/* restore happens before render side-effects */}
+eq(JSON.stringify(S.session.cfSuggestions[1].allIds), JSON.stringify(['p0', 'p1', 'p2', 'p3']), 'undo restored the pre-reshuffle four');
+eq(CF._undo, null, 'undo cleared after use');
+
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

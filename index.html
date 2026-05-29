@@ -4167,6 +4167,7 @@ function _sugPickerApply(courtNum,outId,inId){
   if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
   _sugPickerClose();
   const sug=S.session?.cfSuggestions[courtNum];if(!sug)return;
+  CF._snapUndo(courtNum,'Swap');
   // Ensure inId is in cfQueue — confirmSuggestion will dequeue them at confirm time.
   // Do NOT remove inId here; removing before confirm causes notInQueue rejection.
   const inIsQueued=S.session.cfQueue.some(q=>q.id===inId);
@@ -7673,6 +7674,7 @@ const CF={
     if(!S.session)return;
     if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
     const sug=S.session.cfSuggestions[courtNum];if(!sug)return;
+    this._undo=null; // suggestion is being consumed — pre-confirm undo snapshot is now stale
     // ── SAFETY: detect stale suggestions ──────────────────────────────
     // When courts are confirmed individually (not via confirmAll), an earlier
     // court's confirm may have dequeued players that are still listed in this
@@ -8156,6 +8158,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     if(!toReplace.length){closeModal();toast('No players to swap — uncheck at least one','warn');return;}
     if(locked.length>3){closeModal();toast('At most 3 can be locked — need at least 1 fresh player','warn');return;}
     closeModal();
+    this._snapUndo(courtNum,'Lock+Shuffle');
 
     const lockedSet=new Set(locked);
 
@@ -8206,10 +8209,34 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     toast(`Court ${offset+courtNum} reshuffled — ${toReplace.length} player(s) replaced`,'ok');
   },
 
+  // ── Undo (single-level) for pre-confirm suggestion edits ─────────────────
+  // Reshuffle / swap / manual / lock+shuffle all mutate only the pre-confirm
+  // suggestion state (cfSuggestions + queue + paused) — no court/ELO. So a full
+  // snapshot of those three is a complete, safe reversal of "oops, I retapped
+  // while 4 people were walking over". Cleared on confirm (state is then consumed).
+  _undo:null,
+  _snapUndo(courtNum,action){
+    if(!S.session)return;
+    this._undo={court:courtNum,action,ts:Date.now(),
+      cfSuggestions:JSON.parse(JSON.stringify(S.session.cfSuggestions||{})),
+      cfQueue:JSON.parse(JSON.stringify(S.session.cfQueue||[])),
+      cfPaused:JSON.parse(JSON.stringify(S.session.cfPaused||[]))};
+  },
+  undoLast(){
+    if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
+    const u=this._undo;if(!u||!S.session)return;
+    S.session.cfSuggestions=u.cfSuggestions;
+    S.session.cfQueue=u.cfQueue;
+    S.session.cfPaused=u.cfPaused;
+    this._undo=null;
+    STORE.save('session');renderLive();
+    toast('↶ Undone — '+u.action,'ok');
+  },
   reshuffleSuggestion(courtNum){
     if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
     if(!S.session)return;
     cancelAutoConfirm(courtNum);
+    this._snapUndo(courtNum,'Reshuffle');
     const prev=S.session.cfSuggestions[courtNum];
     // Track previously shown combos to avoid immediate repeats
     if(!S.session.cfShownCombos)S.session.cfShownCombos={};
@@ -8392,6 +8419,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     if(!S.session)return;
     if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
     cancelAutoConfirm(courtNum);
+    this._snapUndo(courtNum,'Quality reshuffle');
     // Snapshot and temporarily suppress starvation by setting all lastPlayedAtMatch to current
     const savedLastPlayed={};
     const mc=S.session.cfMatchCount||0;
@@ -8503,6 +8531,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
     const ids=['1','2','3','4'].map(n=>document.getElementById(`man-p${n}`)?.value).filter(Boolean);
     if(new Set(ids).size!==4){toast('Select 4 different players','err');return;}
+    this._snapUndo(courtNum,'Manual pick');
     const players=ids.map(id=>({id,sr:this._rankSr(id),waitMin:0}));
     const{t1,t2}=MM.bestPair(players);
     const gap=Math.abs((t1[0].sr+t1[1].sr)/2-(t2[0].sr+t2[1].sr)/2);
@@ -8842,6 +8871,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       <div style="display:flex;gap:7px;flex-wrap:wrap">
         <button class="btn bp" style="flex:1 1 100%" onclick="cancelAutoConfirm(${courtNum});CF.confirmSuggestion(${courtNum})">✓ Confirm — Start Court ${(S.session?.courtOffset||0)+courtNum}</button>
         <button class="btn bs sm" title="Full reshuffle" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleSuggestion(${courtNum})">↺ Reshuffle</button>
+        ${this._undo&&this._undo.court===courtNum?`<button class="btn bs sm" style="color:var(--go)" title="Undo the last change to this court (${esc(this._undo.action)})" onclick="CF.undoLast()">↶ Undo</button>`:''}
         <button class="btn bs sm adv-only" title="Partial reshuffle — lock some players" onclick="cancelAutoConfirm(${courtNum});CF.openPartialReshuffle(${courtNum})">🔒 Lock+Shuffle</button>
         ${sug.meta?.constraintReason&&['wait-override','outlier-wait','playtime-catch-up'].includes(sug.meta.constraintReason)?`<button class="btn bs sm adv-only" style="color:var(--cy)" title="Regenerate prioritising match quality — ignores wait/fairness pressure this once" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleQualityFirst(${courtNum})">⚖ Quality</button>`:``}
       </div></div>`;
