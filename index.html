@@ -5922,12 +5922,12 @@ const CF={
 
   /* Score a candidate group of 4 — lower is better */
   _scoreGroup(group,mustSplitPair){
-    // Progression weight: how hard PARTNER-skill tightness is enforced, by phase.
-    // Loose early (0.35) → full late (1.0). Lowers the early floor to create a felt ladder
-    // arc (casual early → competitive late); we can't raise the late ceiling (availability-
-    // bound). Applied to the within-team gap terms only; TEAM balance (crossImb) is never
-    // scaled, so opponents stay balanced (competitive games) in every phase.
-    const _skillW=(p=>p===1?0.35:p===2?0.65:1.0)(this._sessPhaseNum());
+    // NOTE: a phase "progression weight" (loose early → tight late) was tried here and reverted.
+    // The descending partner-gap arc is structurally impossible: early-session availability lets
+    // the engine pick ~random-or-tighter partners, while late session is CONSTRAINT-FORCED into
+    // worse-than-random partners (an outlier's rank-neighbours are rarely benched together). So
+    // P1 ≤ P3 always, regardless of weighting. We enforce tightness fully every phase (best
+    // effort) and deliver "progression" via the UI phase badge + standings stakes, not the gap.
     const[_a,_b,_c,_d]=group;
     const _splits=[{t1:[_a,_b],t2:[_c,_d]},{t1:[_a,_c],t2:[_b,_d]},{t1:[_a,_d],t2:[_b,_c]}];
     const _splitCarry=g=>g>120?Math.pow((g-120)/80,2)*40:0;
@@ -6069,10 +6069,7 @@ const CF={
     // P1: Match balance — primary, capped at 350
     const maxTeamGap=Math.max(rawT1gap,rawT2gap);
     const carryPen=maxTeamGap>120?Math.pow((maxTeamGap-120)/80,2)*40:0;
-    // crossImb (cross-team balance) full weight every phase = competitive games always.
-    // Within-team partner gap + spread + carry scaled by _skillW = loose partners early,
-    // tight late (the felt progression). This is the DOMINANT partner-tightness term.
-    const p1Raw=crossImb*1.5 + ((t1gap+t2gap)*1.5 + spreadPen*1.5 + carryPen)*_skillW;
+    const p1Raw=crossImb*1.5 + (t1gap+t2gap)*1.5 + spreadPen*1.5 + carryPen;
     const p1=Math.min(350,p1Raw);
 
     // P2: Play count fairness — strong 2nd priority but can't override P1 skill balance
@@ -6279,7 +6276,6 @@ const CF={
     //
     // Phase 3 guard: if any player has <4 games, treat that group as Phase 2
     // (ranks not calibrated enough yet to enforce tightest bands).
-    // (_skillW — the phase progression weight — is defined at the top of _scoreGroup.)
     let rankBandPen=0;
     {
       const _rks=group.map(p=>_sessionRank(p.id)).filter(r=>r>0);
@@ -6302,10 +6298,9 @@ const CF={
           const exc=_rSpread-_hardLimit;
           rankBandPen=Math.min(2000,exc*exc*30);
         }else if(_rSpread>_softTarget){
-          // Phase-soft zone — quadratic penalty, scaled DOWN early so foursomes are loose/varied
-          // in P1 and progressively tighten through P3 (the felt ladder arc). Hard limit unscaled.
+          // Phase-soft zone — moderate quadratic penalty, tighter each phase
           const exc=_rSpread-_softTarget;
-          rankBandPen=Math.min(350,exc*exc*10)*_skillW;
+          rankBandPen=Math.min(350,exc*exc*10);
         }
       }
     }
@@ -6320,9 +6315,7 @@ const CF={
       const _pc=this._phaseSkillCaps(group.map(p=>p.id));
       const _partnerOver=Math.max(0,Math.max(rawT1gap,rawT2gap)-_pc.partner);
       const _teamOver=Math.max(0,crossImb-_pc.team);
-      // Partner tightness scaled by phase (loose early → tight late = felt progression);
-      // team tightness full-weight every phase so opponents stay balanced (competitive games).
-      phaseGapPen=_partnerOver*1.2*_skillW+_teamOver*1.0;
+      phaseGapPen=_partnerOver*1.2+_teamOver*1.0;
     }
     return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+blowoutNudge+rankBandPen+neverPairPen+phaseGapPen,meta,t1,t2,group};
   },
