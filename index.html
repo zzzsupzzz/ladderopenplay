@@ -6257,7 +6257,11 @@ const CF={
       const _pc=this._phaseSkillCaps(group.map(p=>p.id));
       const _partnerOver=Math.max(0,Math.max(rawT1gap,rawT2gap)-_pc.partner);
       const _teamOver=Math.max(0,crossImb-_pc.team);
-      phaseGapPen=_partnerOver*1.2+_teamOver*1.0;
+      // Phase-weighted: this soft preference (not a filter, so it never causes extra waits) is
+      // pulled harder as the session matures, so late-session matches actually tighten toward
+      // the ladder arc instead of staying loose under wait/variety pressure. P1 1.0 → P3 2.0.
+      const _phaseW=_phase===1?1.0:_phase===2?1.4:2.0;
+      phaseGapPen=(_partnerOver*1.2+_teamOver*1.0)*_phaseW;
     }
     return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+rankBandPen+neverPairPen+phaseGapPen,meta,t1,t2,group};
   },
