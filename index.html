@@ -7408,24 +7408,8 @@ const CF={
       const key=[...group.map(p=>p.id)].sort().join(',');
       return _shownCombos.includes(key);
     };
-    // Stamp skill-band quartile (1–4) on each player once per generation.
-    // _scoreGroup reads p.band instead of recomputing cfRating() per combination.
-    // Active queue + on-court players define the band boundaries (not full session list).
-    try{
-      const _queueIds=(S.session.cfQueue||[]).map(q=>q.id);
-      const _courtIds=Object.values(S.session.cfCourts||{})
-        .filter(ct=>ct&&ct.status==='playing'&&ct.match)
-        .flatMap(ct=>[...ct.match.t1,...ct.match.t2]);
-      const _poolIdSet=new Set([..._queueIds,..._courtIds]);
-      const _poolForBands=[...pool.filter(p=>_poolIdSet.has(p.id))];
-      if(_poolForBands.length>=8){
-        const _sorted=[..._poolForBands].sort((a,b)=>b.sr-a.sr);
-        const _q=Math.floor(_sorted.length/4);
-        _sorted.forEach((p,i)=>{p.band=i<_q?1:i<_q*2?2:i<_q*3?3:4;});
-      }else{
-        pool.forEach(p=>{p.band=0;}); // not enough players to band — guardrail inactive
-      }
-    }catch(e){pool.forEach(p=>{p.band=0;});}
+    // (Removed dead p.band quartile stamping — it was computed every generation but never read;
+    // _scoreGroup uses _sessionRank for its rank-band penalty, not p.band.)
 
     // Apply same tier ordering as multi-court: first-timers → MGL-waiters → normal
     // This ensures the single-court path also respects the first-game guarantee
@@ -9026,16 +9010,21 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
             }
             break;
           }
-          if(gap2>=4){const _bandIssue=S.session?.cfRanks&&_compatibleQueuePartners(q.id).length===0;reasons.push(_bandIssue?`<span style="font-size:.59rem;color:var(--re);font-weight:700">🔴 Sat out 4+ matches — no Band ${playerBand(q.id)} match yet</span>`:`<span style="font-size:.59rem;color:var(--re);font-weight:700">🔴 Sat out 4+ matches — MUST PLAY</span>`);}
-          else if(gap2===3){const _bandIssue2=S.session?.cfRanks&&_compatibleQueuePartners(q.id).length===0;reasons.push(_bandIssue2?`<span style="font-size:.59rem;color:var(--or);font-weight:700">🟠 Sat out 3 matches — waiting for Band ${playerBand(q.id)} match</span>`:`<span style="font-size:.59rem;color:var(--or);font-weight:700">🟠 Sat out 3 matches — high priority</span>`);}
-          else if(gap2===2)reasons.push(`<span style="font-size:.59rem;color:var(--go)">🟡 Sat out 2 matches — boosted</span>`);
-          else if(gap2===1)reasons.push(`<span style="font-size:.59rem;color:var(--mu)">Sat out 1 match</span>`);
+          // Court-aware priority tiers, derived from the actual (court-scaled) wait cap so the
+          // label matches when the engine truly prioritises/force-seats. cap = 5/7/9 for 2/3/4c,
+          // so "MUST PLAY" now fires near the real force point instead of a fixed gap of 4.
+          const _capL=CF.waitCap();
+          const _stuck=S.session?.cfRanks&&_compatibleQueuePartners(q.id).length===0;
+          if(gap2>=_capL-1)reasons.push(`<span style="font-size:.59rem;color:var(--re);font-weight:700">🔴 Sat out ${gap2} — MUST PLAY${_stuck?' (no level match — widening)':' next'}</span>`);
+          else if(gap2>=_capL-2)reasons.push(`<span style="font-size:.59rem;color:var(--or);font-weight:700">🟠 Sat out ${gap2} — high priority${_stuck?' (waiting for a level match)':''}</span>`);
+          else if(gap2>=Math.max(2,_capL-3))reasons.push(`<span style="font-size:.59rem;color:var(--go)">🟡 Sat out ${gap2} — boosted</span>`);
+          else if(gap2>=1)reasons.push(`<span style="font-size:.59rem;color:var(--mu)">Sat out ${gap2} match${gap2===1?'':'es'}</span>`);
           const gamesPlayed=sp?.matchesPlayed||0;
           if(gamesPlayed===0)reasons.push(`<span style="font-size:.59rem;color:var(--pu)">✦ First game</span>`);
           return `<div class="cf-queue-item" style="flex-direction:column;align-items:stretch;gap:3px">
             <div style="display:flex;align-items:center;gap:7px">
               <div style="font-size:.72rem;color:var(--m2);min-width:18px">${idx+1}</div>
-              <div style="flex:1;font-weight:600;font-size:.82rem">${esc(p?.name||'?')}${tagHtml(p)}${S.session?.cfRanks?(bandBadge(q.id)+_rankBadge(q.id)):''}</div>
+              <div style="flex:1;font-weight:600;font-size:.82rem">${esc(p?.name||'?')}${tagHtml(p)}${S.session?.cfRanks?_rankBadge(q.id):''}</div>
               <div style="font-size:.7rem;color:var(--mu)" title="${_formTitle}">${_formLabel} ${_formVal} ${_pcVal}</div>
               <div style="font-size:.72rem;color:var(--mu)">${rDisp}</div>
               <span class="cf-wait ${wcls}" title="${waitMin>=20?'Long wait — high priority':waitMin>=12?'Moderate wait':'Recently played'}">${waitMin}m</span>
