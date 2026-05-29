@@ -6839,11 +6839,14 @@ const CF={
     const activeN=S.session.players.filter(sp=>sp.status!=='left'&&!(S.session.cfPaused||[]).some(q=>q.id===sp.id)).length;
     const cap=Math.max(ncT*(S.session?.cfWaitCapMult??2)+1,Math.ceil(Math.max(0,activeN-4*ncT)/4)+1);
     // Seating-vs-confirmation lag: this net seats a player into a SUGGESTION at submit time,
-    // but that court isn't confirmed until the next round — and the remaining courts in the
-    // current submit loop each increment cfMatchCount first. The WAIT metric counts matches
-    // submitted until confirmation, so a player seated at gap=cap can still record up to
-    // (nc-1) extra. Seat at cap-(nc-1) so the recorded gap stays within cap worst-case.
-    const seatAt=Math.max(2,cap-(ncT-1));
+    // but the court isn't confirmed until the next round, and the remaining courts in the
+    // current submit loop each increment cfMatchCount first. The recorded WAIT works out to
+    //   seatAt + trailing - 1,  trailing <= nc-1
+    // (the -1 comes from the sim's game-end anchor = cfMatchCount AFTER the prior submit).
+    // So worst-case recorded = seatAt + nc - 2; bounding that <= cap gives seatAt = cap-(nc-2).
+    // For 3 courts that's cap-1 — tight enough to avoid over-forcing (play-count drift) yet
+    // provably within the cap once stranding is fixed.
+    const seatAt=Math.max(2,cap-(ncT-2));
     const mc=S.session.cfMatchCount||0;
     const activeCounts=S.session.players.filter(sp=>sp.status!=='left').map(sp=>sp.matchesPlayed||0);
     const maxPlayed=activeCounts.length?Math.max(...activeCounts):0;
@@ -6870,12 +6873,19 @@ const CF={
     const seated=c=>{const s=S.session.cfSuggestions[c];return s?[...(s.t1||[]),...(s.t2||[])]:[];};
     const maxGapOf=c=>{const ids=seated(c);return ids.length?Math.max(...ids.map(id=>this.matchGap(id))):-Infinity;};
     const usedTargets=new Set();
+    // Benched pool is sourced from the ACTIVE ROSTER, not cfQueue. Critical: generateSuggestion
+    // (the stale-guard regen path) temporarily strips players who sit in other courts' pending
+    // suggestions out of cfQueue before calling here — so a cfQueue-based pool would be blind to
+    // exactly the stranded outliers we must rescue. The roster view always sees them.
+    const qById={};(S.session.cfQueue||[]).forEach(q=>{qById[q.id]=q;});
+    const benchedIds=(S.session.activePlayers||[]).filter(id=>{
+      const sp=gsp(id);
+      return sp&&sp.status!=='left'&&!onCourt.has(id)&&!(S.session.cfPaused||[]).some(p=>p.id===id);
+    });
     // At most one pass per ready court — each pass seats up to a full court of overdue players.
     for(let pass=0;pass<readyCourts.length;pass++){
       const assigned=new Set(readyCourts.flatMap(seated));
-      const benched=(S.session.cfQueue||[])
-        .filter(q=>!onCourt.has(q.id)&&gsp(q.id)?.status!=='left'&&!(S.session.cfPaused||[]).some(p=>p.id===q.id))
-        .map(q=>stamp({id:q.id,sr:this._rankSr(q.id),waitMin:(Date.now()-q.since)/60000,qEntry:q}));
+      const benched=benchedIds.map(id=>{const q=qById[id];return stamp({id,sr:this._rankSr(id),waitMin:q?(Date.now()-q.since)/60000:0,qEntry:q||{id,since:Date.now()}});});
       if(benched.length<4)break;
       // odList = at-risk players (eff >= seatAt) NOT already in a ready-court suggestion
       // (anyone at risk who is already suggested is about to play, so they're safe).
@@ -6900,8 +6910,20 @@ const CF={
       const forcedIds=new Set(forced.map(p=>p.id));
       const fill=avail.filter(p=>!forcedIds.has(p.id));
       const best=this._bestGroupForcing(forced,fill,mustSplit);
-      if(best){best.constraintReason='hardwait';this._storeSuggestion(tgtC,best,finishedMatchByCourtNum?.[tgtC]);}
-      else break;
+      if(!best)break;
+      best.constraintReason='hardwait';
+      this._storeSuggestion(tgtC,best,finishedMatchByCourtNum?.[tgtC]);
+      // De-dupe: overdue players aren't reserved (matchGap >= _noReserveT), so a forced player
+      // may ALSO be sitting in another court's pending suggestion. Leaving both means one court
+      // confirms, the other hits confirmSuggestion's stale guard and regenerates WITHOUT them —
+      // the exact ping-pong that produced the back-to-back STUCK breaches. Clear the duplicate
+      // suggestion(s); those courts regenerate cleanly when next ready.
+      const placedIds=new Set([...(best.t1||[]),...(best.t2||[])]);
+      Object.keys(S.session.cfSuggestions||{}).forEach(c=>{
+        if(+c===tgtC)return;
+        const s=S.session.cfSuggestions[c];
+        if(s&&[...(s.t1||[]),...(s.t2||[])].some(id=>placedIds.has(id)))S.session.cfSuggestions[c]=null;
+      });
     }
   },
 
@@ -6968,8 +6990,12 @@ const CF={
     // Tightening tuned to avoid deselection clusters in a sparse queue (too tight => certain
     // hard-to-match players pile up at the must-play threshold and breach the wait cap).
     const _pp=this._presetParams();
-    const partnerRanks=(phase==='A'?8:phase==='B'?6:_pp.cPartner)+slack;
-    const teamRanks=(phase==='A'?5:phase==='B'?4:_pp.cTeam)+slack;
+    // Phase C (late session) loosened by +1 rank: the old targets (4 partner / 3 team for the
+    // balanced preset) made the soft phaseGapPen defer skill outliers so aggressively they piled
+    // up near the wait cap. A rank-5 partner / rank-4 team target keeps late-session matches
+    // tight without starving hard-to-pair players. (Soft target — the hard guard is ~11 ranks.)
+    const partnerRanks=(phase==='A'?8:phase==='B'?6:_pp.cPartner+1)+slack;
+    const teamRanks=(phase==='A'?5:phase==='B'?4:_pp.cTeam+1)+slack;
     return {partner:Math.round(partnerRanks*srPerRank),team:Math.round(teamRanks*srPerRank),partnerRanks,teamRanks,phase};
   },
   // Loose hard outer guard (~11 ranks) — blocks only egregious carry pairings. Graduated
