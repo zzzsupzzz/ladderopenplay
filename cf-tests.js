@@ -1,0 +1,177 @@
+#!/usr/bin/env node
+/* ──────────────────────────────────────────────────────────────────────────
+   Headless unit tests for the matchmaking core (CF / ELO / ranking / wait cap).
+
+   WHY: the app is one ~10k-line index.html with no fast test loop. simulate.js
+   needs a full browser. This loads the app's inline <script> in a node `vm`
+   sandbox (DOM / Firebase / timers stubbed), then exercises the PURE-ish
+   matchmaking functions directly and asserts known invariants. Runs in
+   milliseconds, no browser, so engine changes can be checked before they ship.
+
+   Run:  node cf-tests.js
+   ────────────────────────────────────────────────────────────────────────── */
+const fs = require('fs');
+const vm = require('vm');
+const path = require('path');
+
+const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+// The app is the largest inline <script> block.
+const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
+const app = scripts.sort((a, b) => b.length - a.length)[0];
+if (!app) { console.error('Could not find app script'); process.exit(1); }
+
+// ── Stubs: anything the script touches at load time (DOM, storage, net, timers)
+const noop = () => {};
+// Chainable element/DOM proxy: every property read returns a callable no-op or
+// another proxy, so .style.x=, .classList.add(), .appendChild(), etc. never throw.
+function makeProxy() {
+  const target = function () { return makeProxy(); };
+  return new Proxy(target, {
+    get(_t, prop) {
+      if (prop === 'style' || prop === 'classList' || prop === 'dataset') return makeProxy();
+      if (prop === 'value' || prop === 'textContent' || prop === 'innerHTML') return '';
+      if (prop === 'length') return 0;
+      if (prop === Symbol.iterator) return function* () {};
+      return makeProxy();
+    },
+    set() { return true; },
+    apply() { return makeProxy(); }
+  });
+}
+const documentStub = {
+  getElementById: () => null,
+  querySelector: () => null,
+  querySelectorAll: () => [],
+  createElement: () => makeProxy(),
+  addEventListener: noop, removeEventListener: noop,
+  body: makeProxy(), head: makeProxy(), documentElement: makeProxy()
+};
+const localStorageStub = { getItem: () => null, setItem: noop, removeItem: noop, clear: noop };
+const firebaseStub = (() => {
+  const ref = () => ({ on: noop, off: noop, once: () => Promise.resolve({ val: () => null }), update: () => Promise.resolve(), set: () => Promise.resolve(), child: () => ref(), remove: () => Promise.resolve() });
+  return { initializeApp: () => ({}), database: () => ({ ref }), apps: [] };
+})();
+
+const ctx = {
+  console, Math, JSON, Date, Object, Array, Set, Map, Number, String, Boolean,
+  parseInt, parseFloat, isNaN, isFinite, RegExp, Promise, Symbol, Proxy,
+  setTimeout: () => 0, clearTimeout: noop, setInterval: () => 0, clearInterval: noop,
+  requestAnimationFrame: () => 0, cancelAnimationFrame: noop,
+  document: documentStub, localStorage: localStorageStub, sessionStorage: localStorageStub,
+  navigator: { onLine: true, userAgent: 'node' },
+  location: { href: 'http://test/', search: '', hash: '', reload: noop },
+  history: { replaceState: noop, pushState: noop },
+  performance: { now: () => Date.now() },
+  firebase: firebaseStub, QRCode: function () { return makeProxy(); },
+  alert: noop, confirm: () => true, prompt: () => null,
+};
+ctx.window = ctx; ctx.globalThis = ctx; ctx.self = ctx;
+
+// Export the const-bound objects we want to test (functions are already globals).
+const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='undefined'?SYNC:null,
+  _sessionRank:typeof _sessionRank!=='undefined'?_sessionRank:null,
+  _totalRanked:typeof _totalRanked!=='undefined'?_totalRanked:null,
+  _ranksCompatible:typeof _ranksCompatible!=='undefined'?_ranksCompatible:null,
+  _initSessionRanks:typeof _initSessionRanks!=='undefined'?_initSessionRanks:null,
+  gp:typeof gp!=='undefined'?gp:null, gsp:typeof gsp!=='undefined'?gsp:null};`;
+
+vm.createContext(ctx);
+try {
+  vm.runInContext(app + exportSnippet, ctx, { filename: 'index.app.js' });
+} catch (e) {
+  console.error('❌ App script failed to load in sandbox:\n', e && e.stack || e);
+  process.exit(1);
+}
+
+const APP = ctx.__APP;
+if (!APP || !APP.CF) { console.error('❌ Loaded, but CF not exported'); process.exit(1); }
+console.log('✅ App loaded headlessly. Exports:', Object.keys(APP).filter(k => APP[k]).join(', '));
+
+// ── tiny test framework ───────────────────────────────────────────────────
+let pass = 0, fail = 0;
+function eq(actual, expected, msg) {
+  if (actual === expected) { pass++; }
+  else { fail++; console.error(`  ❌ ${msg}\n       expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`); }
+}
+function ok(cond, msg) { if (cond) pass++; else { fail++; console.error(`  ❌ ${msg}`); } }
+function section(name) { console.log('\n── ' + name + ' ──'); }
+
+const { S, CF } = APP;
+
+// Build a minimal active CF session with N players, nc courts.
+function makeSession(n, nc, mult = 2) {
+  const players = [];
+  for (let i = 0; i < n; i++) players.push({ id: 'p' + i, name: 'P' + i, status: 'active', matchesPlayed: 0, sRating: 1200 - i * 20, startRating: 1200 - i * 20, wins: 0, losses: 0, ties: 0, lastPlayedAtMatch: null });
+  S.session = {
+    courts: nc, cfMode: true, status: 'active', cfWaitCapMult: mult,
+    players, activePlayers: players.map(p => p.id),
+    cfQueue: players.map(p => ({ id: p.id, since: Date.now(), consec: 0 })),
+    cfPaused: [], cfCourts: {}, cfSuggestions: {}, cfRanks: {},
+    cfMatchCount: 0, cfLog: [], sessionStart: Date.now(),
+    // history maps the app initialises at session start (MM.pc/oc read these directly)
+    partnerHx: {}, oppHx: {}, oppHxTime: {},
+    cfMatchupHx: {}, cfGroupHx: {}, cfPairConsec: {}, cfPermPairs: [], cfSoftPairs: []
+  };
+  // mirror into S.db so gp() resolves (ratings, names)
+  S.db = players.map(p => ({ id: p.id, name: p.name, rating: p.sRating, gamesPlayed: 0, wins: 0, losses: 0, isNR: false }));
+  return S.session;
+}
+
+// ── Tests: WAIT CAP scales with court count ─────────────────────────────────
+section('waitCap() — court scaling (constant cap = nc*mult+1)');
+makeSession(20, 2); eq(CF.waitCap(), 5, '2 courts / mult 2 → cap 5');
+makeSession(20, 3); eq(CF.waitCap(), 7, '3 courts / mult 2 → cap 7');
+makeSession(20, 4); eq(CF.waitCap(), 9, '4 courts / mult 2 → cap 9');
+makeSession(20, 3, 1); eq(CF.waitCap(), 4, '3 courts / mult 1 (social) → cap 4');
+// phase-independent now (graduation was reverted): all phases equal
+makeSession(20, 3); S.session.cfMatchCount = 40;
+eq(CF.waitCap(), 7, 'cap is constant across phases (no graduation)');
+
+// ── Tests: bench floor raises cap when room is too full ─────────────────────
+section('waitCap() — bench floor for a crowded room');
+makeSession(40, 3); // bench = 40-12 = 28, ceil(28/4)+1 = 8 > 7
+eq(CF.waitCap(), 8, 'crowded room raises cap to fairFloor+1');
+
+// ── Tests: _sessionPhase is games-based ─────────────────────────────────────
+section('_sessPhaseNum() — progress-based phase boundaries (np*0.6, np*1.2)');
+makeSession(20, 3); // np=20 → P1<12, P2<24, P3>=24
+S.session.cfMatchCount = 0;  eq(CF._sessPhaseNum(), 1, 'mc 0 → phase 1');
+S.session.cfMatchCount = 11; eq(CF._sessPhaseNum(), 1, 'mc 11 → phase 1');
+S.session.cfMatchCount = 12; eq(CF._sessPhaseNum(), 2, 'mc 12 → phase 2');
+S.session.cfMatchCount = 23; eq(CF._sessPhaseNum(), 2, 'mc 23 → phase 2');
+S.session.cfMatchCount = 24; eq(CF._sessPhaseNum(), 3, 'mc 24 → phase 3');
+
+// ── Tests: matchGap basics ──────────────────────────────────────────────────
+section('matchGap() — gap counting + resume anchor');
+makeSession(20, 3);
+S.session.cfMatchCount = 10;
+const a = S.session.players[0];
+a.matchesPlayed = 2; a.lastPlayedAtMatch = 6;
+eq(CF.matchGap(a.id), 4, 'gap = cfMatchCount(10) - lastPlayed(6) = 4');
+// resumed-from-pause anchors to the resume point, not the pre-pause game
+a.resumedFromPause = true; a._resumedAtMatch = 9;
+eq(CF.matchGap(a.id), 1, 'resumed: gap = mc(10) - max(lastPlayed 6, resume 9) = 1');
+delete a.resumedFromPause; delete a._resumedAtMatch;
+
+// ── Tests: _scoreGroup skill balance ────────────────────────────────────────
+section('_scoreGroup() — skill-balance scoring sanity');
+makeSession(20, 3);
+if (APP._initSessionRanks) APP._initSessionRanks();
+const mk = ids => ids.map(i => {
+  const sp = S.session.players[i];
+  return { id: sp.id, sr: sp.sRating, mg: 0, pcg: 0, cmg: 0, waitMin: 0, _minGames: 0 };
+});
+try {
+  const tight = CF._scoreGroup(mk([0, 1, 2, 3]), null);   // four near-equal players
+  const wide = CF._scoreGroup(mk([0, 1, 18, 19]), null);  // top-2 + bottom-2
+  ok(tight && wide, 'scoreGroup returns a result for both foursomes');
+  ok(tight.score < wide.score, 'tight-rank foursome scores better (lower) than a wide one');
+  // best split of [top,top,bottom,bottom] should pair strong+weak to balance teams
+  const ids = wide.t1.map(p => p.id).concat(wide.t2.map(p => p.id));
+  ok(ids.length === 4, 'scoreGroup produces a 4-player split (2v2)');
+} catch (e) {
+  fail++; console.error('  ❌ _scoreGroup threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
+console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
+process.exit(fail === 0 ? 0 : 1);

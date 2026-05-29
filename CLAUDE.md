@@ -100,6 +100,10 @@ The simulator supports live sync mode and speed controls. After a sim run, the s
 
 The simulator cannot be run by Claude directly — it requires a browser with the full app loaded. The user must run it and report results.
 
+### Headless unit tests (`cf-tests.js`) — Claude CAN run these
+
+`node cf-tests.js` loads the app's inline `<script>` in a sandboxed `vm` (DOM/Firebase/timers stubbed) and asserts matchmaking invariants directly — **no browser needed**, runs in milliseconds. Covers `waitCap()` court-scaling, games-based phase boundaries, `matchGap()` (incl. resume anchor), and `_scoreGroup()` skill balance. **Run this after any matchmaking-engine change** for a fast first check before asking the user to run the full browser `SIM`. Add a new assertion whenever you touch engine behavior. Pure-logic only — it does not exercise rendering, sync, or the confirm/score-submit flow (those still need the browser sim).
+
 ### Matchmaking quality columns (Standings tab)
 - **OPP Δ** — avg opponent rating vs yours (green = well matched)
 - **P.GAP** — worst partner rating gap (lower = better)
