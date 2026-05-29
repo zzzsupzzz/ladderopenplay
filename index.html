@@ -9966,7 +9966,51 @@ function renderPlayerView(){
   }
 
   const arcHtml=sp?_pvPhaseArc(id):'';
-  el.innerHTML=statusHtml+sessHtml+arcHtml+matchHtml;
+
+  // ── End-of-night recap ("Your Night") ──────────────────────────────────
+  // The payoff card for a COMPLETED session: the night framed as a climb.
+  // Shows for a selected past session, or the just-ended one (no active session).
+  // Not shown mid-session (the live hero already shows the running climb).
+  let recapHtml='';
+  {
+    const _recapSess=(sessFilter&&sessFilter!=='__current__')
+      ? S.archive.find(s=>s.id===sessFilter)
+      : (!S.session&&S.archive.length?S.archive[0]:null);
+    const _ap=_recapSess?.players?.find(x=>x.id===id);
+    if(_recapSess&&_ap&&!_ap.isNR){
+      const _cr=_recapSess.cfRanks?.[id];
+      const _start=_cr?.initRank, _finish=_cr?.rank;
+      const _climb=(_start!=null&&_finish!=null)?_start-_finish:null;
+      const _rd=(_ap.sRating!=null&&_ap.startRating!=null)?Math.round(_ap.sRating-_ap.startRating):null;
+      // Best win streak from the session match log (in play order)
+      let _strk=0,_best=0;
+      (_recapSess.cfLog||[]).forEach(m=>{
+        if(!m.t1?.includes(id)&&!m.t2?.includes(id))return;
+        const inT1=m.t1.includes(id), won=inT1?m.s1>m.s2:m.s2>m.s1, tie=m.s1===m.s2;
+        if(won){_strk++;if(_strk>_best)_best=_strk;}else if(!tie){_strk=0;}
+      });
+      const _headline=_climb==null
+        ? `<div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--go)">Finished${_finish?` #${_finish}`:''}</div>`
+        : _climb>0
+        ? `<div style="font-family:'Bebas Neue',sans-serif;font-size:1.7rem;color:var(--gr)">▲ Climbed ${_climb} spot${_climb===1?'':'s'}</div><div style="font-size:.74rem;color:var(--mu)">#${_start} → #${_finish} on the ladder</div>`
+        : _climb<0
+        ? `<div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--or)">Held on at #${_finish}</div><div style="font-size:.74rem;color:var(--mu)">started #${_start} — get 'em next time</div>`
+        : `<div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--go)">Held #${_finish} all night</div>`;
+      const _stat=(v,lbl,col)=>`<div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:${col||'var(--tx)'}">${v}</div><div style="font-size:.6rem;color:var(--mu)">${lbl}</div></div>`;
+      recapHtml=`<div class="pv-hero" style="border:1px solid rgba(251,191,36,.35);background:rgba(251,191,36,.06);margin-bottom:11px">
+        <div style="font-size:.66rem;font-weight:700;color:var(--go);letter-spacing:.08em;margin-bottom:6px">🏁 YOUR NIGHT — ${esc(_recapSess.name||'Session')}</div>
+        ${_headline}
+        <div style="display:flex;gap:12px;justify-content:center;margin-top:10px;flex-wrap:wrap">
+          ${_stat(`${_ap.wins||0}-${_ap.losses||0}`,'W–L')}
+          ${_rd!=null?_stat(`${_rd>=0?'+':''}${_rd}`,'RATING',_rd>=0?'var(--gr)':'var(--re)'):''}
+          ${_best>=2?_stat(`${_best}🔥`,'BEST STREAK',_best>=3?'var(--or)':'var(--tx)'):''}
+          ${_stat(_ap.matchesPlayed||0,'GAMES')}
+        </div>
+      </div>`;
+    }
+  }
+
+  el.innerHTML=statusHtml+recapHtml+sessHtml+arcHtml+matchHtml;
 
   // Show "Last updated N min ago" in player mode so users know if data is fresh
   if(PLAYER_MODE&&S._lastSaveTs){
