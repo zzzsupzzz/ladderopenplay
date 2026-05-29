@@ -9873,8 +9873,16 @@ function renderPlayerView(){
     const nrTag=sp.isNR?`<span class="nr-badge">NR</span>`:sp.isSeeding?`<span class="nr-seed">~${Math.round(sp.sRating)}</span>`:'';
     // Live session ranking (excludes paused/left). Only meaningful once rated.
     const _rk=_sessionRank(id), _tot=_totalRanked();
+    // Tonight's climb — the felt "ladder progression". climb = seed rank − current rank
+    // (positive = moved up). Uses initRank already tracked per player in cfRanks.
+    const _initR=S.session?.cfRanks?.[id]?.initRank;
+    const _climb=(_initR!=null&&_rk)?(_initR-_rk):0;
+    const _climbHtml=!_rk||sp.isNR?''
+      :_climb>0?`<div style="font-size:.82rem;font-weight:700;color:var(--gr);margin:-2px 0 4px">▲ Climbed ${_climb} spot${_climb===1?'':'s'} tonight <span style="color:var(--mu);font-weight:400">(from #${_initR})</span></div>`
+      :_climb<0?`<div style="font-size:.82rem;font-weight:700;color:var(--or);margin:-2px 0 4px">▼ Down ${-_climb} <span style="color:var(--mu);font-weight:400">(from #${_initR}) — climb back up!</span></div>`
+      :`<div style="font-size:.78rem;color:var(--mu);margin:-2px 0 4px">Holding #${_rk} — win to climb ↑</div>`;
     const rankHtml=(_rk&&_tot&&!sp.isNR)
-      ?`<div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--go);margin:2px 0 4px">RANK #${_rk} <span style="font-size:.8rem;color:var(--mu)">of ${_tot}</span></div>`
+      ?`<div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--go);margin:2px 0 0">RANK #${_rk} <span style="font-size:.8rem;color:var(--mu)">of ${_tot}</span></div>${_climbHtml}`
       :'';
     sessHtml=`<div class="pv-hero">
       <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;color:var(--tx)">${esc(p.name)}${p.tag?`<span class="ptag">${esc(p.tag)}</span>`:''}</div>
