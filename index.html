@@ -6059,10 +6059,15 @@ const CF={
     });
     const p2=Math.max(-250,Math.min(250,playFairness));
 
-    // Session phase: 1=first hour, 2=second hour, 3=third hour (time-based, not match-count)
-    // Phase 3 tightens rank bands and reduces repeat avoidance — quality over variety late in session.
-    const _elapsedMin=S.session?.sessionStart?(Date.now()-S.session.sessionStart)/60000:0;
-    const _phase=_elapsedMin<60?1:_elapsedMin<120?2:3;
+    // Session phase: PROGRESS-based (matches played relative to roster), NOT wall-clock.
+    // Was time-based (<60/<120 min) which (a) never advanced in the simulator (a full run is
+    // ~15s) and (b) failed fast real sessions — so the Phase-3 tightening below (rank bands +
+    // repeat-avoidance decay) never fired and late-session matches stayed loose. Tuned so the
+    // boundaries match the old wall-clock intent at normal pace (~12 matches/hr for 20p/3c):
+    // phase 2 ≈ 1h, phase 3 ≈ 2h. Now activates whenever enough games accrue, sim included.
+    const _npPhase=S.session?.activePlayers?.length||8;
+    const _mcPhase=S.session?.cfMatchCount||0;
+    const _phase=_mcPhase<_npPhase*0.6?1:_mcPhase<_npPhase*1.2?2:3;
 
     // P3: Avoid repeats — decay weight by phase so skill balance dominates in later hours.
     // Phase 1: 100% (fresh session, encourage variety)
