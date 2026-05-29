@@ -652,7 +652,8 @@ const SIM = (() => {
               id: sp.id, name: sp.name || p.name || '?', tag: sp.tag || p.tag || '',
               sRating: sp.sRating, startRating: sp.startRating,
               wins: sp.wins, losses: sp.losses, ties: sp.ties,
-              matchesPlayed: sp.matchesPlayed, ptsFor: sp.ptsFor, ptsAgainst: sp.ptsAgainst
+              matchesPlayed: sp.matchesPlayed, ptsFor: sp.ptsFor, ptsAgainst: sp.ptsAgainst,
+              _joinedAtMatch: sp._joinedAtMatch, _resumedAtMatch: sp._resumedAtMatch
             };
           }),
           cfRanks: JSON.parse(JSON.stringify(S.session.cfRanks || {})),

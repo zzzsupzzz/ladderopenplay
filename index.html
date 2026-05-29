@@ -3107,11 +3107,12 @@ function cfResumePlayer(id){
   // Re-enter queue with a FRESH wait clock — a voluntary pause is not queue wait, so the
   // resumed player's wait (and the wait-cap) should count from NOW, not from before the pause.
   S.session.cfQueue.push({id:entry.id,since:Date.now(),consec:entry.consec||0});
-  // Mark resumed so catch-up pressure is capped + reset ALL three wait clocks to the resume
-  // point: _joinedAtMatch (matchGap/scheduler) and sessionWaitAnchor (the standings WAIT column
-  // + MGL). Without the sessionWaitAnchor reset the UI WAIT column counts the voluntary pause
-  // and disagrees with the wait-cap gate (e.g. shows 10 when the real post-resume wait is ≤7).
-  const _spResume=gsp(id);if(_spResume){_spResume.resumedFromPause=true;_spResume._joinedAtMatch=S.session.cfMatchCount||0;_spResume.sessionWaitAnchor=(S.session.cfMatchCount||0)+1;}
+  // Mark resumed so catch-up pressure is capped + reset the wait clocks to the resume point.
+  // _resumedAtMatch is a DEDICATED resume anchor (kept separate from _joinedAtMatch, which is the
+  // late-arrival join anchor and drives the post-hoc "count first gap" logic — overloading it
+  // corrupts a session-start player's gap reconstruction). sessionWaitAnchor resets the live
+  // standings WAIT clock. A voluntary pause is not queue wait, so all of these start from NOW.
+  const _spResume=gsp(id);if(_spResume){_spResume.resumedFromPause=true;_spResume._resumedAtMatch=S.session.cfMatchCount||0;_spResume.sessionWaitAnchor=(S.session.cfMatchCount||0)+1;}
   STORE.save('session');renderLive();toast(`${p.name} back in queue ✓`,'ok');
 }
 
@@ -3579,6 +3580,7 @@ function renderSessStd(){
       const cmcOf=m=>m.confirmMc!=null?m.confirmMc:(m.matchIdx!=null?m.matchIdx:allMatches.findIndex(x=>x.id===m.id));
       const sorted=[...myMatches].sort((a,b)=>cmcOf(a)-cmcOf(b));
       const joinMc=sp._joinedAtMatch??0;
+      const resumeMc=sp._resumedAtMatch??0; // dedicated pause/resume anchor (0 = never paused)
       let anchor=joinMc,maxW=0,sumW=0,gapCount=0;
       // firstDone: true = count this gap. For late joiners (joinMc>0) count first gap (simulate.js
       // initialises _lastGameEndMc at join). For session-start players (joinMc=0) skip first gap
@@ -3588,10 +3590,10 @@ function renderSessStd(){
         const cmc=cmcOf(gm);if(cmc<0)continue;
         if(firstDone){
           // Resume-aware: if this gap SPANS a pause/resume (anchor is before the resume point
-          // _joinedAtMatch, and this game starts after it), measure only from the resume — a
+          // _resumedAtMatch, and this game starts after it), measure only from the resume — a
           // voluntary pause is not queue wait. Pre-pause and post-resume gaps use the normal
           // anchor. This mirrors the sim gate, which resets its clock at resume (cfResumePlayer).
-          const effAnchor=(joinMc>anchor&&cmc>=joinMc)?joinMc:anchor;
+          const effAnchor=(resumeMc>anchor&&cmc>=resumeMc)?resumeMc:anchor;
           const gap=cmc-effAnchor;if(gap>maxW)maxW=gap;sumW+=gap;gapCount++;
         }
         firstDone=true;
@@ -4779,7 +4781,7 @@ function doEndSession(){
   }
   showCfm(`End <strong>${esc(S.session.name)}</strong>?<br/><span style="font-size:.74rem;color:var(--mu)">Ratings saved to database.</span>`,'🏁 End Session','bp',()=>{
     const arch={id:S.session.id,name:S.session.name,date:S.session.date,cfMode:true,
-      players:S.session.players.map(sp=>{const p=gp(sp.id)||{};return{id:sp.id,name:sp.name||p.name||'?',tag:sp.tag||p.tag||'',sRating:sp.sRating,startRating:sp.startRating,wins:sp.wins,losses:sp.losses,ties:sp.ties,matchesPlayed:sp.matchesPlayed,ptsFor:sp.ptsFor,ptsAgainst:sp.ptsAgainst};}),
+      players:S.session.players.map(sp=>{const p=gp(sp.id)||{};return{id:sp.id,name:sp.name||p.name||'?',tag:sp.tag||p.tag||'',sRating:sp.sRating,startRating:sp.startRating,wins:sp.wins,losses:sp.losses,ties:sp.ties,matchesPlayed:sp.matchesPlayed,ptsFor:sp.ptsFor,ptsAgainst:sp.ptsAgainst,_joinedAtMatch:sp._joinedAtMatch,_resumedAtMatch:sp._resumedAtMatch};}),
       cfRanks:JSON.parse(JSON.stringify(S.session.cfRanks||{})),
       cfLog:JSON.parse(JSON.stringify(S.session.cfLog||[]))};
     S.archive.unshift(arch);
@@ -5758,8 +5760,8 @@ const CF={
       // for their first game. Returning a flat 0 made them invisible to starvation
       // logic, so a late joiner could wait indefinitely for their first game.
       if(S.session?.cfRanks?.[id]?.isLateArrival||sp.resumedFromPause){
-        const joinMc=sp._joinedAtMatch??current;
-        return Math.max(0,current-joinMc);
+        const anchorMc=sp.resumedFromPause?(sp._resumedAtMatch??current):(sp._joinedAtMatch??current);
+        return Math.max(0,current-anchorMc);
       }
       // Present from session start — been waiting since game 0
       return current+1;
@@ -5768,9 +5770,9 @@ const CF={
     // Resumed-from-pause players (WITH games): a voluntary pause is NOT queue wait. Anchor to
     // the resume point so matchGap reflects only the post-resume wait — otherwise the entire
     // pause counts and the player shows as breaching the wait cap the instant they resume.
-    // Self-correcting: once they play post-resume, lastPlayedAtMatch >= _joinedAtMatch.
-    if(sp.resumedFromPause&&sp._joinedAtMatch!=null){
-      return Math.max(0,current-Math.max(lastAt,sp._joinedAtMatch));
+    // Self-correcting: once they play post-resume, lastPlayedAtMatch >= _resumedAtMatch.
+    if(sp.resumedFromPause&&sp._resumedAtMatch!=null){
+      return Math.max(0,current-Math.max(lastAt,sp._resumedAtMatch));
     }
     return current-lastAt;
   },
