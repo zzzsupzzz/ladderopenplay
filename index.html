@@ -546,7 +546,6 @@ body.observer-mode .qs-row{display:none!important}
     <div class="card">
       <div class="ct">⏳ Queue <span id="cf-queue-badge" style="font-size:.66rem;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(34,211,238,.1);color:var(--cy)">0</span>
         <button onclick="openQueueRulesModal()" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;align-items:center;gap:1px" title="How the queue works"><span style="font-size:.75rem">ℹ️</span><span>Rules</span></button>
-        <button onclick="openLockPairModal()" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;align-items:center;gap:1px" title="Partner settings — permanent, locked, or soft preference"><span style="font-size:.75rem">⛓️</span><span>Pair</span></button>
         <button onclick="changeCourtsMidSession()" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;align-items:center;gap:1px" title="Change court count or court start number"><span style="font-size:.75rem">⚙</span><span>Courts</span></button>
         <button onclick="AUDIT.open()" class="adv-only" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--mu);padding:2px 5px;font-family:'DM Sans',sans-serif;flex-direction:column;align-items:center;gap:1px" title="Audit log — organiser actions this session"><span style="font-size:.75rem">📋</span><span>Log</span></button>
       </div>
@@ -2679,7 +2678,7 @@ function renderRosterModal(){
       <div class="pnc" style="min-width:100px"><div class="pn">${p?.name||'?'}${tagHtml(p)}${left?'<span class="tleft">LEFT</span>':''}${late?'<span class="tlate">LATE</span>':''}${isLeavingSoon?'<span style="font-size:.58rem;font-weight:700;color:var(--or);margin-left:4px">🚶 LEAVING</span>':''}${ovrTag}</div></div>
       <div style="display:flex;gap:4px;flex-wrap:wrap">
         ${!left?`<button class="btn bg2 sm" style="font-size:.65rem" onclick="openOvrModal('${id}')">⚡ RTG</button>`:''}
-        ${!left&&S.session?.cfRanks?`<button class="btn bg2 sm" style="font-size:.65rem" onclick="openRankOverride('${id}')" title="Manually adjust session rank">🏅 #${_sessionRank(id)||'?'}</button>`:''}
+        ${!left&&S.session?.cfRanks?`<span style="font-size:.65rem;color:var(--mu);padding:3px 7px;border:1px solid var(--bd);border-radius:6px;display:inline-flex;align-items:center" title="Session rank">🏅 #${_sessionRank(id)||'?'}</span>`:''}
         ${!left?`<button class="btn bg2 sm" style="font-size:.65rem" onclick="openNeverPairModal('${id}')">🚫 Pair</button>`:''}
         ${!left&&S.session.cfMode&&S.session.status==='active'?`<button class="btn bg2 sm" style="font-size:.65rem" onclick="${isPaused?`cfResumePlayer('${id}')`:`cfPausePlayer('${id}')`}">${isPaused?'▶':'⏸'}</button>`:''}
         ${!left&&S.session.cfMode?`<button class="btn bg2 sm" style="font-size:.65rem;color:${isLeavingSoon?'var(--re)':'var(--or)'}" onclick="cfLeaveSoon('${id}')" title="${isLeavingSoon?'Cancel leaving soon':'Priority final game, then auto-leave'}">${isLeavingSoon?'🚶 Cancel':'🚶 Leave'}</button>`:''}
@@ -9025,17 +9024,11 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
         ?`<div style="display:flex;flex-wrap:wrap;gap:4px;padding:2px 0 6px">`
           +pins.map(id=>`<span style="font-size:.62rem;background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.3);border-radius:20px;padding:2px 8px;color:var(--pu);cursor:pointer" onclick="cfUnpinPlayer('${id}')" title="Tap to unpin">📌 ${esc(gp(id)?.name?.split(' ')[0]||'?')} ✕</span>`).join('')+'</div>'
         :'';}
-    // Locked pairs + permanent pairs display
+    // (Lock-pair / soft-pair UI removed — partner-locking is no longer organiser-facing.
+    // The pair-chip display is cleared; the engine's perm-pair guards stay but lie dormant
+    // because the arrays can no longer be populated. Old sessions just show nothing here.)
     const lpEl=document.getElementById('cf-locked-pairs-display');
-    if(lpEl){
-      const lp=S.session.cfLockedPairs||[];
-      const pp=S.session.cfPermPairs||[];
-      const chips=[
-        ...lp.map(([a,b])=>`<span style="font-size:.62rem;background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.3);border-radius:20px;padding:2px 8px;color:var(--cy);cursor:pointer" onclick="openLockPairModal()" title="Hard lock — same team when grouped together">🔒 ${esc(gp(a)?.name?.split(' ')[0]||'?')} & ${esc(gp(b)?.name?.split(' ')[0]||'?')}</span>`),
-        ...pp.map(([a,b])=>`<span style="font-size:.62rem;background:rgba(167,139,250,.1);border:1px solid rgba(167,139,250,.3);border-radius:20px;padding:2px 8px;color:var(--pu);cursor:pointer" onclick="openLockPairModal()" title="Permanent partners — always play together on same team">⛓️ ${esc(gp(a)?.name?.split(' ')[0]||'?')} & ${esc(gp(b)?.name?.split(' ')[0]||'?')}</span>`)
-      ];
-      lpEl.innerHTML=chips.length?`<div style="display:flex;flex-wrap:wrap;gap:4px;padding:2px 0 6px">${chips.join('')}</div>`:'';
-    }
+    if(lpEl)lpEl.innerHTML='';
     const el=document.getElementById('cf-queue-list');
     if(el){
       if(!queue.length){el.innerHTML=`<div class="empty" style="padding:10px">All players on court 🏓</div>`;}
