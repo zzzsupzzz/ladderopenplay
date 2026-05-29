@@ -3586,7 +3586,14 @@ function renderSessStd(){
       let firstDone=joinMc>0;
       for(const gm of sorted){
         const cmc=cmcOf(gm);if(cmc<0)continue;
-        if(firstDone){const gap=cmc-anchor;if(gap>maxW)maxW=gap;sumW+=gap;gapCount++;}
+        if(firstDone){
+          // Resume-aware: if this gap SPANS a pause/resume (anchor is before the resume point
+          // _joinedAtMatch, and this game starts after it), measure only from the resume — a
+          // voluntary pause is not queue wait. Pre-pause and post-resume gaps use the normal
+          // anchor. This mirrors the sim gate, which resets its clock at resume (cfResumePlayer).
+          const effAnchor=(joinMc>anchor&&cmc>=joinMc)?joinMc:anchor;
+          const gap=cmc-effAnchor;if(gap>maxW)maxW=gap;sumW+=gap;gapCount++;
+        }
         firstDone=true;
         // Queue-time-only anchor: matchIdx+1 = cfMatchCount after this game's submit (game-end time).
         // Falls back to confirmMc+1 for legacy entries without matchIdx.
