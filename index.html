@@ -3525,6 +3525,9 @@ function _tierOf(rank,total){
   if(pct<=0.60)return {key:2,label:'Silver',emoji:'🥈',color:'#cbd5e1'};
   return {key:1,label:'Bronze',emoji:'🥉',color:'#d8a373'};
 }
+// Translate an abstract rating gap into "≈ N wins" — players grok wins, not ELO points.
+// ~15 ≈ a typical win's rating swing in this engine. Floored at 1 so "you're close" still reads.
+function _winsToCatch(gapPts){return Math.max(1,Math.round((gapPts||0)/15));}
 // End-of-night superlatives for a (usually just-ended) session — the communal payoff.
 function _awardsHtml(sess){
   if(!sess||!sess.players||sess.players.length<3)return '';
@@ -3996,7 +3999,7 @@ function _seasonLadderHtml(){
     let catchLine='';
     if(i===0){catchLine=`<div style="font-size:.58rem;color:var(--go);font-weight:400;margin-top:1px">👑 Top of the ladder</div>`;}
     else{const _gap=Math.round((ranked[i-1].rating||0)-(p.rating||0));
-      if(_gap>0)catchLine=`<div style="font-size:.58rem;color:var(--mu);font-weight:400;margin-top:1px">+${_gap} to catch ${esc(ranked[i-1].name)}</div>`;}
+      if(_gap>0){const _w=_winsToCatch(_gap);catchLine=`<div style="font-size:.58rem;color:var(--mu);font-weight:400;margin-top:1px" title="+${_gap} rating">${_gap<=6?'neck-and-neck — beat them to pass':`≈${_w} win${_w===1?'':'s'} to catch ${esc(ranked[i-1].name)}`}</div>`;}}
     return `<tr class="r${r}"><td><span class="rnk">${r}</span></td>`+
       `<td style="font-weight:600;font-size:.79rem">${tierBadge}${esc(p.name)}${p.tag?`<span class="ptag">${esc(p.tag)}</span>`:''}${catchLine}</td>`+
       `<td style="font-size:.72rem">${mvCell(p.id)}</td>`+
@@ -9965,7 +9968,7 @@ function _pvLegendHtml(){
     <summary style="cursor:pointer;padding:9px 12px;font-size:.74rem;font-weight:700;color:var(--cy)">ℹ️ What do these mean?</summary>
     <div style="padding:0 12px 11px;font-size:.7rem;color:var(--mu);line-height:1.6">
       <div style="margin-bottom:6px"><strong style="color:var(--tx)">Tonight's rating</strong> (the big number) — your skill rating for <em>this session</em>. It starts from your all-time rating and moves with each game. Your <strong style="color:var(--tx)">all-time</strong> rating across every session is on the <strong>Season Ladder</strong> (History tab).</div>
-      <div style="margin-bottom:6px"><strong style="color:var(--tx)">🎯 +N to catch</strong> — rating points between you and the player one rank above. Roughly one good win's worth (a win is usually +10 to +20).</div>
+      <div style="margin-bottom:6px"><strong style="color:var(--tx)">🎯 ≈N wins to catch</strong> — roughly how many wins to pass the player one rank above you. <strong style="color:var(--tx)">Win by a bigger margin, or beat someone ranked above you, to climb faster</strong> — close games move you less.</div>
       <div style="margin-bottom:6px"><strong style="color:var(--tx)">▲ Climbed / ▼ Down</strong> — how far you've moved from where you started tonight (your seed).</div>
       <div style="margin-bottom:6px"><strong style="color:var(--tx)">🥇 Tier</strong> — Gold = top 25%, Silver = next 35%, Bronze = the rest of the field.</div>
       <div><strong style="color:var(--tx)">PTS DIFF</strong> — total points you scored minus points conceded, across all your games.</div>
@@ -10096,14 +10099,22 @@ function renderPlayerView(){
       :_climb>0?`<div style="font-size:.82rem;font-weight:700;color:var(--gr);margin:-2px 0 4px">▲ Climbed ${_climb} spot${_climb===1?'':'s'} tonight <span style="color:var(--mu);font-weight:400">(from #${_initR})</span></div>`
       :_climb<0?`<div style="font-size:.82rem;font-weight:700;color:var(--or);margin:-2px 0 4px">▼ Down ${-_climb} <span style="color:var(--mu);font-weight:400">(from #${_initR}) — climb back up!</span></div>`
       :`<div style="font-size:.78rem;color:var(--mu);margin:-2px 0 4px">Holding #${_rk} — win to climb ↑</div>`;
-    // "Catch the rung above" — exact session-rating gap to the player one rank up.
+    // "Catch the rung above" — translated into wins + a visual closeness bar, because players
+    // understand "≈2 wins away", not "+27 rating". Tiny gaps read as a head-to-head challenge.
     let _catchHtml='';
     if(_rk&&_rk>1&&!sp.isNR){
       const _aboveId=Object.entries(S.session?.cfRanks||{}).find(([pid,e])=>e.rank===_rk-1)?.[0];
       const _above=_aboveId?gsp(_aboveId):null;
       const _g=_above?Math.round((_above.sRating||0)-(sp.sRating||0)):0;
-      if(_above&&_g>0)_catchHtml=`<div style="font-size:.74rem;color:var(--cy);margin:2px 0 0">🎯 +${_g} to catch ${esc(_above.name||gp(_aboveId)?.name||('#'+(_rk-1)))} (#${_rk-1})</div>`;
-    }else if(_rk===1&&!sp.isNR){_catchHtml=`<div style="font-size:.74rem;color:var(--go);margin:2px 0 0">👑 Top of tonight's ladder</div>`;}
+      const _an=_above?esc(_above.name||gp(_aboveId)?.name||('#'+(_rk-1))):'';
+      if(_above&&_g>0&&_g<=6){
+        _catchHtml=`<div style="font-size:.74rem;color:var(--cy);margin:3px 0 0">🎯 Neck-and-neck with ${_an} — beat them to pass!</div>`;
+      }else if(_above&&_g>0){
+        const _w=_winsToCatch(_g),_fill=Math.max(8,Math.min(92,100-_w*22));
+        _catchHtml=`<div style="font-size:.74rem;color:var(--cy);margin:3px 0 1px" title="+${_g} rating — a win is usually +10 to +20; win big to climb faster">🎯 ≈${_w} win${_w===1?'':'s'} to catch ${_an} (#${_rk-1})</div>
+          <div style="height:6px;background:var(--bd);border-radius:3px;max-width:220px;margin:0 auto"><div style="height:100%;width:${_fill}%;background:var(--cy);border-radius:3px"></div></div>`;
+      }
+    }else if(_rk===1&&!sp.isNR){_catchHtml=`<div style="font-size:.74rem;color:var(--go);margin:2px 0 0">👑 Top of tonight's board</div>`;}
     const _tier=_tierOf(_rk,_tot);
     const _tierBadge=(_tier&&_rk&&!sp.isNR)?` <span title="${_tier.label} tier" style="font-size:.95rem">${_tier.emoji}</span>`:'';
     const rankHtml=(_rk&&_tot&&!sp.isNR)
