@@ -5856,15 +5856,14 @@ const CF={
     const mult=S.session?.cfWaitCapMult??2;
     const activeN=(S.session?.players||[]).filter(sp=>sp.status!=='left'&&!(S.session.cfPaused||[]).some(q=>q.id===sp.id)).length||nc*4;
     const bench=Math.max(0,activeN-4*nc);
-    // [RESV] Graduated hold budget (Moderate profile): P1 +0, P2 +1, P3 +2 over the base
-    // (nc*mult+1). An earlier graduated cap FAILED in isolation because the extra wait was idle
-    // — the engine just deferred then force-seated the same wide match. This time the budget is
-    // SPENT: the anchor skill-hold in batchGenerateSuggestions defers an outlier whose closest
-    // bench-mate is beyond the phase % target, filling courts from the rest, until a tighter
-    // partner is released or the cap forces the issue. The hold and this budget are a package —
-    // reverting one without the other reproduces the failed experiment.
-    const hold=phase>=3?2:phase>=2?1:0;
-    return Math.max(Math.floor(nc*mult)+1+hold, Math.ceil(bench/4)+1);
+    // phaseFactor is 1.0 for ALL phases — i.e. a CONSTANT cap (= nc*mult+1, the proven value).
+    // A phase-GRADUATED cap (0.75/1.0/1.5) was tried to enable the ladder arc but the sim proved
+    // it useless: extra late wait-budget never produced tighter matches (the bottleneck is
+    // rotation structure — an outlier's rank-neighbours are rarely benched together — not wait
+    // budget), so it only lengthened waits. Reverted to constant; helper kept as the single
+    // source of truth that every forcing threshold + the sim gate read from.
+    const pf=1;
+    return Math.max(Math.floor(nc*mult*pf)+1, Math.ceil(bench/4)+1);
   },
   waitCap(){return this.waitCapForPhase(this._sessPhaseNum());},
   maxWaitCap(){return this.waitCapForPhase(3);}, // absolute ceiling (loosest phase) — used by the sim gate
@@ -6376,14 +6375,7 @@ const CF={
       const _teamOver=Math.max(0,crossImb-_pc.team);
       phaseGapPen=_partnerOver*1.2+_teamOver*1.0;
     }
-    // [RESV] Top-cluster grouping bonus — the "feel". In phase 2+, strongly prefer a group made
-    // ENTIRELY of top-cluster players (p._isTop, stamped once per generation in the pool build)
-    // so the strongest players play EACH OTHER more often — a top-tier ladder feel. Negative =
-    // preferred. Judged by top-internal match frequency, NOT by the average gap. group.every
-    // short-circuits on the first non-top player, so _sessPhaseNum only runs for all-top groups.
-    let topGroupBonus=0;
-    if(group.every(p=>p._isTop===true)&&this._sessPhaseNum()>=2)topGroupBonus=-200;
-    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+blowoutNudge+rankBandPen+neverPairPen+phaseGapPen+topGroupBonus,meta,t1,t2,group};
+    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+blowoutNudge+rankBandPen+neverPairPen+phaseGapPen,meta,t1,t2,group};
   },
 
   /* Generate a suggestion for a court */
@@ -6496,34 +6488,6 @@ const CF={
       }
     }
 
-    // [RESV] Phase 2/3 TOP-CLUSTER hold — the "feel" mechanism. Goal: the strongest players play
-    // EACH OTHER more often (a top-tier ladder feel), measured by top-internal match FREQUENCY,
-    // not by the average gap. When only a PARTIAL top cluster is benched (2-3 of the top K), hold
-    // them so they ACCUMULATE, and fill the open courts from the dense middle/bottom (which has
-    // plenty of compatible partners — so no court idles). Once 4+ top players are benched the
-    // top-group bonus in _scoreGroup seats them together. Strictly bounded: only top-cluster
-    // players, only under the wait budget, and never enough to starve a ready court
-    // (remaining queue must stay >= need). Backstops (_enforceHardWait / _scheduleMandatory,
-    // which scan the FULL cfQueue ignoring this filter) force-seat any held top player at the
-    // cap — so a top match that never assembles just becomes a normal mixed match + a short wait.
-    // The wait cost concentrates on the top players, who are "in on the deal" (wait a bit to play
-    // the other sharks). Reverting this block alone (leaving the bonus) keeps the preference but
-    // drops the accumulation, so top matches form only when 4 top players coincide by luck.
-    if(this._sessPhaseNum()>=2 && queue.length>need){
-      const _holdCap=this.waitCap()-1;
-      const _topIds=this._topClusterIds();
-      const _benchedTop=queue.filter(q=>_topIds.has(q.id));
-      // Hold only a PARTIAL cluster (2-3). With 0-1 there's nothing to gather toward a top match;
-      // with 4+ they can be seated together NOW, so let the bonus do it (don't hold).
-      if(_benchedTop.length>=2 && _benchedTop.length<4){
-        const _pinned=new Set(S.session.cfPinnedIds||[]);
-        const _holdable=_benchedTop.filter(q=>!_pinned.has(q.id)&&(gsp(q.id)?.matchesPlayed||0)>0&&this.matchGap(q.id)<_holdCap);
-        const _maxHold=Math.max(0,queue.length-need); // never drop the fill pool below need
-        const _toHold=new Set(_holdable.slice(0,_maxHold).map(q=>q.id));
-        if(_toHold.size)queue=queue.filter(q=>!_toHold.has(q.id)); // hold — courts fill from the rest
-      }
-    }
-
     const mustSplit=S.session.cfMustSplitPair;
     // nrIds: use session player isNR (reflects any promotions during session)
     const nrIds=new Set(queue.filter(q=>{const sp=gsp(q.id);return sp?.isNR||(sp&&!sp.isNR&&(sp.matchesPlayed||0)<5&&gp(q.id)?.isNR);}).map(q=>q.id));
@@ -6559,10 +6523,8 @@ const CF={
     }).map(sp=>sp.matchesPlayed||0);
     const _batchMinPlayed=_batchFloorCounts.length?Math.min(..._batchFloorCounts):0;
     const _batchMC=S.session.cfMatchCount||0;
-    const _batchTopSet=this._topClusterIds(); // [RESV] stamp top-cluster membership once
     const _stampPool=p=>{
       const sp=gsp(p.id);
-      p._isTop=_batchTopSet.has(p.id); // [RESV] top-group bonus reads this in _scoreGroup
       const _isLR2=S.session.cfRanks?.[p.id]?.isLateArrival||sp?.resumedFromPause;
       // Late arrivals / resumed with 0 games: mg=0 (no catch-up gap from session start)
       const _neverPlayed=!sp?.matchesPlayed;
@@ -7142,40 +7104,30 @@ const CF={
 
   // Phase-aware skill caps — TIGHTEN as players accumulate games. Ladder model: the
   // more you play, the more accurate ranks become, so the system can be trusted to match
-  // tighter. [RESV] Expressed as a % OF FIELD WIDTH (not fixed ranks). A fixed rank target
-  // silently tightens as the crowd grows (4 ranks of 20 vs 4 of 40); a % keeps a CONSTANT
-  // rating band regardless of headcount (partnerPct × ~500 sr ≈ fixed points). Partner % is
-  // anchored at 3 courts and scaled ±10%/court (fewer courts looser — thin pool/rare releases;
-  // more courts tighter — frequent releases assemble easily). Team ≈ ⅔ of partner so teams stay
-  // balanced even when partners span a range.
-  //                        P1 (warm-up)   P2 (settling)   P3 (competitive)
-  //   2 courts (partner):     60%             50%              40%
-  //   3 courts (partner):     50%             40%              30%
-  //   4 courts (partner):     40%             30%              20%
-  // These feed the SOFT phaseGapPen score term (not a hard gate), so tightening can't deadlock;
-  // the anchor skill-hold + graduated wait cap are what actually pull the achieved late gap down.
+  // tighter. Expressed in RANK positions (the engine is rank-based) then converted to sr
+  // for the gap checks. Moderate tightening (organizer decision):
+  //   Phase A (warm-up, ranks uncertain): partner 8 / team 5 ranks  (loose, forgiving)
+  //   Phase B (settling):                 partner 5 / team 3 ranks
+  //   Phase C (competitive):              partner 3 / team 2 ranks   (tight, true ladder)
+  // +1 rank slack for small (≤2 court) sessions where the pool is thin.
+  // These are PASS-1 caps only — pass 2/3 relax and the wait cap force-seats as the hard
+  // backstop, so tightening can never deadlock (just falls back to a looser match + wait).
   _phaseSkillCaps(groupIds){
     const phase=this._sessionPhase(groupIds);
-    const nc=S.session?.courts||1;
     const N=_totalRanked()||S.session?.activePlayers?.length||20;
     const srPerRank=500/Math.max(N-1,1);
-    const basePct=phase==='A'?0.50:phase==='B'?0.40:0.30;
-    const courtAdj=(3-nc)*0.10; // 2 courts +10% looser, 4 courts -10% tighter
-    const partnerPct=Math.max(0.10,Math.min(0.90,basePct+courtAdj));
-    const teamPct=partnerPct*0.65;
-    const partnerRanks=Math.max(2,Math.round(partnerPct*(N-1)));
-    const teamRanks=Math.max(1,Math.round(teamPct*(N-1)));
-    return {partner:Math.round(partnerRanks*srPerRank),team:Math.round(teamRanks*srPerRank),partnerRanks,teamRanks,phase,partnerPct,teamPct};
-  },
-  // [RESV] Top cluster = the strongest ~30% (min 4) of active (non-paused, non-left) players by
-  // skill rating. Drives the top-cluster hold + the _scoreGroup top-group bonus that make the
-  // strongest players play each other (the ladder "feel"). Call ONCE per generation and stamp
-  // the result onto pool objects as p._isTop — _scoreGroup is too hot to recompute this.
-  _topClusterIds(){
-    const active=(S.session?.players||[]).filter(sp=>sp.status!=='left'&&!(S.session.cfPaused||[]).some(q=>q.id===sp.id));
-    const N=active.length||1;
-    const K=Math.max(4,Math.round(N*0.3));
-    return new Set(active.map(sp=>({id:sp.id,sr:this._rankSr(sp.id)})).sort((a,b)=>b.sr-a.sr).slice(0,K).map(x=>x.id));
+    const slack=(S.session?.courts||1)<=2?1:0;
+    // Tightening tuned to avoid deselection clusters in a sparse queue (too tight => certain
+    // hard-to-match players pile up at the must-play threshold and breach the wait cap).
+    const _pp=this._presetParams();
+    // Phase C (late session) uses the preset targets directly (4 partner / 3 team balanced).
+    // NOTE: an earlier +1 loosening here was reverted — it made P3 matches looser (rising
+    // partner gap into late session), which is backwards from the intended ladder arc (P3 should
+    // be the TIGHTEST). The wait-cap is now held by the pause fix + hard-wait net, so the soft
+    // skill targets don't need loosening to avoid starvation. (Soft target; hard guard ~11 ranks.)
+    const partnerRanks=(phase==='A'?8:phase==='B'?6:_pp.cPartner)+slack;
+    const teamRanks=(phase==='A'?5:phase==='B'?4:_pp.cTeam)+slack;
+    return {partner:Math.round(partnerRanks*srPerRank),team:Math.round(teamRanks*srPerRank),partnerRanks,teamRanks,phase};
   },
   // Loose hard outer guard (~11 ranks) — blocks only egregious carry pairings. Graduated
   // tightness is driven by the phaseGapPen score term in _scoreGroup (NOT a tight gate), so
@@ -7480,10 +7432,8 @@ const CF={
     }).map(sp2=>sp2.matchesPlayed||0);
     const _minPlayed=_floorCounts.length?Math.min(..._floorCounts):0;
     const _mc=S.session.cfMatchCount||0;
-    const _sgTopSet=this._topClusterIds(); // [RESV] stamp top-cluster membership once
     pool.forEach(p=>{
       const sp2=gsp(p.id);
-      p._isTop=_sgTopSet.has(p.id); // [RESV] top-group bonus reads this in _scoreGroup
       const _isLR3=S.session.cfRanks?.[p.id]?.isLateArrival||sp2?.resumedFromPause;
       // Late arrivals / resumed with 0 games: mg=0 (no catch-up gap from session start)
       const _neverPlayed2=!sp2?.matchesPlayed;

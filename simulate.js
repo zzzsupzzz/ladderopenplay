@@ -715,10 +715,7 @@ const SIM = (() => {
           const _capBench = Math.max(0, _capN - 4 * courts);
           const _capFloor = Math.ceil(_capBench / 4);
           const _mult = 2; // cfWaitCapMult default (Competitive); Social would be 1
-          // [RESV] Session-wide ceiling = loosest-phase cap = base + P3 hold(2). Mirrors
-          // CF.maxWaitCap()=waitCapForPhase(3). The anchor skill-hold lets P3 waits run to this
-          // ceiling; the report must use it or it false-flags legit late holds. Revert with the app.
-          const _base = Math.floor(courts * _mult) + 1 + 2;
+          const _base = Math.floor(courts * _mult) + 1;
           const _waitCap = Math.max(_base, _capFloor + 1);
           const _roomTooFull = (_capFloor + 1) > _base;
           log(`--- WAIT CAP gate (N=${_capN}, courts=${courts}, bench=${_capBench}, fairFloor=${_capFloor}, cap=${_waitCap}${_roomTooFull ? ' — room too full for nc*mult+1 target' : ''}) ---`);
@@ -762,38 +759,6 @@ const SIM = (() => {
           log('--- Skill Quality by phase (rank gaps; should DROP P1→P3 if ladder arc works) ---');
           log(`  Partner gap (teammate):  P1=${_avg(_pBuckets[0])}  P2=${_avg(_pBuckets[1])}  P3=${_avg(_pBuckets[2])}`);
           log(`  Team gap (vs opponents): P1=${_avg(_tBuckets[0])}  P2=${_avg(_tBuckets[1])}  P3=${_avg(_tBuckets[2])}`);
-        }
-
-        // ── [RESV] Top-cluster internal match frequency (the "feel" metric) ────
-        // The top-cluster hold + top-group bonus aim to make the strongest players play EACH
-        // OTHER more often. This measures it: of the LATE-session matches (last 2/3), how many
-        // were ALL-TOP (all 4 in the top K = max(4, round(N*0.3)) by final rank) vs the random-
-        // chance baseline. Higher % / lift = stronger ladder "feel". (Gap is NOT the metric here.)
-        {
-          const _N = arch.players.length;
-          const _K = Math.max(4, Math.round(_N*0.3));
-          const _topRank = {};
-          [...arch.players].sort((a,b)=>(b.sRating||0)-(a.sRating||0)).slice(0,_K).forEach(p=>{_topRank[p.id]=true;});
-          const _qlog2 = arch.cfLog || [];
-          const _third2 = Math.max(1, Math.ceil(_qlog2.length/3));
-          let _lateTotal=0, _lateTopInternal=0, _allTopInternal=0;
-          const _topGamesByPlayer = {};
-          _qlog2.forEach((m,i)=>{
-            const ids=[...(m.t1||[]),...(m.t2||[])];
-            if(ids.length<4)return;
-            const allTop = ids.every(id=>_topRank[id]);
-            if(allTop)_allTopInternal++;
-            if(Math.min(2,Math.floor(i/_third2))>=1){_lateTotal++; if(allTop)_lateTopInternal++;}
-            ids.forEach(id=>{ if(_topRank[id]){ const t=_topGamesByPlayer[id]||(_topGamesByPlayer[id]={g:0,tg:0}); t.g++; if(allTop)t.tg++; }});
-          });
-          const _choose=(n,k)=>{if(k<0||k>n)return 0;let r=1;for(let j=0;j<k;j++)r=r*(n-j)/(j+1);return r;};
-          const _randPct = _choose(_K,4)/Math.max(1e-9,_choose(_N,4))*100;
-          const _pct = _lateTotal? (_lateTopInternal/_lateTotal*100):0;
-          const _shares = Object.values(_topGamesByPlayer).map(t=>t.g? t.tg/t.g:0);
-          const _avgShare = _shares.length? (_shares.reduce((s,x)=>s+x,0)/_shares.length*100):0;
-          log(`--- [RESV] Top-${_K} internal match frequency (the "feel" metric) ---`);
-          log(`  Late all-top matches: ${_lateTopInternal}/${_lateTotal} (${_pct.toFixed(1)}%)  ·  random baseline ${_randPct.toFixed(1)}%  ·  lift ${(_pct-_randPct).toFixed(1)}pts`);
-          log(`  Avg top player's games that were all-top: ${_avgShare.toFixed(0)}%  ·  all-top matches (full session): ${_allTopInternal}`);
         }
 
         log('--- Player Stats ---');
