@@ -10029,7 +10029,7 @@ function _pvLegendHtml(){
     <summary style="cursor:pointer;padding:9px 12px;font-size:.74rem;font-weight:700;color:var(--cy)">ℹ️ What do these mean?</summary>
     <div style="padding:0 12px 11px;font-size:.7rem;color:var(--mu);line-height:1.6">
       <div style="margin-bottom:6px"><strong style="color:var(--tx)">Tonight's rating</strong> (the big number) — your skill rating for <em>this session</em>. It starts from your all-time rating and moves with each game. Your <strong style="color:var(--tx)">all-time</strong> rating across every session is on the <strong>Season Ladder</strong> (History tab).</div>
-      <div style="margin-bottom:6px"><strong style="color:var(--tx)">🎯 ≈N wins from Silver/Gold</strong> — roughly how many wins to reach the next tier up. <strong style="color:var(--tx)">Win by a bigger margin, or beat a higher-ranked team, to climb faster</strong> — close games move you less.</div>
+      <div style="margin-bottom:6px"><strong style="color:var(--tx)">🎯 ≈N wins to pass #X</strong> — standings rank by <strong style="color:var(--tx)">wins first</strong> (then point difference), so one more win usually moves you up a rung. Win by a bigger margin to pad your point-diff tiebreaker.</div>
       <div style="margin-bottom:6px"><strong style="color:var(--tx)">▲ Climbed / ▼ Down</strong> — how far you've moved from where you started tonight (your seed).</div>
       <div style="margin-bottom:6px"><strong style="color:var(--tx)">🥇 Tier</strong> — Gold = top 25%, Silver = next 35%, Bronze = the rest of the field.</div>
       <div><strong style="color:var(--tx)">PTS DIFF</strong> — total points you scored minus points conceded, across all your games.</div>
@@ -10176,30 +10176,19 @@ function renderPlayerView(){
       :_climb>0?`<div style="font-size:.82rem;font-weight:700;color:var(--gr);margin:-2px 0 4px">▲ Climbed ${_climb} spot${_climb===1?'':'s'} tonight <span style="color:var(--mu);font-weight:400">(from #${_initR})</span></div>`
       :_climb<0?`<div style="font-size:.82rem;font-weight:700;color:var(--or);margin:-2px 0 4px">▼ Down ${-_climb} <span style="color:var(--mu);font-weight:400">(from #${_initR}) — climb back up!</span></div>`
       :`<div style="font-size:.78rem;color:var(--mu);margin:-2px 0 4px">Holding #${_rk} — win to climb ↑</div>`;
-    // Climb goal framed as a TIER target (an aspirational status players actually care about —
-    // "get to Silver"), NOT "catch [some named person]" which is meaningless mid-session. Wins,
-    // not ELO points, with a closeness bar. Win big to climb faster (margin/upsets pay more).
+    // Climb goal = WINS to pass the player on the NEXT rung up. Standings are WINS-first, so this
+    // is a WIN gap, not a rating gap — the old rating-based version produced absurd numbers like
+    // "20 wins to #1" when everyone was actually tied on wins (one win would've moved them up).
     let _catchHtml='';
     if(_rk&&_tot&&!sp.isNR){
-      const _ratingAtRank=r=>(r>=1&&r<=_lbRows.length)?(_lbRows[r-1]?.sRating??null):null;
-      const _myTier=_tierOf(_rk,_tot);
       if(_rk===1){
         _catchHtml=`<div style="font-size:.74rem;color:var(--go);margin:2px 0 0">👑 #1 — top of the board</div>`;
       }else{
-        let _tgtRank,_tgtLabel;
-        if(_myTier&&_myTier.key===3){_tgtRank=1;_tgtLabel='#1';}
-        else if(_myTier&&_myTier.key===2){_tgtRank=Math.max(1,Math.floor(_tot*0.25));_tgtLabel='🥇 Gold';}
-        else{_tgtRank=Math.max(1,Math.floor(_tot*0.60));_tgtLabel='🥈 Silver';}
-        if(_tgtRank>=_rk){_tgtRank=_rk-1;_tgtLabel='#'+(_rk-1);}
-        const _tgtR=_ratingAtRank(_tgtRank),_g=_tgtR!=null?Math.round(_tgtR-(sp.sRating||0)):0;
-        const _toWord=_tgtLabel.startsWith('#')?`to reach ${_tgtLabel}`:`from ${_tgtLabel}`;
-        if(_tgtR!=null&&_g>0&&_g<=6){
-          _catchHtml=`<div style="font-size:.74rem;color:var(--cy);margin:3px 0 0">🎯 On the edge of ${_tgtLabel} — win to break in!</div>`;
-        }else if(_tgtR!=null&&_g>0){
-          const _w=_winsToCatch(_g),_fill=Math.max(8,Math.min(92,100-_w*22));
-          _catchHtml=`<div style="font-size:.74rem;color:var(--cy);margin:3px 0 1px" title="${_g} rating away — win by a bigger margin or beat a higher-ranked team to climb faster">🎯 ≈${_w} win${_w===1?'':'s'} ${_toWord}</div>
+        const _above=_lbRows[_rk-2];                          // player one rank up
+        const _w=Math.max(1,(_above?.wins||0)-(sp.wins||0));  // wins to match/pass them
+        const _fill=Math.max(12,Math.min(90,100-(_w-1)*26));  // 1 win = almost there
+        _catchHtml=`<div style="font-size:.74rem;color:var(--cy);margin:3px 0 1px" title="Standings go by wins first — one more win moves you up. Win big to pad your point-diff tiebreaker too.">🎯 ≈${_w} win${_w===1?'':'s'} to pass #${_rk-1}</div>
           <div style="height:6px;background:var(--bd);border-radius:3px;max-width:220px;margin:0 auto"><div style="height:100%;width:${_fill}%;background:var(--cy);border-radius:3px"></div></div>`;
-        }
       }
     }
     const _tier=_tierOf(_rk,_tot);
