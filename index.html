@@ -4118,6 +4118,27 @@ function clearPvSearch(){
   updatePvSelect();
 }
 
+// Tap a name in the leaderboard → open that player's full stats/history. Clears any active
+// search filter first so the option exists, then selects + renders + scrolls to the top.
+function pvSelectPlayer(id){
+  if(!id)return;
+  const search=document.getElementById('pv-search');if(search)search.value='';
+  const clr=document.getElementById('pv-clear');if(clr)clr.style.display='none';
+  updatePvSelect(); // repopulate full list (no filter) so the option is selectable
+  const sel=document.getElementById('pv-select');if(sel)sel.value=id;
+  renderPlayerView();
+  try{window.scrollTo({top:0,behavior:'smooth'});}catch(e){window.scrollTo(0,0);}
+}
+// Back to the session leaderboard (the no-selection view, which shows the shared board).
+function pvBackToLeaderboard(){
+  const sel=document.getElementById('pv-select');if(sel)sel.value='';
+  const search=document.getElementById('pv-search');if(search)search.value='';
+  const clr=document.getElementById('pv-clear');if(clr)clr.style.display='none';
+  updatePvSelect();
+  renderPlayerView();
+  try{window.scrollTo({top:0,behavior:'smooth'});}catch(e){window.scrollTo(0,0);}
+}
+
 function onPvSelectChange(){
   renderPlayerView();
 }
@@ -9981,7 +10002,7 @@ function _pvLeaderboardHtml(sess,viewedId,isLive){
     const d=Math.round((sp.sRating||0)-(sp.startRating||0));
     const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
     const col=i===0?'var(--go)':i===1?'#c0ccd8':i===2?'#d4956a':'var(--mu)';
-    return `<div class="prow" style="cursor:default;margin-bottom:2px;${me?'background:rgba(99,179,237,.12);border:1px solid var(--ac);border-radius:6px;padding:2px 4px':''}">
+    return `<div class="prow" onclick="pvSelectPlayer('${sp.id}')" title="Tap for full stats &amp; history" style="cursor:pointer;margin-bottom:2px;${me?'background:rgba(99,179,237,.12);border:1px solid var(--ac);border-radius:6px;padding:2px 4px':''}">
       <div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;color:${col};min-width:24px;text-align:center">${medal||(i+1)}</div>
       <div class="pnc"><div class="pn">${tier?tier.emoji+' ':''}${esc(sp.name||gp(sp.id)?.name||'?')}${me?` <span style="font-size:.58rem;color:var(--ac);font-weight:800">YOU</span>`:''}</div></div>
       <div style="font-size:.72rem;color:var(--mu)">${sp.wins||0}W/${sp.losses||0}L</div>
@@ -9990,7 +10011,8 @@ function _pvLeaderboardHtml(sess,viewedId,isLive){
     </div>`;
   }).join('');
   return `<div class="card" style="margin-bottom:11px">
-    <div class="ct" style="margin-bottom:8px">${isLive?'🏓 TONIGHT\'S LEADERBOARD':'🏁 FINAL LEADERBOARD'} <span style="font-size:.62rem;font-weight:600;color:var(--mu)">${N} players</span></div>
+    <div class="ct" style="margin-bottom:3px">${isLive?'🏓 TONIGHT\'S LEADERBOARD':'🏁 FINAL LEADERBOARD'} <span style="font-size:.62rem;font-weight:600;color:var(--mu)">${N} players</span></div>
+    <div style="font-size:.6rem;color:var(--mu);margin-bottom:8px">👆 Tap any name to see their full stats &amp; history</div>
     ${!isLive?_awardsHtml(sess):''}
     <div>${body}</div>
   </div>`;
@@ -10315,7 +10337,10 @@ function renderPlayerView(){
         :(!S.session&&S.archive.length?S.archive[0]:null));
     if(_lbSess&&(!_lbLive||(_lbSess.cfLog||[]).length>0))leaderboardHtml=_pvLeaderboardHtml(_lbSess,id,!!_lbLive);
   }
-  el.innerHTML=statusHtml+recapHtml+sessHtml+leaderboardHtml+(p?_ratingSparkHtml(id):'')+arcHtml+matchHtml+(p?_pvLegendHtml():'');
+  // Back-to-leaderboard affordance — we arrived here by tapping a name (or searching), so give a
+  // one-tap return to the shared board. Only shown when there's actually a leaderboard to return to.
+  const _backBar=leaderboardHtml?`<div style="margin-bottom:10px"><button class="btn bg2 sm" onclick="pvBackToLeaderboard()" style="font-size:.72rem">← Back to leaderboard</button></div>`:'';
+  el.innerHTML=_backBar+statusHtml+recapHtml+sessHtml+leaderboardHtml+(p?_ratingSparkHtml(id):'')+arcHtml+matchHtml+(p?_pvLegendHtml():'');
 
   // Show "Last updated N min ago" in player mode so users know if data is fresh
   if(PLAYER_MODE&&S._lastSaveTs){
