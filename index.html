@@ -4247,7 +4247,7 @@ function _sugPickerToggle(evt,courtNum,outId){
   }
   picker.innerHTML=`<div style="font-size:.65rem;font-weight:700;color:var(--mu);margin-bottom:6px;letter-spacing:.05em">REPLACE ${esc(outName.toUpperCase())} WITH:</div>`
     +`<div style="display:flex;flex-wrap:wrap;gap:5px">`
-    +avail.map(p=>`<button onclick="_sugPickerApply('${courtNum}','${outId}','${p.id}')" style="font-size:.73rem;font-weight:600;padding:5px 10px;border-radius:20px;border:1px solid var(--bd);background:var(--s2);color:var(--tx);cursor:pointer">${esc(p.name)} <span style="font-size:.6rem;color:var(--mu)">${p.rating}</span></button>`).join('')
+    +avail.map(p=>`<button onclick="_sugPickerApply('${courtNum}','${outId}','${p.id}')" style="font-size:.73rem;font-weight:600;padding:5px 10px;border-radius:20px;border:1px solid var(--bd);background:var(--s2);color:var(--tx);cursor:pointer">${esc(p.name)} <span style="font-size:.6rem;color:var(--cy);font-weight:700">${_sessionRank(p.id)?'#'+_sessionRank(p.id):'NR'}</span></button>`).join('')
     +`</div>`
     +`<button onclick="_sugPickerClose()" style="margin-top:7px;font-size:.68rem;color:var(--mu);background:none;border:none;cursor:pointer;width:100%;text-align:center">✕ Cancel</button>`;
   picker.style.display='block';
@@ -8458,8 +8458,9 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       .filter(q=>!onOtherCourts.has(q.id))
       .sort((a,b)=>(gp(a.id)?.name||'').localeCompare(gp(b.id)?.name||''));
     if(!available.length){toast('No available players to swap in','warn');return;}
-    const onChips=onCourt.map(id=>`<button onclick="document.querySelectorAll('.ams-out-btn').forEach(b=>{b.style.background='var(--s2)';b.style.color='var(--tx)'});this.style.background='rgba(248,113,113,.2)';this.style.color='var(--re)';document.getElementById('ams-out-val').value='${id}'" class="ams-out-btn" style="font-size:.73rem;font-weight:600;padding:5px 10px;border-radius:20px;border:1px solid var(--bd);background:var(--s2);color:var(--tx);cursor:pointer">${esc(gp(id)?.name||'?')} <span style="font-size:.6rem;color:var(--mu)">${Math.round(this.cfRating(id))}</span></button>`).join('');
-    const inChips=available.map(q=>`<button onclick="document.querySelectorAll('.ams-in-btn').forEach(b=>{b.style.background='var(--s2)';b.style.color='var(--tx)'});this.style.background='rgba(52,217,116,.15)';this.style.color='var(--gr)';document.getElementById('ams-in-val').value='${q.id}'" class="ams-in-btn" style="font-size:.73rem;font-weight:600;padding:5px 10px;border-radius:20px;border:1px solid var(--bd);background:var(--s2);color:var(--tx);cursor:pointer">${esc(gp(q.id)?.name||'?')} <span style="font-size:.6rem;color:var(--mu)">${Math.round(this.cfRating(q.id))}</span></button>`).join('');
+    const _rkChip=id=>`<span style="font-size:.6rem;color:var(--cy);font-weight:700">${_sessionRank(id)?'#'+_sessionRank(id):'NR'}</span>`;
+    const onChips=onCourt.map(id=>`<button onclick="document.querySelectorAll('.ams-out-btn').forEach(b=>{b.style.background='var(--s2)';b.style.color='var(--tx)'});this.style.background='rgba(248,113,113,.2)';this.style.color='var(--re)';document.getElementById('ams-out-val').value='${id}'" class="ams-out-btn" style="font-size:.73rem;font-weight:600;padding:5px 10px;border-radius:20px;border:1px solid var(--bd);background:var(--s2);color:var(--tx);cursor:pointer">${esc(gp(id)?.name||'?')} ${_rkChip(id)}</button>`).join('');
+    const inChips=available.map(q=>`<button onclick="document.querySelectorAll('.ams-in-btn').forEach(b=>{b.style.background='var(--s2)';b.style.color='var(--tx)'});this.style.background='rgba(52,217,116,.15)';this.style.color='var(--gr)';document.getElementById('ams-in-val').value='${q.id}'" class="ams-in-btn" style="font-size:.73rem;font-weight:600;padding:5px 10px;border-radius:20px;border:1px solid var(--bd);background:var(--s2);color:var(--tx);cursor:pointer">${esc(gp(q.id)?.name||'?')} ${_rkChip(q.id)}</button>`).join('');
     openModal(`<div class="modal-title">⇄ Swap Player — Court ${offset+courtNum}</div>
       <div style="background:rgba(251,147,60,.08);border:1px solid rgba(251,147,60,.3);border-radius:8px;padding:8px 10px;margin-bottom:12px;font-size:.71rem;color:var(--or)">
         ⚠ The removed player will <strong>not receive ELO or a result</strong> for this match.
@@ -9968,7 +9969,7 @@ function _pvLegendHtml(){
     <summary style="cursor:pointer;padding:9px 12px;font-size:.74rem;font-weight:700;color:var(--cy)">ℹ️ What do these mean?</summary>
     <div style="padding:0 12px 11px;font-size:.7rem;color:var(--mu);line-height:1.6">
       <div style="margin-bottom:6px"><strong style="color:var(--tx)">Tonight's rating</strong> (the big number) — your skill rating for <em>this session</em>. It starts from your all-time rating and moves with each game. Your <strong style="color:var(--tx)">all-time</strong> rating across every session is on the <strong>Season Ladder</strong> (History tab).</div>
-      <div style="margin-bottom:6px"><strong style="color:var(--tx)">🎯 ≈N wins to catch</strong> — roughly how many wins to pass the player one rank above you. <strong style="color:var(--tx)">Win by a bigger margin, or beat someone ranked above you, to climb faster</strong> — close games move you less.</div>
+      <div style="margin-bottom:6px"><strong style="color:var(--tx)">🎯 ≈N wins from Silver/Gold</strong> — roughly how many wins to reach the next tier up. <strong style="color:var(--tx)">Win by a bigger margin, or beat a higher-ranked team, to climb faster</strong> — close games move you less.</div>
       <div style="margin-bottom:6px"><strong style="color:var(--tx)">▲ Climbed / ▼ Down</strong> — how far you've moved from where you started tonight (your seed).</div>
       <div style="margin-bottom:6px"><strong style="color:var(--tx)">🥇 Tier</strong> — Gold = top 25%, Silver = next 35%, Bronze = the rest of the field.</div>
       <div><strong style="color:var(--tx)">PTS DIFF</strong> — total points you scored minus points conceded, across all your games.</div>
@@ -10099,22 +10100,32 @@ function renderPlayerView(){
       :_climb>0?`<div style="font-size:.82rem;font-weight:700;color:var(--gr);margin:-2px 0 4px">▲ Climbed ${_climb} spot${_climb===1?'':'s'} tonight <span style="color:var(--mu);font-weight:400">(from #${_initR})</span></div>`
       :_climb<0?`<div style="font-size:.82rem;font-weight:700;color:var(--or);margin:-2px 0 4px">▼ Down ${-_climb} <span style="color:var(--mu);font-weight:400">(from #${_initR}) — climb back up!</span></div>`
       :`<div style="font-size:.78rem;color:var(--mu);margin:-2px 0 4px">Holding #${_rk} — win to climb ↑</div>`;
-    // "Catch the rung above" — translated into wins + a visual closeness bar, because players
-    // understand "≈2 wins away", not "+27 rating". Tiny gaps read as a head-to-head challenge.
+    // Climb goal framed as a TIER target (an aspirational status players actually care about —
+    // "get to Silver"), NOT "catch [some named person]" which is meaningless mid-session. Wins,
+    // not ELO points, with a closeness bar. Win big to climb faster (margin/upsets pay more).
     let _catchHtml='';
-    if(_rk&&_rk>1&&!sp.isNR){
-      const _aboveId=Object.entries(S.session?.cfRanks||{}).find(([pid,e])=>e.rank===_rk-1)?.[0];
-      const _above=_aboveId?gsp(_aboveId):null;
-      const _g=_above?Math.round((_above.sRating||0)-(sp.sRating||0)):0;
-      const _an=_above?esc(_above.name||gp(_aboveId)?.name||('#'+(_rk-1))):'';
-      if(_above&&_g>0&&_g<=6){
-        _catchHtml=`<div style="font-size:.74rem;color:var(--cy);margin:3px 0 0">🎯 Neck-and-neck with ${_an} — beat them to pass!</div>`;
-      }else if(_above&&_g>0){
-        const _w=_winsToCatch(_g),_fill=Math.max(8,Math.min(92,100-_w*22));
-        _catchHtml=`<div style="font-size:.74rem;color:var(--cy);margin:3px 0 1px" title="+${_g} rating — a win is usually +10 to +20; win big to climb faster">🎯 ≈${_w} win${_w===1?'':'s'} to catch ${_an} (#${_rk-1})</div>
+    if(_rk&&_tot&&!sp.isNR){
+      const _ratingAtRank=r=>{const e=Object.entries(S.session?.cfRanks||{}).find(([pid,en])=>en.rank===r);return e?(gsp(e[0])?.sRating??null):null;};
+      const _myTier=_tierOf(_rk,_tot);
+      if(_rk===1){
+        _catchHtml=`<div style="font-size:.74rem;color:var(--go);margin:2px 0 0">👑 #1 — top of the board</div>`;
+      }else{
+        let _tgtRank,_tgtLabel;
+        if(_myTier&&_myTier.key===3){_tgtRank=1;_tgtLabel='#1';}
+        else if(_myTier&&_myTier.key===2){_tgtRank=Math.max(1,Math.floor(_tot*0.25));_tgtLabel='🥇 Gold';}
+        else{_tgtRank=Math.max(1,Math.floor(_tot*0.60));_tgtLabel='🥈 Silver';}
+        if(_tgtRank>=_rk){_tgtRank=_rk-1;_tgtLabel='#'+(_rk-1);}
+        const _tgtR=_ratingAtRank(_tgtRank),_g=_tgtR!=null?Math.round(_tgtR-(sp.sRating||0)):0;
+        const _toWord=_tgtLabel.startsWith('#')?`to reach ${_tgtLabel}`:`from ${_tgtLabel}`;
+        if(_tgtR!=null&&_g>0&&_g<=6){
+          _catchHtml=`<div style="font-size:.74rem;color:var(--cy);margin:3px 0 0">🎯 On the edge of ${_tgtLabel} — win to break in!</div>`;
+        }else if(_tgtR!=null&&_g>0){
+          const _w=_winsToCatch(_g),_fill=Math.max(8,Math.min(92,100-_w*22));
+          _catchHtml=`<div style="font-size:.74rem;color:var(--cy);margin:3px 0 1px" title="${_g} rating away — win by a bigger margin or beat a higher-ranked team to climb faster">🎯 ≈${_w} win${_w===1?'':'s'} ${_toWord}</div>
           <div style="height:6px;background:var(--bd);border-radius:3px;max-width:220px;margin:0 auto"><div style="height:100%;width:${_fill}%;background:var(--cy);border-radius:3px"></div></div>`;
+        }
       }
-    }else if(_rk===1&&!sp.isNR){_catchHtml=`<div style="font-size:.74rem;color:var(--go);margin:2px 0 0">👑 Top of tonight's board</div>`;}
+    }
     const _tier=_tierOf(_rk,_tot);
     const _tierBadge=(_tier&&_rk&&!sp.isNR)?` <span title="${_tier.label} tier" style="font-size:.95rem">${_tier.emoji}</span>`:'';
     const rankHtml=(_rk&&_tot&&!sp.isNR)
