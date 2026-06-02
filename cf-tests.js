@@ -78,7 +78,8 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   _streakOf:typeof _streakOf!=='undefined'?_streakOf:null,
   _tierOf:typeof _tierOf!=='undefined'?_tierOf:null,
   _awardsHtml:typeof _awardsHtml!=='undefined'?_awardsHtml:null,
-  _ratingSparkHtml:typeof _ratingSparkHtml!=='undefined'?_ratingSparkHtml:null};`;
+  _ratingSparkHtml:typeof _ratingSparkHtml!=='undefined'?_ratingSparkHtml:null,
+  _pvLeaderboardHtml:typeof _pvLeaderboardHtml!=='undefined'?_pvLeaderboardHtml:null};`;
 
 vm.createContext(ctx);
 try {
@@ -256,6 +257,20 @@ if (APP._ratingSparkHtml) {
   ok(/Rating Trajectory/.test(h), '_ratingSparkHtml: renders trajectory with >=3 points');
   ok(/\+80/.test(h),              '_ratingSparkHtml: net change +80 over the season');
   ok(APP._ratingSparkHtml('nobody') === '', '_ratingSparkHtml: <3 points → empty');
+}
+if (APP._pvLeaderboardHtml) {
+  const lbSess = {
+    players: [
+      { id:'a', name:'Ann', sRating:1240, startRating:1200, isNR:false, wins:3, losses:0, ptsFor:33, ptsAgainst:18 },
+      { id:'b', name:'Bob', sRating:1180, startRating:1200, isNR:false, wins:1, losses:2, ptsFor:25, ptsAgainst:30 },
+      { id:'c', name:'Cy',  sRating:1100, startRating:1100, isNR:false, wins:0, losses:2, ptsFor:12, ptsAgainst:22 },
+    ], cfRanks:{}, cfLog:[],
+  };
+  const h = APP._pvLeaderboardHtml(lbSess, 'b', true);
+  ok(/LEADERBOARD/.test(h), '_pvLeaderboardHtml: renders a leaderboard');
+  ok(/YOU/.test(h), '_pvLeaderboardHtml: highlights the viewed player');
+  ok(h.indexOf('Ann') < h.indexOf('Bob'), '_pvLeaderboardHtml: orders by wins (Ann 3W above Bob 1W)');
+  ok(APP._pvLeaderboardHtml({players:[{id:'a',name:'A',wins:0,losses:0}]},'a',true) === '', '_pvLeaderboardHtml: <2 players → empty');
 }
 
 // ── Tests: undo (snapshot + restore of pre-confirm suggestion state) ────────

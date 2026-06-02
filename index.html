@@ -9962,6 +9962,39 @@ function _pvPhaseArc(id){
   </div>`;
 }
 
+// Shared session leaderboard for the player view — so a player sees where EVERYONE stands, not
+// just their own card. Works for the live session (TONIGHT'S LEADERBOARD) or a finished one
+// (FINAL LEADERBOARD + awards). Same wins→ptDiff→rating order as the Standings tab; highlights you.
+function _pvLeaderboardHtml(sess,viewedId,isLive){
+  if(!sess||!Array.isArray(sess.players))return '';
+  const rows=[...sess.players].filter(p=>!p.isNR).sort((a,b)=>{
+    if((b.wins||0)!==(a.wins||0))return (b.wins||0)-(a.wins||0);
+    const pda=(a.ptsFor||0)-(a.ptsAgainst||0),pdb=(b.ptsFor||0)-(b.ptsAgainst||0);
+    if(pdb!==pda)return pdb-pda;
+    return (b.sRating||0)-(a.sRating||0);
+  });
+  if(rows.length<2)return '';
+  const N=rows.length;
+  const body=rows.map((sp,i)=>{
+    const me=sp.id===viewedId;
+    const tier=_tierOf(i+1,N);
+    const d=Math.round((sp.sRating||0)-(sp.startRating||0));
+    const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
+    const col=i===0?'var(--go)':i===1?'#c0ccd8':i===2?'#d4956a':'var(--mu)';
+    return `<div class="prow" style="cursor:default;margin-bottom:2px;${me?'background:rgba(99,179,237,.12);border:1px solid var(--ac);border-radius:6px;padding:2px 4px':''}">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;color:${col};min-width:24px;text-align:center">${medal||(i+1)}</div>
+      <div class="pnc"><div class="pn">${tier?tier.emoji+' ':''}${esc(sp.name||gp(sp.id)?.name||'?')}${me?` <span style="font-size:.58rem;color:var(--ac);font-weight:800">YOU</span>`:''}</div></div>
+      <div style="font-size:.72rem;color:var(--mu)">${sp.wins||0}W/${sp.losses||0}L</div>
+      <div class="pr">${Math.round(sp.sRating||0)}</div>
+      ${d!==0?`<span class="dl ${d>0?'du':'dd'}">${d>=0?'+':''}${d}</span>`:''}
+    </div>`;
+  }).join('');
+  return `<div class="card" style="margin-bottom:11px">
+    <div class="ct" style="margin-bottom:8px">${isLive?'🏓 TONIGHT\'S LEADERBOARD':'🏁 FINAL LEADERBOARD'} <span style="font-size:.62rem;font-weight:600;color:var(--mu)">${N} players</span></div>
+    ${!isLive?_awardsHtml(sess):''}
+    <div style="max-height:42vh;overflow-y:auto;-webkit-overflow-scrolling:touch">${body}</div>
+  </div>`;
+}
 // Collapsed "what do these mean?" legend for the player view. The session-vs-all-time rating
 // distinction is the one players most often get confused by, so it leads.
 function _pvLegendHtml(){
@@ -10260,7 +10293,17 @@ function renderPlayerView(){
     }
   }
 
-  el.innerHTML=statusHtml+recapHtml+sessHtml+(p?_ratingSparkHtml(id):'')+arcHtml+matchHtml+(p?_pvLegendHtml():'');
+  // Shared session leaderboard (everyone) — live session, or the selected/just-ended one.
+  // Skipped for a live session with no games yet (a lobby leaderboard of all-zeros is noise).
+  let leaderboardHtml='';
+  {
+    const _lbLive=(sessFilter==='__current__'||!sessFilter)&&S.session;
+    const _lbSess=_lbLive?S.session
+      :((sessFilter&&sessFilter!=='__current__')?S.archive.find(s=>s.id===sessFilter)
+        :(!S.session&&S.archive.length?S.archive[0]:null));
+    if(_lbSess&&(!_lbLive||(_lbSess.cfLog||[]).length>0))leaderboardHtml=_pvLeaderboardHtml(_lbSess,id,!!_lbLive);
+  }
+  el.innerHTML=statusHtml+recapHtml+sessHtml+leaderboardHtml+(p?_ratingSparkHtml(id):'')+arcHtml+matchHtml+(p?_pvLegendHtml():'');
 
   // Show "Last updated N min ago" in player mode so users know if data is fresh
   if(PLAYER_MODE&&S._lastSaveTs){
