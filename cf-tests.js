@@ -124,11 +124,11 @@ makeSession(20, 2); eq(CF.waitCap(), 5, '2 courts / mult 2 → cap 5');
 makeSession(20, 3); eq(CF.waitCap(), 7, '3 courts / mult 2 → cap 7');
 makeSession(20, 4); eq(CF.waitCap(), 9, '4 courts / mult 2 → cap 9');
 makeSession(20, 3, 1); eq(CF.waitCap(), 4, '3 courts / mult 1 (social) → cap 4');
-// [EXPERIMENT] phase-3 wait slack: P1/P2 = nc*mult+1, P3 = floor(nc*mult*1.5)+1 (looser late)
-makeSession(20, 3); S.session.cfMatchCount = 40; // mc 40 > np*1.2=24 → phase 3
-eq(CF.waitCap(), 10, 'phase 3 cap loosened to floor(nc*mult*1.5)+1 = 10');
-makeSession(20, 3); S.session.cfMatchCount = 0; // phase 1
-eq(CF.waitCap(), 7, 'phase 1 cap unchanged at nc*mult+1 = 7');
+// phase-independent: all phases equal (P3 wait-slack + tighten experiment reverted — the sim
+// showed partner gap RISES P1→P3 regardless, and tightening the P3 target made late gaps WIDER
+// because availability, not the cap, is the binding constraint. Constant cap restored.)
+makeSession(20, 3); S.session.cfMatchCount = 40;
+eq(CF.waitCap(), 7, 'cap is constant across phases (no graduation)');
 
 // ── Tests: bench floor raises cap when room is too full ─────────────────────
 section('waitCap() — bench floor for a crowded room');

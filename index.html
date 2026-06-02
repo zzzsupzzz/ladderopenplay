@@ -5862,12 +5862,7 @@ const CF={
     // rotation structure — an outlier's rank-neighbours are rarely benched together — not wait
     // budget), so it only lengthened waits. Reverted to constant; helper kept as the single
     // source of truth that every forcing threshold + the sim gate read from.
-    // [EXPERIMENT] Phase-3 wait slack: loosen the cap late (nc*mult*1.5 = nc*3 for mult=2)
-    // so the scheduler can defer mediocre-fit seatings 2 extra cycles and hold out for a
-    // tight match, paid for by longer late-session waits. Paired with tightened P3 skill
-    // targets in _phaseSkillCaps. Revert pf to constant 1 if the per-phase P.GAP/OPP Δ
-    // curves don't improve in the sim.
-    const pf=phase===3?1.5:1;
+    const pf=1;
     return Math.max(Math.floor(nc*mult*pf)+1, Math.ceil(bench/4)+1);
   },
   waitCap(){return this.waitCapForPhase(this._sessPhaseNum());},
@@ -7130,12 +7125,8 @@ const CF={
     // partner gap into late session), which is backwards from the intended ladder arc (P3 should
     // be the TIGHTEST). The wait-cap is now held by the pause fix + hard-wait net, so the soft
     // skill targets don't need loosening to avoid starvation. (Soft target; hard guard ~11 ranks.)
-    // [EXPERIMENT] Phase C (late) skill targets tightened by 1 rank below the preset
-    // (cPartner-1 / cTeam-1, floored) to demand level-matched late games, paid for by the
-    // looser P3 wait cap (waitCapForPhase pf=1.5) that gives the scheduler slack to wait for
-    // the tighter fit. Revert to plain _pp.cPartner/_pp.cTeam if the arc doesn't materialize.
-    const partnerRanks=(phase==='A'?8:phase==='B'?6:Math.max(2,_pp.cPartner-1))+slack;
-    const teamRanks=(phase==='A'?5:phase==='B'?4:Math.max(1,_pp.cTeam-1))+slack;
+    const partnerRanks=(phase==='A'?8:phase==='B'?6:_pp.cPartner)+slack;
+    const teamRanks=(phase==='A'?5:phase==='B'?4:_pp.cTeam)+slack;
     return {partner:Math.round(partnerRanks*srPerRank),team:Math.round(teamRanks*srPerRank),partnerRanks,teamRanks,phase};
   },
   // Loose hard outer guard (~11 ranks) — blocks only egregious carry pairings. Graduated
