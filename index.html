@@ -3503,6 +3503,79 @@ function discardLobby(){
 
 /* § RENDER:STANDINGS */
 /* ── RENDER: STANDINGS ───────────────────────────── */
+// ── Progression helpers (scoreboard "feel") ────────────────────────────────
+// Current trailing streak from a match log (assumed chronological). {n,type:'W'|'L'|''}.
+function _streakOf(log,id){
+  let n=0,type='';
+  for(const m of (log||[])){
+    if(!m.t1?.includes(id)&&!m.t2?.includes(id))continue;
+    const inT1=m.t1.includes(id),won=inT1?m.s1>m.s2:m.s2>m.s1,tie=m.s1===m.s2;
+    if(tie)continue; // a tie neither extends nor breaks a streak
+    const t=won?'W':'L';
+    if(t===type)n++;else{type=t;n=1;}
+  }
+  return {n,type};
+}
+// Percentile tier for a rank within `total` ranked players (lower rank = better tier).
+// key is ordinal (3=Gold>2=Silver>1=Bronze) so cross-session promotion is a simple compare.
+function _tierOf(rank,total){
+  if(!rank||!total)return null;
+  const pct=rank/total;
+  if(pct<=0.25)return {key:3,label:'Gold',emoji:'🥇',color:'#fbbf24'};
+  if(pct<=0.60)return {key:2,label:'Silver',emoji:'🥈',color:'#cbd5e1'};
+  return {key:1,label:'Bronze',emoji:'🥉',color:'#d8a373'};
+}
+// End-of-night superlatives for a (usually just-ended) session — the communal payoff.
+function _awardsHtml(sess){
+  if(!sess||!sess.players||sess.players.length<3)return '';
+  const log=sess.cfLog||[];if(!log.length)return '';
+  const nm=id=>{const p=sess.players.find(x=>x.id===id)||gp(id);return p?esc(p.name):'?';};
+  const ranked=sess.players.filter(p=>!p.isNR);
+  let mi=null;ranked.forEach(p=>{const d=Math.round((p.sRating||0)-(p.startRating||0));if(mi==null||d>mi.d)mi={id:p.id,d};});
+  let bc=null;ranked.forEach(p=>{const cr=sess.cfRanks?.[p.id];if(!cr||cr.initRank==null||cr.rank==null)return;const c=cr.initRank-cr.rank;if(bc==null||c>bc.c)bc={id:p.id,c};});
+  let hh=null;ranked.forEach(p=>{let s=0,b=0;log.forEach(m=>{if(!m.t1?.includes(p.id)&&!m.t2?.includes(p.id))return;const inT1=m.t1.includes(p.id),won=inT1?m.s1>m.s2:m.s2>m.s1,tie=m.s1===m.s2;if(won){s++;if(s>b)b=s;}else if(!tie)s=0;});if(hh==null||b>hh.b)hh={id:p.id,b};});
+  const rnkAt=(m,id)=>{const ids=[...m.t1,...m.t2];const idx=ids.indexOf(id);if(idx>=0&&m.sessionRanks?.[idx]>0)return m.sessionRanks[idx];return sess.cfRanks?.[id]?.rank||0;};
+  let gs=null;
+  log.forEach(m=>{
+    if(!m.t1||!m.t2||m.s1===m.s2)return;
+    const win=m.s1>m.s2?m.t1:m.t2,los=m.s1>m.s2?m.t2:m.t1;
+    const wr=win.map(id=>rnkAt(m,id)).filter(r=>r>0),lr=los.map(id=>rnkAt(m,id)).filter(r=>r>0);
+    if(wr.length<2||lr.length<2)return;
+    const up=(wr.reduce((a,b)=>a+b,0)/wr.length)-(lr.reduce((a,b)=>a+b,0)/lr.length); // +=winners lower-ranked
+    if(up>0&&(gs==null||up>gs.up))gs={win:[...win],up:Math.round(up)};
+  });
+  const card=(emoji,title,who,detail)=>who?`<div style="flex:1;min-width:118px;background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.2);border-radius:8px;padding:7px 9px"><div style="font-size:.58rem;color:var(--mu);letter-spacing:.04em">${emoji} ${title}</div><div style="font-size:.79rem;font-weight:700;color:var(--tx);margin-top:1px">${who}</div><div style="font-size:.62rem;color:var(--go)">${detail}</div></div>`:'';
+  const cards=[
+    mi&&mi.d>0?card('📈','MOST IMPROVED',nm(mi.id),`+${mi.d} rating`):'',
+    bc&&bc.c>0?card('🚀','BIGGEST CLIMBER',nm(bc.id),`▲${bc.c} spot${bc.c===1?'':'s'}`):'',
+    hh&&hh.b>=2?card('🔥','HOT HAND',nm(hh.id),`${hh.b}-game streak`):'',
+    gs&&gs.up>=2?card('🗡️','GIANT SLAYER',gs.win.map(nm).join(' & '),'upset a higher pair'):''
+  ].filter(Boolean).join('');
+  if(!cards)return '';
+  return `<div style="margin:10px 0 6px"><div style="font-size:.66rem;font-weight:700;color:var(--go);letter-spacing:.06em;margin-bottom:6px">🏆 NIGHT'S AWARDS</div><div style="display:flex;gap:7px;flex-wrap:wrap">${cards}</div></div>`;
+}
+// Rating-over-the-season sparkline: the entering (all-time) rating before each past session,
+// chronological, capped with the current rating. The long-term "am I climbing?" view.
+function _ratingSparkHtml(id){
+  const pts=[];
+  [...S.archive].reverse().forEach(s=>{const ap=(s.players||[]).find(x=>x.id===id);if(ap&&!ap.isNR&&ap.startRating!=null)pts.push(Math.round(ap.startRating));});
+  const cur=gp(id);if(cur&&!cur.isNR&&cur.rating!=null)pts.push(Math.round(cur.rating));
+  if(pts.length<3)return ''; // need a few points before a trajectory means anything
+  const min=Math.min(...pts),max=Math.max(...pts),rng=Math.max(1,max-min);
+  const W=240,H=44,pad=5,step=(W-pad*2)/(pts.length-1);
+  const xy=pts.map((v,i)=>[pad+i*step,H-pad-((v-min)/rng)*(H-pad*2)]);
+  const poly=xy.map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  const last=xy[xy.length-1],net=pts[pts.length-1]-pts[0];
+  const col=net>0?'var(--gr)':net<0?'var(--re)':'var(--mu)';
+  return `<div class="card" style="margin-bottom:11px">
+    <div class="ct" style="margin-bottom:6px">📈 Rating Trajectory <span style="font-size:.62rem;color:${col};font-weight:600">${net>=0?'+':''}${net} over ${pts.length} sessions</span></div>
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;overflow:visible">
+      <polyline points="${poly}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3" fill="${col}"/>
+    </svg>
+    <div style="font-size:.62rem;color:var(--mu);margin-top:3px">Best: ${max} · Now: ${pts[pts.length-1]}</div>
+  </div>`;
+}
 function renderSessStd(){
   const el=document.getElementById('sess-std');
   if(!el)return;
@@ -3704,10 +3777,17 @@ function renderSessStd(){
     const waitColor=mq.maxWait==null?'var(--mu)':mq.maxWait<=waitGreenMax?'var(--gr)':mq.maxWait<=waitOrangeMax?'var(--or)':'var(--re)';
     const waitLabel=mq.maxWait!=null?mq.maxWait:'—';
     const waitTitle=mq.maxWait!=null?`Max wait: ${mq.maxWait} matches · Avg: ${mq.avgWait} · Threshold: ${waitOrangeMax}`:'No wait data';
-    return `<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.79rem">${esc(name)}${tag?`<span class="ptag">${esc(tag)}</span>`:''}${nrTag}${courtTag}${sp.status==='left'?'<span class="tleft">LEFT</span>':''}</td><td style="font-size:.73rem;color:var(--mu)">${sp.wins}W/${sp.losses}L${sp.ties?'/'+sp.ties+'T':''}</td><td><span class="dl ${d>0?'du':d<0?'dd':'dz'}">${d>=0?'+':''}${d}</span></td><td><span class="rv">${rtgCell}</span></td><td style="font-size:.71rem;color:${oppGapColor};font-weight:600" title="Avg session rank gap vs opponents">${oppGapLabel}</td><td style="font-size:.71rem;color:${pGapColor}" title="Worst rating gap with a partner">${mq.worstPGap!=null?mq.worstPGap:'—'}</td><td style="font-size:.71rem;color:var(--mu)" title="Unique partners / games played">${mq.partners||0}/${mq.g}</td><td style="font-size:.71rem;color:${waitColor};font-weight:600" title="${waitTitle}">${waitLabel}</td></tr>`;
+    // Progression chips: movement vs seed rank (▲/▼), and a live win-streak flame.
+    const _ir=sess.cfRanks?.[sp.id]?.initRank;
+    const _mv=(_ir!=null&&!sp.isNR)?(_ir-(i+1)):0;
+    const mvChip=_mv>0?`<span title="Up ${_mv} from seed #${_ir}" style="font-size:.58rem;color:var(--gr);font-weight:700;margin-left:3px">▲${_mv}</span>`
+      :_mv<0?`<span title="Down ${-_mv} from seed #${_ir}" style="font-size:.58rem;color:var(--re);font-weight:700;margin-left:3px">▼${-_mv}</span>`:'';
+    const _stk=_streakOf(sess.cfLog,sp.id);
+    const streakBadge=(_stk.type==='W'&&_stk.n>=2)?`<span title="${_stk.n}-game win streak" style="font-size:.6rem;color:var(--or);margin-left:3px">🔥${_stk.n}</span>`:'';
+    return `<tr class="r${i+1}"><td><span class="rnk">${i+1}</span>${mvChip}</td><td style="font-weight:600;font-size:.79rem">${esc(name)}${tag?`<span class="ptag">${esc(tag)}</span>`:''}${nrTag}${streakBadge}${courtTag}${sp.status==='left'?'<span class="tleft">LEFT</span>':''}</td><td style="font-size:.73rem;color:var(--mu)">${sp.wins}W/${sp.losses}L${sp.ties?'/'+sp.ties+'T':''}</td><td><span class="dl ${d>0?'du':d<0?'dd':'dz'}">${d>=0?'+':''}${d}</span></td><td><span class="rv">${rtgCell}</span></td><td style="font-size:.71rem;color:${oppGapColor};font-weight:600" title="Avg session rank gap vs opponents">${oppGapLabel}</td><td style="font-size:.71rem;color:${pGapColor}" title="Worst rating gap with a partner">${mq.worstPGap!=null?mq.worstPGap:'—'}</td><td style="font-size:.71rem;color:var(--mu)" title="Unique partners / games played">${mq.partners||0}/${mq.g}</td><td style="font-size:.71rem;color:${waitColor};font-weight:600" title="${waitTitle}">${waitLabel}</td></tr>`;
   }).join('');
 
-  el.innerHTML=labelHtml+stakesHtml+`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Wins / Losses / Ties">W/L</th><th title="Rating change this session">+/−</th><th title="Current session rating">RTG</th><th title="Opponent gap: avg opponent session rank minus yours. Green = well matched, red = big mismatch">OPP Δ</th><th title="Worst partner gap: biggest session rank difference with a teammate">P.GAP</th><th title="Unique partners / total games played">P/G</th><th title="Worst wait: most completed matches by others while this player sat in queue between games. Green ≤ courts, orange ≤ courts×2, red = too long">WAIT</th></tr></thead><tbody>${rows}</tbody></table>
+  el.innerHTML=labelHtml+(isFinal?_awardsHtml(sess):'')+stakesHtml+`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Wins / Losses / Ties">W/L</th><th title="Rating change this session">+/−</th><th title="Current session rating">RTG</th><th title="Opponent gap: avg opponent session rank minus yours. Green = well matched, red = big mismatch">OPP Δ</th><th title="Worst partner gap: biggest session rank difference with a teammate">P.GAP</th><th title="Unique partners / total games played">P/G</th><th title="Worst wait: most completed matches by others while this player sat in queue between games. Green ≤ courts, orange ≤ courts×2, red = too long">WAIT</th></tr></thead><tbody>${rows}</tbody></table>
   <div style="font-size:.62rem;color:var(--m2);margin-top:5px;padding:0 2px">+/− = rating change · OPP Δ = avg opponent session rank vs yours (<span style="color:var(--gr)">green</span>=close, <span style="color:var(--re)">red</span>=mismatch) · P.GAP = worst partner gap · P/G = unique partners / games · WAIT = max matches others played while you sat out between games</div>`;
 }
 // renderAllTime removed — all-time ratings visible in Setup player list
@@ -3910,8 +3990,15 @@ function _seasonLadderHtml(){
   };
   const rows=ranked.map((p,i)=>{
     const r=i+1;
+    // Tier badge (percentile) + "catch the rung above" target — the concrete climb goal.
+    const tier=_tierOf(r,ranked.length);
+    const tierBadge=tier?`<span title="${tier.label} tier" style="margin-right:3px">${tier.emoji}</span>`:'';
+    let catchLine='';
+    if(i===0){catchLine=`<div style="font-size:.58rem;color:var(--go);font-weight:400;margin-top:1px">👑 Top of the ladder</div>`;}
+    else{const _gap=Math.round((ranked[i-1].rating||0)-(p.rating||0));
+      if(_gap>0)catchLine=`<div style="font-size:.58rem;color:var(--mu);font-weight:400;margin-top:1px">+${_gap} to catch ${esc(ranked[i-1].name)}</div>`;}
     return `<tr class="r${r}"><td><span class="rnk">${r}</span></td>`+
-      `<td style="font-weight:600;font-size:.79rem">${esc(p.name)}${p.tag?`<span class="ptag">${esc(p.tag)}</span>`:''}</td>`+
+      `<td style="font-weight:600;font-size:.79rem">${tierBadge}${esc(p.name)}${p.tag?`<span class="ptag">${esc(p.tag)}</span>`:''}${catchLine}</td>`+
       `<td style="font-size:.72rem">${mvCell(p.id)}</td>`+
       `<td style="font-size:.71rem;color:var(--mu)">${sessCount[p.id]||0}</td>`+
       `<td style="font-size:.71rem;color:var(--mu)">${p.wins||0}-${p.losses||0}</td>`+
@@ -9951,8 +10038,18 @@ function renderPlayerView(){
       :_climb>0?`<div style="font-size:.82rem;font-weight:700;color:var(--gr);margin:-2px 0 4px">▲ Climbed ${_climb} spot${_climb===1?'':'s'} tonight <span style="color:var(--mu);font-weight:400">(from #${_initR})</span></div>`
       :_climb<0?`<div style="font-size:.82rem;font-weight:700;color:var(--or);margin:-2px 0 4px">▼ Down ${-_climb} <span style="color:var(--mu);font-weight:400">(from #${_initR}) — climb back up!</span></div>`
       :`<div style="font-size:.78rem;color:var(--mu);margin:-2px 0 4px">Holding #${_rk} — win to climb ↑</div>`;
+    // "Catch the rung above" — exact session-rating gap to the player one rank up.
+    let _catchHtml='';
+    if(_rk&&_rk>1&&!sp.isNR){
+      const _aboveId=Object.entries(S.session?.cfRanks||{}).find(([pid,e])=>e.rank===_rk-1)?.[0];
+      const _above=_aboveId?gsp(_aboveId):null;
+      const _g=_above?Math.round((_above.sRating||0)-(sp.sRating||0)):0;
+      if(_above&&_g>0)_catchHtml=`<div style="font-size:.74rem;color:var(--cy);margin:2px 0 0">🎯 +${_g} to catch ${esc(_above.name||gp(_aboveId)?.name||('#'+(_rk-1)))} (#${_rk-1})</div>`;
+    }else if(_rk===1&&!sp.isNR){_catchHtml=`<div style="font-size:.74rem;color:var(--go);margin:2px 0 0">👑 Top of tonight's ladder</div>`;}
+    const _tier=_tierOf(_rk,_tot);
+    const _tierBadge=(_tier&&_rk&&!sp.isNR)?` <span title="${_tier.label} tier" style="font-size:.95rem">${_tier.emoji}</span>`:'';
     const rankHtml=(_rk&&_tot&&!sp.isNR)
-      ?`<div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--go);margin:2px 0 0">RANK #${_rk} <span style="font-size:.8rem;color:var(--mu)">of ${_tot}</span></div>${_climbHtml}`
+      ?`<div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--go);margin:2px 0 0">RANK #${_rk} <span style="font-size:.8rem;color:var(--mu)">of ${_tot}</span>${_tierBadge}</div>${_climbHtml}${_catchHtml}`
       :'';
     sessHtml=`<div class="pv-hero">
       <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;color:var(--tx)">${esc(p.name)}${p.tag?`<span class="ptag">${esc(p.tag)}</span>`:''}</div>
@@ -10047,6 +10144,20 @@ function renderPlayerView(){
         const inT1=m.t1.includes(id), won=inT1?m.s1>m.s2:m.s2>m.s1, tie=m.s1===m.s2;
         if(won){_strk++;if(_strk>_best)_best=_strk;}else if(!tie){_strk=0;}
       });
+      // Promotion / relegation vs the previous session (tier by rank-snapshot percentile).
+      let _promoHtml='';
+      {
+        const _ai=S.archive.indexOf(_recapSess);
+        const _snapNow=_recapSess.rankSnapshot, _snapPrev=_ai>=0?S.archive[_ai+1]?.rankSnapshot:null;
+        if(_snapNow&&_snapPrev&&_snapNow[id]!=null&&_snapPrev[id]!=null){
+          const _tNow=_tierOf(_snapNow[id],Object.keys(_snapNow).length);
+          const _tPrev=_tierOf(_snapPrev[id],Object.keys(_snapPrev).length);
+          if(_tNow&&_tPrev&&_tNow.key>_tPrev.key)
+            _promoHtml=`<div style="font-size:.82rem;font-weight:700;color:${_tNow.color};margin-top:8px">⬆️ Promoted to ${_tNow.emoji} ${_tNow.label}!</div>`;
+          else if(_tNow&&_tPrev&&_tNow.key<_tPrev.key)
+            _promoHtml=`<div style="font-size:.74rem;color:var(--mu);margin-top:8px">⬇️ Dropped to ${_tNow.emoji} ${_tNow.label} — climb back next time</div>`;
+        }
+      }
       const _headline=_climb==null
         ? `<div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--go)">Finished${_finish?` #${_finish}`:''}</div>`
         : _climb>0
@@ -10064,11 +10175,12 @@ function renderPlayerView(){
           ${_best>=2?_stat(`${_best}🔥`,'BEST STREAK',_best>=3?'var(--or)':'var(--tx)'):''}
           ${_stat(_ap.matchesPlayed||0,'GAMES')}
         </div>
+        ${_promoHtml}
       </div>`;
     }
   }
 
-  el.innerHTML=statusHtml+recapHtml+sessHtml+arcHtml+matchHtml;
+  el.innerHTML=statusHtml+recapHtml+sessHtml+(p?_ratingSparkHtml(id):'')+arcHtml+matchHtml;
 
   // Show "Last updated N min ago" in player mode so users know if data is fresh
   if(PLAYER_MODE&&S._lastSaveTs){

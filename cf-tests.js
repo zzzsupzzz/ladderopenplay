@@ -74,7 +74,11 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   _ranksCompatible:typeof _ranksCompatible!=='undefined'?_ranksCompatible:null,
   _initSessionRanks:typeof _initSessionRanks!=='undefined'?_initSessionRanks:null,
   gp:typeof gp!=='undefined'?gp:null, gsp:typeof gsp!=='undefined'?gsp:null,
-  _seasonLadderHtml:typeof _seasonLadderHtml!=='undefined'?_seasonLadderHtml:null};`;
+  _seasonLadderHtml:typeof _seasonLadderHtml!=='undefined'?_seasonLadderHtml:null,
+  _streakOf:typeof _streakOf!=='undefined'?_streakOf:null,
+  _tierOf:typeof _tierOf!=='undefined'?_tierOf:null,
+  _awardsHtml:typeof _awardsHtml!=='undefined'?_awardsHtml:null,
+  _ratingSparkHtml:typeof _ratingSparkHtml!=='undefined'?_ratingSparkHtml:null};`;
 
 vm.createContext(ctx);
 try {
@@ -200,6 +204,58 @@ if (APP._seasonLadderHtml) {
   ok(!/▲|▼/.test(h1), 'single snapshot → no movement arrows yet');
 } else {
   fail++; console.error('  ❌ _seasonLadderHtml not exported');
+}
+
+// ── Tests: progression helpers (streak / tier / awards / sparkline) ─────────
+section('progression helpers — _streakOf / _tierOf / _awardsHtml / _ratingSparkHtml');
+if (APP._streakOf) {
+  const log = [
+    { t1:['a','x'], t2:['y','z'], s1:3,  s2:11 }, // a loses
+    { t1:['a','x'], t2:['y','z'], s1:11, s2:5  }, // a wins
+    { t1:['a','x'], t2:['y','z'], s1:11, s2:7  }, // a wins
+    { t1:['a','x'], t2:['y','z'], s1:11, s2:9  }, // a wins → trailing W3
+  ];
+  const st = APP._streakOf(log, 'a');
+  eq(st.type, 'W', '_streakOf: trailing streak type is W');
+  eq(st.n, 3, '_streakOf: trailing win streak is 3');
+}
+if (APP._tierOf) {
+  eq(APP._tierOf(1, 20).key,  3, '_tierOf: rank 1/20 → Gold');
+  eq(APP._tierOf(5, 20).key,  3, '_tierOf: rank 5/20 (25%) → Gold');
+  eq(APP._tierOf(6, 20).key,  2, '_tierOf: rank 6/20 (30%) → Silver');
+  eq(APP._tierOf(13, 20).key, 1, '_tierOf: rank 13/20 (65%) → Bronze');
+  ok(APP._tierOf(0, 20) === null, '_tierOf: rank 0 → null');
+}
+if (APP._awardsHtml) {
+  const sess = {
+    players: [
+      { id:'a', name:'A', sRating:1250, startRating:1200, isNR:false, wins:3, losses:0, matchesPlayed:3 },
+      { id:'b', name:'B', sRating:1180, startRating:1200, isNR:false, wins:1, losses:2 },
+      { id:'c', name:'C', sRating:1090, startRating:1100, isNR:false, wins:1, losses:2 },
+      { id:'d', name:'D', sRating:1070, startRating:1100, isNR:false, wins:1, losses:2 },
+    ],
+    cfRanks: { a:{initRank:4,rank:1}, b:{initRank:1,rank:2}, c:{initRank:2,rank:3}, d:{initRank:3,rank:4} },
+    cfLog: [
+      { t1:['a','c'], t2:['b','d'], s1:11, s2:6, sessionRanks:[4,2,1,3] },
+      { t1:['a','d'], t2:['b','c'], s1:11, s2:8, sessionRanks:[1,4,2,3] },
+      { t1:['a','b'], t2:['c','d'], s1:11, s2:9, sessionRanks:[1,2,3,4] },
+    ],
+  };
+  const h = APP._awardsHtml(sess);
+  ok(/NIGHT'S AWARDS/.test(h), '_awardsHtml: renders an awards panel');
+  ok(/MOST IMPROVED/.test(h),  '_awardsHtml: includes Most Improved (A +50)');
+  ok(/HOT HAND/.test(h),       '_awardsHtml: includes Hot Hand (A won 3)');
+}
+if (APP._ratingSparkHtml) {
+  S.db = [{ id:'a', name:'A', rating:1280, isNR:false }];
+  S.archive = [
+    { id:'s2', players:[{ id:'a', startRating:1220, isNR:false }] },
+    { id:'s1', players:[{ id:'a', startRating:1200, isNR:false }] },
+  ];
+  const h = APP._ratingSparkHtml('a'); // 1200,1220,1280 → 3 pts, +80
+  ok(/Rating Trajectory/.test(h), '_ratingSparkHtml: renders trajectory with >=3 points');
+  ok(/\+80/.test(h),              '_ratingSparkHtml: net change +80 over the season');
+  ok(APP._ratingSparkHtml('nobody') === '', '_ratingSparkHtml: <3 points → empty');
 }
 
 // ── Tests: undo (snapshot + restore of pre-confirm suggestion state) ────────
