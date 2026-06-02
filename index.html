@@ -9948,8 +9948,7 @@ function _pvWhyMatch(id,partnerId,oppIds){
       const od=Math.round(Math.abs(myRank-oppAvg));
       chips.push(`<span style="color:var(--gr)">🎯 Opponents ~${od} rank${od===1?'':'s'} off</span>`);
     }
-    const wait=(typeof CF!=='undefined'&&CF.matchGap)?CF.matchGap(id):0;
-    if(wait>=2)chips.push(`<span style="color:var(--or)">⏳ You waited ${wait}</span>`);
+    // (Wait-time chip removed — players shouldn't be shown how long they've waited.)
     return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;font-size:.66rem;font-weight:600">${chips.join('')}</div>`;
   }catch(e){return '';}
 }
@@ -10136,17 +10135,14 @@ function renderPlayerView(){
         const sortedQ=[...queue].sort((a,b)=>CF.queuePriority(b,courtAvg)-CF.queuePriority(a,courtAvg));
         const qi=sortedQ.findIndex(q=>q.id===id);
         const totalQ=sortedQ.length;
-        const waitMin=Math.round((Date.now()-inQueue.since)/60000);
         const upNext=qi<2;
         statusHtml=`<div class="pv-match-now" style="border-color:${upNext?'var(--gr)':'rgba(34,211,238,.3)'}">
           <div style="font-size:.68rem;font-weight:700;color:${upNext?'var(--gr)':'var(--cy)'};letter-spacing:.08em;margin-bottom:6px">${upNext?'🏓 UP NEXT!':'⏳ IN QUEUE'}</div>
           <div style="font-family:'Bebas Neue',sans-serif;font-size:2.2rem;color:${upNext?'var(--gr)':'var(--cy)'}">#${qi+1} <span style="font-size:1rem;color:var(--mu)">of ${totalQ}</span></div>
           <div style="display:flex;gap:14px;justify-content:center;margin-top:6px">
-            <div style="text-align:center"><div style="font-size:.62rem;color:var(--mu)">WAITED</div><div style="font-weight:700">${waitMin}m</div></div>
-            <div style="text-align:center"><div style="font-size:.62rem;color:var(--mu)">EST. WAIT</div><div style="font-weight:700">${upNext?'Now!':`~${Math.max(1,Math.ceil(qi/(S.session?.courts||1)))*12}min`}</div></div>
             <div style="text-align:center"><div style="font-size:.62rem;color:var(--mu)">GAMES TONIGHT</div><div style="font-weight:700">${sp?.matchesPlayed||0}</div></div>
           </div>
-          <div style="font-size:.65rem;color:var(--m2);margin-top:7px">Matched by rating + fair wait time</div>
+          <div style="font-size:.65rem;color:var(--m2);margin-top:7px">Matched by rating + fair rotation</div>
         </div>`;
       }else if(sp&&sp.status==='left'){
         statusHtml=`<div class="pv-match-now" style="border-color:rgba(248,113,113,.3)">
