@@ -119,21 +119,35 @@ function makeSession(n, nc, mult = 2) {
 }
 
 // ── Tests: WAIT CAP scales with court count ─────────────────────────────────
-section('waitCap() — court scaling (constant cap = nc*mult+1)');
-makeSession(20, 2); eq(CF.waitCap(), 5, '2 courts / mult 2 → cap 5');
-makeSession(20, 3); eq(CF.waitCap(), 7, '3 courts / mult 2 → cap 7');
-makeSession(20, 4); eq(CF.waitCap(), 9, '4 courts / mult 2 → cap 9');
-makeSession(20, 3, 1); eq(CF.waitCap(), 4, '3 courts / mult 1 (social) → cap 4');
-// phase-independent: all phases equal (P3 wait-slack + tighten experiment reverted — the sim
-// showed partner gap RISES P1→P3 regardless, and tightening the P3 target made late gaps WIDER
-// because availability, not the cap, is the binding constraint. Constant cap restored.)
-makeSession(20, 3); S.session.cfMatchCount = 40;
-eq(CF.waitCap(), 7, 'cap is constant across phases (no graduation)');
+section('waitCap() — P1 base nc*mult+1, [RESV] graduated hold P2 +1 / P3 +2');
+// P1 (mc=0, hold=0) → base = nc*mult+1
+makeSession(20, 2); eq(CF.waitCap(), 5, '2 courts / mult 2 / P1 → cap 5');
+makeSession(20, 3); eq(CF.waitCap(), 7, '3 courts / mult 2 / P1 → cap 7');
+makeSession(20, 4); eq(CF.waitCap(), 9, '4 courts / mult 2 / P1 → cap 9');
+makeSession(20, 3, 1); eq(CF.waitCap(), 4, '3 courts / mult 1 (social) / P1 → cap 4');
+// [RESV] graduated hold budget — paired with the anchor skill-hold that spends it.
+makeSession(20, 3); S.session.cfMatchCount = 18; // np=20 → 12<=mc<24 → phase 2
+eq(CF.waitCap(), 8, 'phase 2 cap = base+1 = 8');
+makeSession(20, 3); S.session.cfMatchCount = 40; // mc>=24 → phase 3
+eq(CF.waitCap(), 9, 'phase 3 cap = base+2 = 9');
 
 // ── Tests: bench floor raises cap when room is too full ─────────────────────
 section('waitCap() — bench floor for a crowded room');
 makeSession(40, 3); // bench = 40-12 = 28, ceil(28/4)+1 = 8 > 7
 eq(CF.waitCap(), 8, 'crowded room raises cap to fairFloor+1');
+
+// ── Tests: [RESV] %-of-field skill targets, court-scaled ────────────────────
+section('_phaseSkillCaps() — % of field width, court-scaled');
+makeSession(20, 3); S.session.cfMatchCount = 0;  // phase A (mc<np)
+eq(CF._phaseSkillCaps([]).partnerRanks, 10, '3 courts / P1 → 50% of 20 ≈ 10 ranks');
+makeSession(20, 3); S.session.cfMatchCount = 55; // phase C (mc>=np*2.5)
+eq(CF._phaseSkillCaps([]).partnerRanks, 6, '3 courts / P3 → 30% of 20 ≈ 6 ranks');
+makeSession(20, 2); S.session.cfMatchCount = 55; // 2 courts looser (+10%)
+eq(CF._phaseSkillCaps([]).partnerRanks, 8, '2 courts / P3 → 40% ≈ 8 ranks (looser)');
+ok(Math.abs(CF._phaseSkillCaps([]).partnerPct - 0.40) < 1e-9, '2 courts / P3 partnerPct = 0.40');
+makeSession(20, 4); S.session.cfMatchCount = 55; // 4 courts tighter (-10%)
+eq(CF._phaseSkillCaps([]).partnerRanks, 4, '4 courts / P3 → 20% ≈ 4 ranks (tighter)');
+ok(Math.abs(CF._phaseSkillCaps([]).partnerPct - 0.20) < 1e-9, '4 courts / P3 partnerPct = 0.20');
 
 // ── Tests: _sessionPhase is games-based ─────────────────────────────────────
 section('_sessPhaseNum() — progress-based phase boundaries (np*0.6, np*1.2)');

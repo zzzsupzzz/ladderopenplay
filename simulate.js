@@ -715,7 +715,10 @@ const SIM = (() => {
           const _capBench = Math.max(0, _capN - 4 * courts);
           const _capFloor = Math.ceil(_capBench / 4);
           const _mult = 2; // cfWaitCapMult default (Competitive); Social would be 1
-          const _base = Math.floor(courts * _mult) + 1;
+          // [RESV] Session-wide ceiling = loosest-phase cap = base + P3 hold(2). Mirrors
+          // CF.maxWaitCap()=waitCapForPhase(3). The anchor skill-hold lets P3 waits run to this
+          // ceiling; the report must use it or it false-flags legit late holds. Revert with the app.
+          const _base = Math.floor(courts * _mult) + 1 + 2;
           const _waitCap = Math.max(_base, _capFloor + 1);
           const _roomTooFull = (_capFloor + 1) > _base;
           log(`--- WAIT CAP gate (N=${_capN}, courts=${courts}, bench=${_capBench}, fairFloor=${_capFloor}, cap=${_waitCap}${_roomTooFull ? ' — room too full for nc*mult+1 target' : ''}) ---`);
