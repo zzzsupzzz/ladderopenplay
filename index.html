@@ -9992,7 +9992,7 @@ function _pvLeaderboardHtml(sess,viewedId,isLive){
   return `<div class="card" style="margin-bottom:11px">
     <div class="ct" style="margin-bottom:8px">${isLive?'🏓 TONIGHT\'S LEADERBOARD':'🏁 FINAL LEADERBOARD'} <span style="font-size:.62rem;font-weight:600;color:var(--mu)">${N} players</span></div>
     ${!isLive?_awardsHtml(sess):''}
-    <div style="max-height:42vh;overflow-y:auto;-webkit-overflow-scrolling:touch">${body}</div>
+    <div>${body}</div>
   </div>`;
 }
 // Collapsed "what do these mean?" legend for the player view. The session-vs-all-time rating
