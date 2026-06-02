@@ -1128,6 +1128,11 @@ const SYNC={
        if(isFirstLoad){
          renderDB();renderRoster();renderHistory();renderArchive();
          renderLive(); // always render live — player/observer need it too
+         // Player mode renders renderPlayerView (the live tab render above doesn't touch it).
+         // Without this, a phone opened to ?view=player renders ONCE before Firebase data lands
+         // and is never refreshed after hydration — so the leaderboard/stats stay empty until a
+         // later sync tick or tap. (Caught by the pre-night browser verification pass.)
+         if(PLAYER_MODE&&typeof renderPlayerView==='function')renderPlayerView();
          _stopLoadingProgressTimer();
          const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
          if(_pageFirstLoad&&(S.session?.status==='active'||S.session?.status==='lobby')&&!PLAYER_MODE){
