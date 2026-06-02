@@ -10018,13 +10018,25 @@ function renderPlayerView(){
 
   const id=sel?.value||'';
   if(!id){
+    // Even before anyone picks their name, show the SHARED session leaderboard — it's a public
+    // board, not personal. (Per-player stats still need a name selected; this just makes the
+    // standings visible up front, which is what most players open the page to see.)
+    let _noSelLb='';
+    {
+      const _filt=document.getElementById('pv-sess-filter')?.value||'';
+      const _lbLive=(_filt==='__current__'||!_filt)&&S.session&&(S.session.cfLog||[]).length>0;
+      const _lbSess=_lbLive?S.session
+        :((_filt&&_filt!=='__current__')?S.archive.find(s=>s.id===_filt)
+          :(S.archive.length?S.archive[0]:null));
+      if(_lbSess)_noSelLb=_pvLeaderboardHtml(_lbSess,'',!!_lbLive);
+    }
     if(PLAYER_MODE){
       el.innerHTML=`<div class="card" style="text-align:center;padding:28px 20px">
         <div style="font-size:2.5rem;margin-bottom:10px">🏓</div>
         <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--cy);margin-bottom:8px">Find Your Name</div>
-        <div style="font-size:.85rem;color:var(--tx);margin-bottom:6px">Type the first few letters of your name in the search box above.</div>
-        <div style="font-size:.75rem;color:var(--mu)">Your live queue position, match info, and stats will appear here.</div>
-      </div>`;
+        <div style="font-size:.85rem;color:var(--tx);margin-bottom:6px">Type the first few letters of your name in the search box above to see your stats.</div>
+        <div style="font-size:.75rem;color:var(--mu)">Your live queue position, match info, and personal stats will appear here.</div>
+      </div>`+_noSelLb;
       // Auto-focus the search input so the keyboard opens immediately on mobile
       setTimeout(()=>{const si=document.getElementById('pv-search');if(si&&!si.value)si.focus();},150);
     } else {
@@ -10032,7 +10044,7 @@ function renderPlayerView(){
         <div style="font-size:2rem;margin-bottom:8px">👤</div>
         <div style="font-weight:600;margin-bottom:5px">Select a player above</div>
         <div style="font-size:.75rem;color:var(--mu)">Choose a player to view their stats.</div>
-      </div>`;
+      </div>`+_noSelLb;
     }
     return;
   }
