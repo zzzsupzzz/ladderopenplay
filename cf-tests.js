@@ -79,7 +79,8 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   _tierOf:typeof _tierOf!=='undefined'?_tierOf:null,
   _awardsHtml:typeof _awardsHtml!=='undefined'?_awardsHtml:null,
   _ratingSparkHtml:typeof _ratingSparkHtml!=='undefined'?_ratingSparkHtml:null,
-  _pvLeaderboardHtml:typeof _pvLeaderboardHtml!=='undefined'?_pvLeaderboardHtml:null};`;
+  _pvLeaderboardHtml:typeof _pvLeaderboardHtml!=='undefined'?_pvLeaderboardHtml:null,
+  _sessionLbRows:typeof _sessionLbRows!=='undefined'?_sessionLbRows:null};`;
 
 vm.createContext(ctx);
 try {
@@ -199,6 +200,10 @@ if (APP._seasonLadderHtml) {
   ok(/SEASON LADDER/.test(h), 'renders a season ladder');
   ok(/▲1/.test(h), 'A shows ▲1 (climbed from #2 to #1)');
   ok(/▼1/.test(h), 'B shows ▼1 (slipped from #1 to #2)');
+  // [consistency sweep] season ladder is RATING-only — no wins-derived "catch" numbers, labeled clearly
+  ok(!/to catch/.test(h), 'season ladder has NO "wins to catch" lines (rating ladder)');
+  ok(/skill rating/.test(h), 'season ladder labels itself "by skill rating"');
+  ok(/Top of the ladder/.test(h), '#1 gets the crown');
   // first-season case: a single snapshot → no movement shown
   S.archive = [{ id: 's1', players: S.db.map(p => ({ id: p.id })), rankSnapshot: { a: 1, b: 2, c: 3 } }];
   const h1 = APP._seasonLadderHtml();
@@ -271,6 +276,22 @@ if (APP._pvLeaderboardHtml) {
   ok(/YOU/.test(h), '_pvLeaderboardHtml: highlights the viewed player');
   ok(h.indexOf('Ann') < h.indexOf('Bob'), '_pvLeaderboardHtml: orders by wins (Ann 3W above Bob 1W)');
   ok(APP._pvLeaderboardHtml({players:[{id:'a',name:'A',wins:0,losses:0}]},'a',true) === '', '_pvLeaderboardHtml: <2 players → empty');
+  // [consistency sweep] shows point-diff (the tiebreaker) + labels the wins-first basis; not rating
+  ok(/ranked by/i.test(h), '_pvLeaderboardHtml: labels the "ranked by wins" basis');
+  ok(/\+15/.test(h), '_pvLeaderboardHtml: shows point differential (Ann pd +15), not absolute rating');
+}
+// [consistency sweep] _sessionLbRows is the SINGLE order used by hero rank + leaderboard + end modal.
+// The key invariant: tied on wins → POINT DIFF breaks the tie (NOT rating). This is exactly the
+// "Frankie 976 ranks above Morgan 1314" case being correct, and the source of the old confusion.
+if (APP._sessionLbRows) {
+  const tied = { players: [
+    { id:'lo', name:'Lo', wins:2, losses:0, ptsFor:22, ptsAgainst:20, sRating:1300 }, // 2W · pd +2 · high rating
+    { id:'hi', name:'Hi', wins:2, losses:0, ptsFor:22, ptsAgainst:10, sRating:900 },  // 2W · pd +12 · low rating
+    { id:'lw', name:'Lw', wins:0, losses:2, ptsFor:5,  ptsAgainst:30, sRating:1500 }, // 0W · highest rating
+  ]};
+  const rows = APP._sessionLbRows(tied);
+  eq(rows[0].id, 'hi', '_sessionLbRows: tied wins → higher point-diff wins (not higher rating)');
+  eq(rows[2].id, 'lw', '_sessionLbRows: fewer wins ranks last even with the highest rating');
 }
 
 // ── Tests: undo (snapshot + restore of pre-confirm suggestion state) ────────
