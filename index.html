@@ -4929,8 +4929,6 @@ function doEndSession(){
       cfRanks:JSON.parse(JSON.stringify(S.session.cfRanks||{})),
       cfLog:JSON.parse(JSON.stringify(S.session.cfLog||[]))};
     S.archive.unshift(arch);
-    const topN=arch.players.length>=6?3:1; // show 1 winner for small sessions
-    const top=[...arch.players].sort((a,b)=>b.sRating-a.sRating).slice(0,topN);
     const n=S.session.name;S._sessionEndedId=arch.id;S.checkedIn.clear();S.session=null;
     CF._confirmAllBusy=false;CF._confirmAllLastTs=0;
     if(_cfTick){clearInterval(_cfTick);_cfTick=null;}
@@ -4950,17 +4948,23 @@ function doEndSession(){
     updateHeader();renderDB();renderRoster();renderHistory();renderArchive();renderStandings();updatePvSessFilter();
     const totalM=(arch.cfLog||[]).length;
     const modeLabel=`${totalM} matches · Continuous Flow`;
-    openModal(`<div class="modal-title" style="text-align:center">🏆 Session Complete!</div>
-      <div style="text-align:center;margin-bottom:12px;color:var(--mu);font-size:.76rem">${esc(n)}<br/>${modeLabel} · ${arch.players.length} players</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:.86rem;color:var(--mu);letter-spacing:.5px;margin-bottom:6px">🥇 TOP PERFORMERS</div>
-      ${top.map((sp,i)=>`<div class="prow" style="cursor:default;margin-bottom:4px">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:${i===0?'var(--go)':i===1?'#c0ccd8':'#d4956a'};min-width:22px">${i+1}</div>
+    const _finalRows=[...arch.players].sort((a,b)=>b.sRating-a.sRating).map((sp,i)=>{
+      const d=Math.round(sp.sRating-sp.startRating);
+      const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
+      const col=i===0?'var(--go)':i===1?'#c0ccd8':i===2?'#d4956a':'var(--mu)';
+      return `<div class="prow" style="cursor:default;margin-bottom:3px">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.05rem;color:${col};min-width:26px;text-align:center">${medal||(i+1)}</div>
         <div class="pnc"><div class="pn">${esc(sp.name)}${sp.tag?`<span class="ptag">${esc(sp.tag)}</span>`:''}</div></div>
-        <div style="font-size:.75rem;color:var(--mu)">${sp.wins}W/${sp.losses}L</div>
+        <div style="font-size:.74rem;color:var(--mu)">${sp.wins}W/${sp.losses}L</div>
         <div class="pr">${Math.round(sp.sRating)}</div>
-        ${(()=>{const d=Math.round(sp.sRating-sp.startRating);return d!==0?`<span class="dl ${d>0?'du':'dd'}">${d>=0?'+':''}${d}</span>`:'';})()} 
-      </div>`).join('')}
-      <button class="btn bp" style="width:100%;margin-top:14px" onclick="closeModal();switchTab('standings')">View Full Standings →</button>`);
+        ${d!==0?`<span class="dl ${d>0?'du':'dd'}">${d>=0?'+':''}${d}</span>`:''}
+      </div>`;}).join('');
+    openModal(`<div class="modal-title" style="text-align:center">🏆 Session Complete!</div>
+      <div style="text-align:center;margin-bottom:10px;color:var(--mu);font-size:.76rem">${esc(n)}<br/>${modeLabel} · ${arch.players.length} players</div>
+      ${_awardsHtml(arch)}
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:.86rem;color:var(--go);letter-spacing:.5px;margin:10px 0 6px">🏁 FINAL STANDINGS</div>
+      <div style="max-height:44vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin:0 -4px;padding:0 4px">${_finalRows}</div>
+      <button class="btn bp" style="width:100%;margin-top:12px" onclick="closeModal();switchTab('standings')">View Full Standings →</button>`);
     // Stay on current tab — user navigates via the modal button above
   });
 }
@@ -9133,7 +9137,10 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       else{
         const courtAvg=queue.reduce((s,q)=>s+this.cfRating(q.id),0)/queue.length;
         const sorted=[...queue].sort((a,b)=>this.queuePriority(b,courtAvg)-this.queuePriority(a,courtAvg));
-        el.innerHTML=sorted.map((q,idx)=>{
+        // Live-order explainer: the queue is a fairness POOL, not a fixed line — positions shift
+        // as games finish, so set that expectation instead of letting players track a jiggling #.
+        const _qExplain=`<div style="font-size:.6rem;color:var(--mu);padding:1px 2px 7px;line-height:1.45">↕ Order updates live by wait time &amp; fairness — a player's spot shifts as games finish. <strong style="color:var(--gr)">▶ Up next</strong> = first in line to be seated.</div>`;
+        el.innerHTML=_qExplain+sorted.map((q,idx)=>{
           const p=gp(q.id),sp=gsp(q.id);
           const waitMin=Math.round((Date.now()-q.since)/60000);
           const wcls=waitMin>=20?'cf-wait-hot':waitMin>=12?'cf-wait-warn':'cf-wait-ok';
@@ -9159,6 +9166,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
           if(isLeavingSoon)reasons.push(`<span style="font-size:.59rem;color:var(--or);font-weight:700;cursor:pointer" onclick="cfLeaveSoon('${q.id}')" title="Tap to cancel leaving soon">🚶 LEAVING SOON ✕</span>`);
           if(isPinned)reasons.push(`<span style="font-size:.59rem;color:var(--pu);font-weight:700">📌 PINNED</span>`);
           else if(upNext)reasons.push(`<span style="font-size:.59rem;color:var(--gr);font-weight:700">▶ UP NEXT</span>`);
+          else if(idx<6)reasons.push(`<span style="font-size:.59rem;color:var(--cy)">🟦 On deck</span>`);
           if(waitMin>=20)reasons.push(`<span style="font-size:.59rem;color:var(--re)">⏰ Long wait priority</span>`);
           const gap2=CF.matchGap(q.id);
           const nc2=S.session?.courts||1;
@@ -9921,16 +9929,17 @@ function _pvWhyMatch(id,partnerId,oppIds){
   }catch(e){return '';}
 }
 
-// Personal ladder arc — shows the player their matches tighten as they accumulate
-// games (mirrors the sim's per-phase metric, per player). Phase A=calibrating, C=competitive.
+// Ranking-confidence meter — honest framing of the games-played phases. We do NOT claim matches
+// "tighten" late (the sim proved continuous-flow can't deliver that arc); what genuinely improves
+// with games is how SETTLED your standing is. Early games your rank is provisional; later it's real.
 function _pvPhaseArc(id){
   if(!(S.session?.status==='active'&&S.session.cfMode))return '';
   const mp=gsp(id)?.matchesPlayed||0;
   const phase=(typeof CF!=='undefined'&&CF._playerPhase)?CF._playerPhase(id):(mp<5?'A':mp<8?'B':'C');
   const steps=[
-    {k:'A',lbl:'Calibrating',sub:'0–4 games · loose matches while we learn your level'},
-    {k:'B',lbl:'Settling',sub:'5–7 games · matches tightening'},
-    {k:'C',lbl:'Competitive',sub:'8+ games · tightest, true-ladder matches'}
+    {k:'A',lbl:'Calibrating',sub:'0–4 games · your rank is still provisional while the night gets going'},
+    {k:'B',lbl:'Settling',sub:'5–7 games · your standing is firming up'},
+    {k:'C',lbl:'Locked in',sub:'8+ games · your standing is solid — every game now counts for keeps'}
   ];
   const dots=steps.map(s=>{
     const active=s.k===phase;
@@ -9943,12 +9952,26 @@ function _pvPhaseArc(id){
   }).join('');
   const cur=steps.find(s=>s.k===phase);
   return `<div class="card" style="margin-bottom:11px">
-    <div class="ct" style="margin-bottom:8px">📈 Your Ladder Arc <span style="font-size:.64rem;font-weight:600;color:var(--mu)">${mp} game${mp===1?'':'s'} tonight</span></div>
+    <div class="ct" style="margin-bottom:8px">📊 Ranking Confidence <span style="font-size:.64rem;font-weight:600;color:var(--mu)">${mp} game${mp===1?'':'s'} tonight</span></div>
     <div style="display:flex;gap:7px">${dots}</div>
     <div style="font-size:.7rem;color:var(--mu);margin-top:8px">${cur?cur.sub:''}</div>
   </div>`;
 }
 
+// Collapsed "what do these mean?" legend for the player view. The session-vs-all-time rating
+// distinction is the one players most often get confused by, so it leads.
+function _pvLegendHtml(){
+  return `<details style="margin-bottom:11px;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra)">
+    <summary style="cursor:pointer;padding:9px 12px;font-size:.74rem;font-weight:700;color:var(--cy)">ℹ️ What do these mean?</summary>
+    <div style="padding:0 12px 11px;font-size:.7rem;color:var(--mu);line-height:1.6">
+      <div style="margin-bottom:6px"><strong style="color:var(--tx)">Tonight's rating</strong> (the big number) — your skill rating for <em>this session</em>. It starts from your all-time rating and moves with each game. Your <strong style="color:var(--tx)">all-time</strong> rating across every session is on the <strong>Season Ladder</strong> (History tab).</div>
+      <div style="margin-bottom:6px"><strong style="color:var(--tx)">🎯 +N to catch</strong> — rating points between you and the player one rank above. Roughly one good win's worth (a win is usually +10 to +20).</div>
+      <div style="margin-bottom:6px"><strong style="color:var(--tx)">▲ Climbed / ▼ Down</strong> — how far you've moved from where you started tonight (your seed).</div>
+      <div style="margin-bottom:6px"><strong style="color:var(--tx)">🥇 Tier</strong> — Gold = top 25%, Silver = next 35%, Bronze = the rest of the field.</div>
+      <div><strong style="color:var(--tx)">PTS DIFF</strong> — total points you scored minus points conceded, across all your games.</div>
+    </div>
+  </details>`;
+}
 function renderPlayerView(){
   _assertOwner('pv-content','renderPlayerView');
   if(!isActiveTab('player')&&!PLAYER_MODE)return;
@@ -10215,7 +10238,7 @@ function renderPlayerView(){
     }
   }
 
-  el.innerHTML=statusHtml+recapHtml+sessHtml+(p?_ratingSparkHtml(id):'')+arcHtml+matchHtml;
+  el.innerHTML=statusHtml+recapHtml+sessHtml+(p?_ratingSparkHtml(id):'')+arcHtml+matchHtml+(p?_pvLegendHtml():'');
 
   // Show "Last updated N min ago" in player mode so users know if data is fresh
   if(PLAYER_MODE&&S._lastSaveTs){
