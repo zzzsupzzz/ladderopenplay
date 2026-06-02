@@ -9983,27 +9983,32 @@ function _pvPhaseArc(id){
   </div>`;
 }
 
-// Shared session leaderboard for the player view — so a player sees where EVERYONE stands, not
-// just their own card. Works for the live session (TONIGHT'S LEADERBOARD) or a finished one
-// (FINAL LEADERBOARD + awards). Same wins→ptDiff→rating order as the Standings tab; highlights you.
-function _pvLeaderboardHtml(sess,viewedId,isLive){
-  if(!sess||!Array.isArray(sess.players))return '';
-  const rows=[...sess.players].filter(p=>!p.isNR).sort((a,b)=>{
+// Single source of truth for session standings ORDER: wins → point diff → rating (matches the
+// Standings tab). The player-view hero rank reads the SAME function, so "RANK #N" always equals
+// the player's row on this leaderboard — no more hero-says-#5 / board-says-#3 mismatch.
+function _sessionLbRows(sess){
+  if(!sess||!Array.isArray(sess.players))return [];
+  return [...sess.players].filter(p=>!p.isNR).sort((a,b)=>{
     if((b.wins||0)!==(a.wins||0))return (b.wins||0)-(a.wins||0);
     const pda=(a.ptsFor||0)-(a.ptsAgainst||0),pdb=(b.ptsFor||0)-(b.ptsAgainst||0);
     if(pdb!==pda)return pdb-pda;
     return (b.sRating||0)-(a.sRating||0);
   });
+}
+// Shared session leaderboard for the player view. The ONLY 🥇🥈🥉 here mean TIER (Gold/Silver/
+// Bronze); position is a plain colour-graded number — so a 3rd-place Gold player no longer shows a
+// confusing bronze "position medal" beside a gold tier badge. Highlights the viewed player.
+function _pvLeaderboardHtml(sess,viewedId,isLive){
+  const rows=_sessionLbRows(sess);
   if(rows.length<2)return '';
   const N=rows.length;
   const body=rows.map((sp,i)=>{
     const me=sp.id===viewedId;
     const tier=_tierOf(i+1,N);
     const d=Math.round((sp.sRating||0)-(sp.startRating||0));
-    const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
     const col=i===0?'var(--go)':i===1?'#c0ccd8':i===2?'#d4956a':'var(--mu)';
     return `<div class="prow" onclick="pvSelectPlayer('${sp.id}')" title="Tap for full stats &amp; history" style="cursor:pointer;margin-bottom:2px;${me?'background:rgba(99,179,237,.12);border:1px solid var(--ac);border-radius:6px;padding:2px 4px':''}">
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;color:${col};min-width:24px;text-align:center">${medal||(i+1)}</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;color:${col};min-width:24px;text-align:center">${i+1}</div>
       <div class="pnc"><div class="pn">${tier?tier.emoji+' ':''}${esc(sp.name||gp(sp.id)?.name||'?')}${me?` <span style="font-size:.58rem;color:var(--ac);font-weight:800">YOU</span>`:''}</div></div>
       <div style="font-size:.72rem;color:var(--mu)">${sp.wins||0}W/${sp.losses||0}L</div>
       <div class="pr">${Math.round(sp.sRating||0)}</div>
@@ -10157,8 +10162,12 @@ function renderPlayerView(){
     const d=sp.sRating-sp.startRating;
     const pd=sp.ptsFor-sp.ptsAgainst;
     const nrTag=sp.isNR?`<span class="nr-badge">NR</span>`:sp.isSeeding?`<span class="nr-seed">~${Math.round(sp.sRating)}</span>`:'';
-    // Live session ranking (excludes paused/left). Only meaningful once rated.
-    const _rk=_sessionRank(id), _tot=_totalRanked();
+    // Player-facing rank = position on the standings leaderboard (wins→ptDiff→rating), the SAME
+    // order the board below uses — so the hero and the leaderboard never disagree. (This is the
+    // standings rank, NOT the internal matchmaking rank _sessionRank, which can differ.)
+    const _lbRows=_sessionLbRows(S.session);
+    const _myIdx=_lbRows.findIndex(p=>p.id===id);
+    const _rk=_myIdx>=0?_myIdx+1:0, _tot=_lbRows.length;
     // Tonight's climb — the felt "ladder progression". climb = seed rank − current rank
     // (positive = moved up). Uses initRank already tracked per player in cfRanks.
     const _initR=S.session?.cfRanks?.[id]?.initRank;
@@ -10172,7 +10181,7 @@ function renderPlayerView(){
     // not ELO points, with a closeness bar. Win big to climb faster (margin/upsets pay more).
     let _catchHtml='';
     if(_rk&&_tot&&!sp.isNR){
-      const _ratingAtRank=r=>{const e=Object.entries(S.session?.cfRanks||{}).find(([pid,en])=>en.rank===r);return e?(gsp(e[0])?.sRating??null):null;};
+      const _ratingAtRank=r=>(r>=1&&r<=_lbRows.length)?(_lbRows[r-1]?.sRating??null):null;
       const _myTier=_tierOf(_rk,_tot);
       if(_rk===1){
         _catchHtml=`<div style="font-size:.74rem;color:var(--go);margin:2px 0 0">👑 #1 — top of the board</div>`;
