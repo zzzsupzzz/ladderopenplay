@@ -8689,8 +8689,12 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
             <div style="font-family:'Bebas Neue',sans-serif;font-size:1.05rem;color:var(--mu);margin-bottom:6px">Court ${off+c}</div>
             <div style="font-size:.76rem;color:var(--mu)">Waiting for players…</div>
           </div>`;
-        } else if(!ct||!ct.status){
-          // Court entry missing from cfCourts — show placeholder so court is never invisible
+        } else if(!S.session.cfSuggestions?.[c]){
+          // Catch-all: ANY court with no pending suggestion that isn't a valid active court —
+          // missing entry, OR a corrupted half-state (e.g. status 'playing' with a null match
+          // after an interrupted swap/cancel/sync). Render a placeholder so a court is NEVER
+          // invisible. (A ready court WITH a suggestion is shown in the suggestions wrap, so it
+          // correctly renders nothing here.) A stuck court self-heals on the next generation.
           h+=`<div class="cf-court-card" style="border:1px dashed var(--bd);border-radius:var(--ra);padding:18px 14px;margin-bottom:10px;text-align:center;opacity:.5">
             <div style="font-family:'Bebas Neue',sans-serif;font-size:1.05rem;color:var(--mu);margin-bottom:6px">Court ${off+c}</div>
             <div style="font-size:.76rem;color:var(--mu)">Waiting for players…</div>
