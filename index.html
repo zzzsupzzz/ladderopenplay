@@ -6376,7 +6376,14 @@ const CF={
       const _teamOver=Math.max(0,crossImb-_pc.team);
       phaseGapPen=_partnerOver*1.2+_teamOver*1.0;
     }
-    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+blowoutNudge+rankBandPen+neverPairPen+phaseGapPen,meta,t1,t2,group};
+    // [RESV] Top-cluster grouping bonus — the "feel". In phase 2+, strongly prefer a group made
+    // ENTIRELY of top-cluster players (p._isTop, stamped once per generation in the pool build)
+    // so the strongest players play EACH OTHER more often — a top-tier ladder feel. Negative =
+    // preferred. Judged by top-internal match frequency, NOT by the average gap. group.every
+    // short-circuits on the first non-top player, so _sessPhaseNum only runs for all-top groups.
+    let topGroupBonus=0;
+    if(group.every(p=>p._isTop===true)&&this._sessPhaseNum()>=2)topGroupBonus=-200;
+    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+blowoutNudge+rankBandPen+neverPairPen+phaseGapPen+topGroupBonus,meta,t1,t2,group};
   },
 
   /* Generate a suggestion for a court */
@@ -6489,29 +6496,31 @@ const CF={
       }
     }
 
-    // [RESV] Phase 2/3 anchor skill-hold — the mechanism that spends the graduated wait budget.
-    // If the longest-waiting bench player's CLOSEST available bench-mate is beyond the phase %
-    // partner target, seating them now means a wide match. Instead hold them THIS generation and
-    // fill ready courts from the rest of the bench (no idle court), betting a tighter partner is
-    // released soon. Strictly bounded: holds at most ONE player, only in phase 2+, only when the
-    // queue can still fill every ready court without them (queue.length>need), and only while
-    // they're UNDER budget (matchGap < waitCap-1). Once they hit the cap, _enforceHardWait /
-    // _scheduleMandatory (which scan the FULL cfQueue, ignoring this filter) force-seat them.
-    // Reverting this block alone (leaving the graduated cap) reproduces the failed experiment.
+    // [RESV] Phase 2/3 TOP-CLUSTER hold — the "feel" mechanism. Goal: the strongest players play
+    // EACH OTHER more often (a top-tier ladder feel), measured by top-internal match FREQUENCY,
+    // not by the average gap. When only a PARTIAL top cluster is benched (2-3 of the top K), hold
+    // them so they ACCUMULATE, and fill the open courts from the dense middle/bottom (which has
+    // plenty of compatible partners — so no court idles). Once 4+ top players are benched the
+    // top-group bonus in _scoreGroup seats them together. Strictly bounded: only top-cluster
+    // players, only under the wait budget, and never enough to starve a ready court
+    // (remaining queue must stay >= need). Backstops (_enforceHardWait / _scheduleMandatory,
+    // which scan the FULL cfQueue ignoring this filter) force-seat any held top player at the
+    // cap — so a top match that never assembles just becomes a normal mixed match + a short wait.
+    // The wait cost concentrates on the top players, who are "in on the deal" (wait a bit to play
+    // the other sharks). Reverting this block alone (leaving the bonus) keeps the preference but
+    // drops the accumulation, so top matches form only when 4 top players coincide by luck.
     if(this._sessPhaseNum()>=2 && queue.length>need){
       const _holdCap=this.waitCap()-1;
-      const _pinned=new Set(S.session.cfPinnedIds||[]);
-      const _anchor=queue
-        .filter(q=>!_pinned.has(q.id)&&(gsp(q.id)?.matchesPlayed||0)>0&&this.matchGap(q.id)<_holdCap)
-        .sort((a,b)=>this.matchGap(b.id)-this.matchGap(a.id))[0];
-      if(_anchor){
-        const _aSr=this._rankSr(_anchor.id);
-        let _nearestD=Infinity;
-        for(const q of queue){if(q.id===_anchor.id)continue;const d=Math.abs(this._rankSr(q.id)-_aSr);if(d<_nearestD)_nearestD=d;}
-        const _tgt=this._phaseSkillCaps(queue.map(q=>q.id)).partner; // phase % partner band, in sr
-        if(_nearestD>_tgt){
-          queue=queue.filter(q=>q.id!==_anchor.id); // hold — court fills from the rest
-        }
+      const _topIds=this._topClusterIds();
+      const _benchedTop=queue.filter(q=>_topIds.has(q.id));
+      // Hold only a PARTIAL cluster (2-3). With 0-1 there's nothing to gather toward a top match;
+      // with 4+ they can be seated together NOW, so let the bonus do it (don't hold).
+      if(_benchedTop.length>=2 && _benchedTop.length<4){
+        const _pinned=new Set(S.session.cfPinnedIds||[]);
+        const _holdable=_benchedTop.filter(q=>!_pinned.has(q.id)&&(gsp(q.id)?.matchesPlayed||0)>0&&this.matchGap(q.id)<_holdCap);
+        const _maxHold=Math.max(0,queue.length-need); // never drop the fill pool below need
+        const _toHold=new Set(_holdable.slice(0,_maxHold).map(q=>q.id));
+        if(_toHold.size)queue=queue.filter(q=>!_toHold.has(q.id)); // hold — courts fill from the rest
       }
     }
 
@@ -6550,8 +6559,10 @@ const CF={
     }).map(sp=>sp.matchesPlayed||0);
     const _batchMinPlayed=_batchFloorCounts.length?Math.min(..._batchFloorCounts):0;
     const _batchMC=S.session.cfMatchCount||0;
+    const _batchTopSet=this._topClusterIds(); // [RESV] stamp top-cluster membership once
     const _stampPool=p=>{
       const sp=gsp(p.id);
+      p._isTop=_batchTopSet.has(p.id); // [RESV] top-group bonus reads this in _scoreGroup
       const _isLR2=S.session.cfRanks?.[p.id]?.isLateArrival||sp?.resumedFromPause;
       // Late arrivals / resumed with 0 games: mg=0 (no catch-up gap from session start)
       const _neverPlayed=!sp?.matchesPlayed;
@@ -7156,6 +7167,16 @@ const CF={
     const teamRanks=Math.max(1,Math.round(teamPct*(N-1)));
     return {partner:Math.round(partnerRanks*srPerRank),team:Math.round(teamRanks*srPerRank),partnerRanks,teamRanks,phase,partnerPct,teamPct};
   },
+  // [RESV] Top cluster = the strongest ~30% (min 4) of active (non-paused, non-left) players by
+  // skill rating. Drives the top-cluster hold + the _scoreGroup top-group bonus that make the
+  // strongest players play each other (the ladder "feel"). Call ONCE per generation and stamp
+  // the result onto pool objects as p._isTop — _scoreGroup is too hot to recompute this.
+  _topClusterIds(){
+    const active=(S.session?.players||[]).filter(sp=>sp.status!=='left'&&!(S.session.cfPaused||[]).some(q=>q.id===sp.id));
+    const N=active.length||1;
+    const K=Math.max(4,Math.round(N*0.3));
+    return new Set(active.map(sp=>({id:sp.id,sr:this._rankSr(sp.id)})).sort((a,b)=>b.sr-a.sr).slice(0,K).map(x=>x.id));
+  },
   // Loose hard outer guard (~11 ranks) — blocks only egregious carry pairings. Graduated
   // tightness is driven by the phaseGapPen score term in _scoreGroup (NOT a tight gate), so
   // hard-to-match players are never deselected into wait-cap-breaching clusters.
@@ -7459,8 +7480,10 @@ const CF={
     }).map(sp2=>sp2.matchesPlayed||0);
     const _minPlayed=_floorCounts.length?Math.min(..._floorCounts):0;
     const _mc=S.session.cfMatchCount||0;
+    const _sgTopSet=this._topClusterIds(); // [RESV] stamp top-cluster membership once
     pool.forEach(p=>{
       const sp2=gsp(p.id);
+      p._isTop=_sgTopSet.has(p.id); // [RESV] top-group bonus reads this in _scoreGroup
       const _isLR3=S.session.cfRanks?.[p.id]?.isLateArrival||sp2?.resumedFromPause;
       // Late arrivals / resumed with 0 games: mg=0 (no catch-up gap from session start)
       const _neverPlayed2=!sp2?.matchesPlayed;

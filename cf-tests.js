@@ -190,6 +190,29 @@ try {
   fail++; console.error('  ❌ _scoreGroup threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
 
+// ── Tests: [RESV] top-cluster + top-group "feel" bonus ──────────────────────
+section('_topClusterIds() + top-group bonus (phase-gated)');
+makeSession(20, 3);
+if (APP._initSessionRanks) APP._initSessionRanks();
+eq(CF._topClusterIds().size, 6, 'top cluster = max(4, round(20*0.3)) = 6 players');
+const mkTop = (ids, isTop) => ids.map(i => {
+  const sp = S.session.players[i];
+  return { id: sp.id, sr: sp.sRating, mg: 0, pcg: 0, cmg: 0, waitMin: 0, _minGames: 0, _isTop: isTop };
+});
+try {
+  S.session.cfMatchCount = 55; // phase 3 (mc >= np*1.2)
+  const withBonus = CF._scoreGroup(mkTop([0,1,2,3], true), null);
+  const noBonus   = CF._scoreGroup(mkTop([0,1,2,3], false), null);
+  ok(withBonus.score < noBonus.score, 'all-top foursome scores better WITH the bonus (phase 3)');
+  ok(Math.abs((noBonus.score - withBonus.score) - 200) < 1e-6, 'bonus is exactly -200 pts');
+  S.session.cfMatchCount = 0; // phase 1 — bonus must NOT apply
+  const p1Top = CF._scoreGroup(mkTop([0,1,2,3], true), null);
+  const p1No  = CF._scoreGroup(mkTop([0,1,2,3], false), null);
+  ok(Math.abs(p1Top.score - p1No.score) < 1e-6, 'no top-group bonus in phase 1');
+} catch (e) {
+  fail++; console.error('  ❌ top-group bonus threw: ' + (e && e.message));
+}
+
 // ── Tests: season ladder movement (snapshot diff) ──────────────────────────
 section('_seasonLadderHtml() — week-over-week movement from rank snapshots');
 if (APP._seasonLadderHtml) {
