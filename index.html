@@ -8960,6 +8960,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:9px">
         ${pTeam(sug.t1,t1Avg,t1pgap,t1rk0,t1rk1)}<div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--m2)">VS</div>${pTeam(sug.t2,t2Avg,t2pgap,t2rk0,t2rk1)}
       </div>
+      <div id="sug-picker-${courtNum}" style="display:none;background:var(--s2);border:1px solid var(--ac);border-radius:var(--ra);padding:9px;margin-bottom:9px"></div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:9px">${chips}</div>
       <div class="cf-ac-wrap" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;min-height:22px">
         ${_cfAutoConfirmTimers[courtNum]?`<span id="cf-ac-${courtNum}" style="font-size:.7rem;color:var(--mu)">Auto-starting…</span><button class="btn bg2 sm" style="font-size:.65rem;padding:2px 8px" onclick="cancelAutoConfirm(${courtNum})">Cancel</button>`:''}
@@ -9296,6 +9297,30 @@ function startCFTick(){
 
     // 2. Refresh queue display every 20s to update wait times
     if(now%20000<1100)CF._renderQueue();
+
+    // 3. Safety net — auto-heal any court stuck WITHOUT a suggestion while the queue can fill it.
+    // Defense-in-depth: covers ANY path (cancel, swap, interrupted generation, a sync that left a
+    // court half-set) that leaves a non-playing court blank when players are available. Runs ~every
+    // 3s, organiser device only, normalises corrupted states (e.g. 'playing' with a null match) to
+    // 'ready', then regenerates. Saves/re-renders ONLY when it actually changes something — so a
+    // legitimately-empty court (queue<4) causes no churn.
+    if(!OBSERVER_MODE&&!PLAYER_MODE&&S.session.status==='active'&&now%3000<1100){
+      const stuck=[];
+      for(let c=1;c<=(S.session.courts||0);c++){
+        const ct=S.session.cfCourts?.[c];
+        const playing=ct?.status==='playing'&&ct.match;
+        if(!playing&&!S.session.cfSuggestions?.[c])stuck.push(c);
+      }
+      if(stuck.length&&(S.session.cfQueue||[]).length>=4){
+        try{
+          let changed=false;
+          stuck.forEach(c=>{const ct=S.session.cfCourts?.[c];
+            if(!ct||ct.status!=='ready'||ct.match){S.session.cfCourts[c]={...(ct||{}),status:'ready',match:null};changed=true;}});
+          CF.batchGenerateSuggestions(stuck,null);
+          if(changed||stuck.some(c=>S.session.cfSuggestions?.[c])){STORE.save('session');renderLive();}
+        }catch(e){console.error('CF auto-heal error (non-fatal):',e);}
+      }
+    }
 
     // 4. Auto-confirm countdown ticks handled by their own intervals (startAutoConfirm)
   },1000);
