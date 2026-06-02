@@ -8409,6 +8409,12 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       // Rebuild matchmaking state so the cancelled court's pair counts are undone.
       // A cancelled match should leave matchmaker as if that court never started.
       rebuildCFDerivedState();
+      // Regenerate a suggestion for the now-ready court. WITHOUT this, cancel left the court
+      // on "Waiting for players…" forever (it set status:'ready' but never re-matched), even
+      // with a full queue — unlike the score-submit path, which always regenerates. Mirrors
+      // _doSubmitScore. Non-fatal: the cancel itself is already committed above.
+      try{this.batchGenerateSuggestions([cn],null);}
+      catch(e){console.error('CF suggestion error after cancel (non-fatal):',e);}
       const _cancelReason=preservePriority?'mistake':'abandoned';
       const _cancelNames=[...m.t1,...m.t2].map(id=>gp(id)?.name||'?').join(', ');
       AUDIT.log('cancel_match',
