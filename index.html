@@ -3993,13 +3993,12 @@ function _seasonLadderHtml(){
   };
   const rows=ranked.map((p,i)=>{
     const r=i+1;
-    // Tier badge (percentile) + "catch the rung above" target — the concrete climb goal.
+    // Tier badge (percentile). NOTE: no per-row "≈N wins to catch" here — this ladder is sorted by
+    // RATING, so a wins-derived gap produced wildly inconsistent numbers (≈1 vs ≈13 to the next
+    // person). The movement arrows (▲▼) carry the progress story; #1 gets a crown.
     const tier=_tierOf(r,ranked.length);
     const tierBadge=tier?`<span title="${tier.label} tier" style="margin-right:3px">${tier.emoji}</span>`:'';
-    let catchLine='';
-    if(i===0){catchLine=`<div style="font-size:.58rem;color:var(--go);font-weight:400;margin-top:1px">👑 Top of the ladder</div>`;}
-    else{const _gap=Math.round((ranked[i-1].rating||0)-(p.rating||0));
-      if(_gap>0){const _w=_winsToCatch(_gap);catchLine=`<div style="font-size:.58rem;color:var(--mu);font-weight:400;margin-top:1px" title="+${_gap} rating">${_gap<=6?'neck-and-neck — beat them to pass':`≈${_w} win${_w===1?'':'s'} to catch ${esc(ranked[i-1].name)}`}</div>`;}}
+    const catchLine=i===0?`<div style="font-size:.58rem;color:var(--go);font-weight:400;margin-top:1px">👑 Top of the ladder</div>`:'';
     return `<tr class="r${r}"><td><span class="rnk">${r}</span></td>`+
       `<td style="font-weight:600;font-size:.79rem">${tierBadge}${esc(p.name)}${p.tag?`<span class="ptag">${esc(p.tag)}</span>`:''}${catchLine}</td>`+
       `<td style="font-size:.72rem">${mvCell(p.id)}</td>`+
@@ -4010,7 +4009,7 @@ function _seasonLadderHtml(){
   const _movementNote=snaps.length>=2?' · ▲▼ = movement in the latest session'
     : (snaps.length===1?' · movement appears after the next session':'');
   return `<div style="font-family:'Bebas Neue',sans-serif;font-size:1.25rem;letter-spacing:.5px;margin:4px 0 6px;color:var(--go)">🪜 SEASON LADDER</div>`+
-    `<div style="font-size:.63rem;color:var(--mu);margin-bottom:8px">All-time standing across ${S.archive.length} session${S.archive.length===1?'':'s'}${_movementNote}</div>`+
+    `<div style="font-size:.63rem;color:var(--mu);margin-bottom:8px">All-time standing by <strong style="color:var(--mu)">skill rating</strong> across ${S.archive.length} session${S.archive.length===1?'':'s'}${_movementNote}</div>`+
     `<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Rank movement in the latest session">±</th><th title="Sessions played">SES</th><th title="All-time W-L">W-L</th><th title="All-time rating">RTG</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function renderArchive(){
@@ -4972,21 +4971,23 @@ function doEndSession(){
     updateHeader();renderDB();renderRoster();renderHistory();renderArchive();renderStandings();updatePvSessFilter();
     const totalM=(arch.cfLog||[]).length;
     const modeLabel=`${totalM} matches · Continuous Flow`;
-    const _finalRows=[...arch.players].sort((a,b)=>b.sRating-a.sRating).map((sp,i)=>{
-      const d=Math.round(sp.sRating-sp.startRating);
+    // Rank by WINS → point diff (same order as the Standings tab + player leaderboard), NOT rating —
+    // so "who won the night" is consistent across every surface. Show point-diff (the tiebreaker).
+    const _finalRows=_sessionLbRows(arch).map((sp,i)=>{
+      const pd=(sp.ptsFor||0)-(sp.ptsAgainst||0);
       const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
       const col=i===0?'var(--go)':i===1?'#c0ccd8':i===2?'#d4956a':'var(--mu)';
       return `<div class="prow" style="cursor:default;margin-bottom:3px">
         <div style="font-family:'Bebas Neue',sans-serif;font-size:1.05rem;color:${col};min-width:26px;text-align:center">${medal||(i+1)}</div>
         <div class="pnc"><div class="pn">${esc(sp.name)}${sp.tag?`<span class="ptag">${esc(sp.tag)}</span>`:''}</div></div>
         <div style="font-size:.74rem;color:var(--mu)">${sp.wins}W/${sp.losses}L</div>
-        <div class="pr">${Math.round(sp.sRating)}</div>
-        ${d!==0?`<span class="dl ${d>0?'du':'dd'}">${d>=0?'+':''}${d}</span>`:''}
+        <div class="pr" title="Point differential — the tiebreaker after wins" style="color:${pd>0?'var(--gr)':pd<0?'var(--re)':'var(--mu)'}">${pd>=0?'+':''}${pd}</div>
       </div>`;}).join('');
     openModal(`<div class="modal-title" style="text-align:center">🏆 Session Complete!</div>
       <div style="text-align:center;margin-bottom:10px;color:var(--mu);font-size:.76rem">${esc(n)}<br/>${modeLabel} · ${arch.players.length} players</div>
       ${_awardsHtml(arch)}
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:.86rem;color:var(--go);letter-spacing:.5px;margin:10px 0 6px">🏁 FINAL STANDINGS</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:.86rem;color:var(--go);letter-spacing:.5px;margin:10px 0 2px">🏁 FINAL STANDINGS</div>
+      <div style="font-size:.6rem;color:var(--mu);margin-bottom:6px">Ranked by wins, then point difference</div>
       <div style="max-height:44vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin:0 -4px;padding:0 4px">${_finalRows}</div>
       <button class="btn bp" style="width:100%;margin-top:12px" onclick="closeModal();switchTab('standings')">View Full Standings →</button>`);
     // Stay on current tab — user navigates via the modal button above
@@ -10004,19 +10005,18 @@ function _pvLeaderboardHtml(sess,viewedId,isLive){
   const body=rows.map((sp,i)=>{
     const me=sp.id===viewedId;
     const tier=_tierOf(i+1,N);
-    const d=Math.round((sp.sRating||0)-(sp.startRating||0));
+    const pd=(sp.ptsFor||0)-(sp.ptsAgainst||0); // point differential — the tiebreaker after wins
     const col=i===0?'var(--go)':i===1?'#c0ccd8':i===2?'#d4956a':'var(--mu)';
     return `<div class="prow" onclick="pvSelectPlayer('${sp.id}')" title="Tap for full stats &amp; history" style="cursor:pointer;margin-bottom:2px;${me?'background:rgba(99,179,237,.12);border:1px solid var(--ac);border-radius:6px;padding:2px 4px':''}">
       <div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;color:${col};min-width:24px;text-align:center">${i+1}</div>
       <div class="pnc"><div class="pn">${tier?tier.emoji+' ':''}${esc(sp.name||gp(sp.id)?.name||'?')}${me?` <span style="font-size:.58rem;color:var(--ac);font-weight:800">YOU</span>`:''}</div></div>
       <div style="font-size:.72rem;color:var(--mu)">${sp.wins||0}W/${sp.losses||0}L</div>
-      <div class="pr">${Math.round(sp.sRating||0)}</div>
-      ${d!==0?`<span class="dl ${d>0?'du':'dd'}">${d>=0?'+':''}${d}</span>`:''}
+      <div class="pr" title="Point differential (points won minus lost) — the tiebreaker after wins" style="color:${pd>0?'var(--gr)':pd<0?'var(--re)':'var(--mu)'}">${pd>=0?'+':''}${pd}</div>
     </div>`;
   }).join('');
   return `<div class="card" style="margin-bottom:11px">
     <div class="ct" style="margin-bottom:3px">${isLive?'🏓 TONIGHT\'S LEADERBOARD':'🏁 FINAL LEADERBOARD'} <span style="font-size:.62rem;font-weight:600;color:var(--mu)">${N} players</span></div>
-    <div style="font-size:.6rem;color:var(--mu);margin-bottom:8px">👆 Tap any name to see their full stats &amp; history</div>
+    <div style="font-size:.6rem;color:var(--mu);margin-bottom:8px">👆 Tap any name for full stats · ranked by <strong style="color:var(--tx)">wins</strong>, then point difference</div>
     ${!isLive?_awardsHtml(sess):''}
     <div>${body}</div>
   </div>`;
