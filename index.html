@@ -501,6 +501,17 @@ body.observer-mode .qs-row{display:none!important}
     <button class="btn sm" style="background:var(--cy);color:#000;font-weight:700" onclick="adminNewDayReset()">🔄 Reset for New Day</button>
   </div>
 
+  <div class="card" style="border:1px solid rgba(52,217,116,.25);background:rgba(52,217,116,.04)">
+    <div class="ct" style="color:var(--gr)">💾 Backup &amp; Restore</div>
+    <p style="font-size:.72rem;color:var(--mu);margin-bottom:10px">Download a full backup of all players, ratings, and session history as a JSON file. Keep it safe — restore it to recover from an accidental wipe or move to a new room. <strong>Do this regularly.</strong></p>
+    <div style="display:flex;gap:7px;flex-wrap:wrap">
+      <button class="btn sm bp" onclick="exportBackup()">⬇ Download Backup</button>
+      <button class="btn sm bg2" onclick="document.getElementById('import-backup-file').click()">⬆ Restore from File</button>
+      <input type="file" id="import-backup-file" accept="application/json,.json" style="display:none" onchange="importBackup(this)"/>
+    </div>
+    <div id="backup-status" style="font-size:.66rem;color:var(--mu);margin-top:8px"></div>
+  </div>
+
   <div class="card" style="border:1px solid rgba(248,113,113,.3);background:rgba(248,113,113,.04)">
     <div class="ct" style="color:var(--re)">⚠️ Factory Reset</div>
     <p style="font-size:.72rem;color:var(--mu);margin-bottom:10px">Wipe <strong>all</strong> data — players, sessions, archive, ratings — across all devices. This cannot be undone.</p>
@@ -672,6 +683,7 @@ body.observer-mode .qs-row{display:none!important}
 const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,extendedMin:16,timerSec:0,timerRunning:false,timerInterval:null,editId:null,_sessionEndedId:''};
 let _pageFirstLoad=true; // true only once — blocks reconnection from forcing tab switch
 let HAS_REMOTE_HYDRATED=false; // true after first successful _applyRemote — guards DB writes
+let _otherWriterTs=0; // last time a WRITE arrived from another device — drives the multi-scorer warning
 
 /* ── Room ID management ─────────────────────────────
    Each organiser device generates its own room code and stores it
@@ -1191,7 +1203,7 @@ const SYNC={
         HAS_REMOTE_HYDRATED=true; // remote data applied — writes are now safe
         _renderActiveTab();
         const rb=data?.meta?._by||data?._by||'';
-        if(rb&&rb!==DEVICE_ID)toast('📲 Updated from another organiser','ok');
+        if(rb&&rb!==DEVICE_ID){_otherWriterTs=Date.now();toast('📲 Updated from another organiser','ok');}
       }
     }catch(e){
       console.error('[sync] _applyRemote error',e);
@@ -3508,6 +3520,14 @@ function discardLobby(){
 
 /* § RENDER:STANDINGS */
 /* ── RENDER: STANDINGS ───────────────────────────── */
+// Multi-scorer warning — shown on the organiser Live view when a WRITE arrived from another device
+// in the last 90s. Two devices entering scores can fork the session (the READY-vs-LIVE mismatch),
+// so nudge toward ONE scorer; extra devices should open ?view=observer (read-only).
+function _multiWriterBannerHtml(){
+  if(OBSERVER_MODE||PLAYER_MODE)return '';
+  if(!_otherWriterTs||Date.now()-_otherWriterTs>90000)return '';
+  return `<div style="background:rgba(251,147,60,.12);border:1px solid rgba(251,147,60,.4);border-radius:var(--ra);padding:9px 12px;margin-bottom:10px;font-size:.73rem;color:var(--or);font-weight:600">⚠ Another device is also editing this session. To avoid score conflicts, enter scores from <strong>one device only</strong> — extra devices should open <em>?view=observer</em> (read-only).</div>`;
+}
 // ── Progression helpers (scoreboard "feel") ────────────────────────────────
 // Current trailing streak from a match log (assumed chronological). {n,type:'W'|'L'|''}.
 function _streakOf(log,id){
@@ -4906,6 +4926,56 @@ function doCopyEl(id){
 /* ── RESET RATINGS ─────────────────────────────────── */
 
 /* ── ADMIN NEW DAY RESET ──────────────────────────── */
+// ── Full-data backup / restore ────────────────────────────────────────────
+// Downloads / restores the DURABLE data (player DB + ratings + session archive). Insurance
+// against an accidental factory-reset, a bad sync write, or migrating to a fresh room. Does NOT
+// touch the live in-progress session (transient). Export is read-only (allowed anytime); import
+// is admin-gated and replaces db+archive everywhere via the normal sync push.
+function exportBackup(){
+  try{
+    const data={ _type:'pickleball-ladder-backup', _version:2, exportedAt:new Date().toISOString(),
+      db:S.db||[], archive:S.archive||[], adminPin:S.adminPin||'' };
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download=`pickleball-backup-${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{URL.revokeObjectURL(url); a.remove();},1000);
+    const st=document.getElementById('backup-status');
+    if(st)st.textContent=`✓ Exported ${(S.db||[]).length} players · ${(S.archive||[]).length} sessions just now`;
+    try{AUDIT.log('backup_export',`Backup exported: ${(S.db||[]).length} players, ${(S.archive||[]).length} sessions`);}catch(e){}
+    toast('Backup downloaded ✓','ok');
+  }catch(e){toast('Export failed: '+(e&&e.message||e),'err');}
+}
+function importBackup(input){
+  const file=input&&input.files&&input.files[0];
+  const _clear=()=>{if(input)input.value='';};
+  if(OBSERVER_MODE){toast('Observer mode — view only','warn');_clear();return;}
+  if(getAdminPin()&&!ADMIN_UNLOCKED){toast('Unlock admin first','warn');_clear();return;}
+  if(!file){_clear();return;}
+  const reader=new FileReader();
+  reader.onerror=()=>{toast('Could not read file','err');_clear();};
+  reader.onload=()=>{
+    let data;
+    try{data=JSON.parse(reader.result);}catch(e){toast('Not a valid JSON file','err');_clear();return;}
+    if(!data||!Array.isArray(data.db)){toast('This file is not a valid backup','err');_clear();return;}
+    const np=data.db.length, ns=Array.isArray(data.archive)?data.archive.length:0;
+    showCfm(`Restore this backup?<br/><span style="font-size:.74rem;color:var(--mu)">${np} players · ${ns} sessions. This <strong>replaces all players &amp; history</strong> on every connected device. (Your current live session, if any, is left running.)</span>`,'⬆ Restore Backup','bp',()=>{
+      S.db=data.db||[];
+      S.archive=Array.isArray(data.archive)?data.archive:[];
+      if(typeof data.adminPin==='string'&&data.adminPin)S.adminPin=data.adminPin;
+      // No recalc — the backup's ratings are authoritative; replay would only re-derive the same.
+      STORE.save('all');
+      renderDB();renderRoster();renderHistory();renderArchive();renderStandings();updateHeader();updatePvSelect();updatePvSessFilter();
+      const st=document.getElementById('backup-status');
+      if(st)st.textContent=`✓ Restored ${np} players · ${ns} sessions`;
+      try{AUDIT.log('backup_import',`Backup restored: ${np} players, ${ns} sessions`);}catch(e){}
+      toast(`Restored ${np} players, ${ns} sessions ✓`,'ok',4000);
+    });
+    _clear();
+  };
+  reader.readAsText(file);
+}
 function adminNewDayReset(){
   if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
   if(getAdminPin()&&!ADMIN_UNLOCKED){toast('Unlock admin first','warn');return;}
@@ -8715,7 +8785,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
           >${CF._confirmAllBusy?'⏳ Confirming…':'✓ Confirm All Courts'}</button>
         </div>`;
       }
-      sw.innerHTML=confirmAllHtml+sugs.map(([c,s])=>this._renderSug(+c,s)).join('');
+      sw.innerHTML=_multiWriterBannerHtml()+confirmAllHtml+sugs.map(([c,s])=>this._renderSug(+c,s)).join('');
     }
 
     const cw=document.getElementById('cf-courts-wrap');

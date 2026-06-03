@@ -80,7 +80,10 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   _awardsHtml:typeof _awardsHtml!=='undefined'?_awardsHtml:null,
   _ratingSparkHtml:typeof _ratingSparkHtml!=='undefined'?_ratingSparkHtml:null,
   _pvLeaderboardHtml:typeof _pvLeaderboardHtml!=='undefined'?_pvLeaderboardHtml:null,
-  _sessionLbRows:typeof _sessionLbRows!=='undefined'?_sessionLbRows:null};`;
+  _sessionLbRows:typeof _sessionLbRows!=='undefined'?_sessionLbRows:null,
+  _multiWriterBannerHtml:typeof _multiWriterBannerHtml!=='undefined'?_multiWriterBannerHtml:null,
+  exportBackup:typeof exportBackup!=='undefined'?exportBackup:null,
+  importBackup:typeof importBackup!=='undefined'?importBackup:null};`;
 
 vm.createContext(ctx);
 try {
@@ -292,6 +295,16 @@ if (APP._sessionLbRows) {
   const rows = APP._sessionLbRows(tied);
   eq(rows[0].id, 'hi', '_sessionLbRows: tied wins → higher point-diff wins (not higher rating)');
   eq(rows[2].id, 'lw', '_sessionLbRows: fewer wins ranks last even with the highest rating');
+}
+
+// ── Tests: backup/restore + multi-scorer guard are wired ───────────────────
+section('backup/restore + multi-scorer guard');
+ok(typeof APP.exportBackup === 'function', 'exportBackup() is defined');
+ok(typeof APP.importBackup === 'function', 'importBackup() is defined');
+ok(typeof APP._multiWriterBannerHtml === 'function', '_multiWriterBannerHtml() is defined');
+if (APP._multiWriterBannerHtml) {
+  // No recent other-device write (and not a writer-conflict) → banner must be silent (no spurious warning).
+  ok(APP._multiWriterBannerHtml() === '', 'multi-scorer banner stays empty with no recent other-device write');
 }
 
 // ── Tests: undo (snapshot + restore of pre-confirm suggestion state) ────────
