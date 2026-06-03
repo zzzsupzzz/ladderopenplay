@@ -340,6 +340,7 @@ const SIM = (() => {
       rounds = 20,
       speed = 'instant',
       live = false,
+      challengeCourt = false, // [CHALLENGE COURT] reserve Court 1 for the session top-6 (3+ courts, Phase 2+)
     } = opts;
 
     _running = true;
@@ -372,6 +373,13 @@ const SIM = (() => {
 
       assert(S.session.status === 'active', 'Session should be active');
       assert(S.session.cfQueue.length > 0, 'Queue should have players');
+
+      // [CHALLENGE COURT] opt-in for this sim run. Engine gates it to 3+ courts and Phase 2+,
+      // so early rounds run normally and Court 1 becomes the top-6-only court once ranks settle.
+      if (challengeCourt) {
+        S.session.cfChallengeCourt = true;
+        log(`👑 Challenge Court ENABLED — Court 1 reserved for the session top-6 from Phase 2 (courts=${courts}${courts < 3 ? ', WARNING: needs 3+ to take effect' : ''})`);
+      }
 
       let totalMatches = 0;
       let midAddDone = false;
