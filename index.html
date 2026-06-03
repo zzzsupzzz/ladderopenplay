@@ -8814,7 +8814,8 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       const acBtn=document.getElementById('cf-ac-toggle');
       if(acBtn){acBtn.classList.toggle('bc',!!S.session.cfAutoConfirm);acBtn.classList.toggle('bg2',!S.session.cfAutoConfirm);acBtn.style.display='';}
       const ccBtn=document.getElementById('cf-challenge-toggle');
-      if(ccBtn){ccBtn.classList.toggle('bc',!!S.session.cfChallengeCourt);ccBtn.classList.toggle('bg2',!S.session.cfChallengeCourt);}
+      // Organizer-only control — hidden from observers so the feature stays invisible to players.
+      if(ccBtn){ccBtn.classList.toggle('bc',!!S.session.cfChallengeCourt);ccBtn.classList.toggle('bg2',!S.session.cfChallengeCourt);ccBtn.style.display=OBSERVER_MODE?'none':'';}
       const acDur=document.getElementById('cf-ac-dur');
       if(acDur){
         acDur.style.display=S.session.cfAutoConfirm?'':'none';
@@ -9118,7 +9119,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       <div style="font-size:.55rem;color:var(--m2);margin-top:2px">tap a name to swap</div></div>`;
     };
     return `<div class="cf-suggest" data-court="${courtNum}">
-      <div class="cf-suggest-hd">${sug.meta?.challenge?'👑 CHALLENGE COURT':'🏓 COURT '+((S.session?.courtOffset||0)+courtNum)} — READY</div>
+      <div class="cf-suggest-hd">${(sug.meta?.challenge&&!OBSERVER_MODE&&!PLAYER_MODE)?'👑 CHALLENGE COURT':'🏓 COURT '+((S.session?.courtOffset||0)+courtNum)} — READY</div>
       <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:9px">
         ${pTeam(sug.t1,t1Avg,t1pgap,t1rk0,t1rk1)}<div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--m2)">VS</div>${pTeam(sug.t2,t2Avg,t2pgap,t2rk0,t2rk1)}
       </div>
