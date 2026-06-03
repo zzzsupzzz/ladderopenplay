@@ -778,34 +778,23 @@ const SIM = (() => {
           log(`  Team gap (vs opponents): P1=${_avg(_tBuckets[0])}  P2=${_avg(_tBuckets[1])}  P3=${_avg(_tBuckets[2])}`);
         }
 
-        // ── [CHALLENGE COURT] middle-court top-tier reservation ──────────────
-        // If the Challenge Court is ON and working, the MIDDLE court's late-session matches are
-        // almost all "top-6 only", while the OTHER courts are ~0% (the top-6 are reserved off them).
-        // If it was OFF, the two are similar. Uses FINAL standings (wins→ptDiff→rating) as the top-6.
+        // ── [CHALLENGE COURT] reservation check (accurate — uses the per-match flag) ─────────
+        // Each confirmed challenge match is tagged m.challenge=true (top-6 at formation time). We
+        // count those directly instead of guessing from final standings (which churn). If the
+        // feature worked: challenge matches > 0, all on the middle court, none leaked elsewhere.
         {
-          const _top6 = new Set([...arch.players].sort((a,b)=>{
-            if((b.wins||0)!==(a.wins||0)) return (b.wins||0)-(a.wins||0);
-            const pda=(a.ptsFor||0)-(a.ptsAgainst||0), pdb=(b.ptsFor||0)-(b.ptsAgainst||0);
-            if(pdb!==pda) return pdb-pda;
-            return (b.sRating||0)-(a.sRating||0);
-          }).slice(0,6).map(p=>p.id));
-          const _mid = Math.ceil(courts/2); // the challenge court index
+          const _mid = Math.ceil(courts/2);
           const _qlog2 = arch.cfLog || [];
-          const _third2 = Math.max(1, Math.ceil(_qlog2.length/3));
-          let midTot=0, midTop=0, othTot=0, othTop=0;
-          _qlog2.forEach((m,i)=>{
-            const ids=[...(m.t1||[]),...(m.t2||[])]; if(ids.length<4) return;
-            if(Math.min(2,Math.floor(i/_third2)) < 1) return; // late session only (challenge is Phase 2+)
-            const allTop = ids.every(id=>_top6.has(id));
-            if(m.courtNum===_mid){ midTot++; if(allTop) midTop++; }
-            else { othTot++; if(allTop) othTop++; }
+          let chMid = 0, chOther = 0, midTot = 0;
+          _qlog2.forEach(m => {
+            if (m.courtNum === _mid) midTot++;
+            if (m.challenge === true) { if (m.courtNum === _mid) chMid++; else chOther++; }
           });
-          const _pct=(n,d)=>d?Math.round(n/d*100):0;
-          log(`--- [CHALLENGE COURT] middle court = #${_mid} · top-6 reservation (LATE-session matches) ---`);
-          log(`  Middle court #${_mid}: ${midTop}/${midTot} all-top-6 (${_pct(midTop,midTot)}%)  ← HIGH if Challenge Court worked`);
-          log(`  Other courts:   ${othTop}/${othTot} all-top-6 (${_pct(othTop,othTot)}%)  ← should be ~0% (top-6 reserved off them)`);
-          if(midTot>0) log('  (note: the top-6 play more games by design — excluded from the play-count fairness check)');
-          if(midTot===0) log('  (no matches recorded on the middle court — was challengeCourt:true AND courts>=3?)');
+          log(`--- [CHALLENGE COURT] middle court = #${_mid} (top-6-only, tagged at formation) ---`);
+          log(`  Challenge matches played: ${chMid} on court #${_mid}  ← > 0 means the Challenge Court engaged`);
+          log(`  Challenge matches that leaked onto other courts: ${chOther}  ← MUST be 0`);
+          if (chMid > 0) log('  ✅ Challenge Court worked — top-6-only matches ran on the middle court (they play more by design; excluded from the play-count check)');
+          else log('  (no challenge matches — was challengeCourt:true, courts>=3, and did the run reach Phase 2? short runs may not)');
         }
 
         log('--- Player Stats ---');

@@ -7994,6 +7994,7 @@ const CF={
     const match={id:uid(),courtNum,t1:sug.t1,t2:sug.t2,
       s1:null,s2:null,status:'pending',eloDeltas:null,startTime:now,extended:false,
       queueSince:queueSinceMap,
+      ...(sug.meta?.challenge?{challenge:true}:{}), // [CHALLENGE COURT] tag for the log (data only, not rendered)
       confirmMc:S.session.cfMatchCount||0}; // cfMatchCount at game START — used for wait gap accuracy.
       // simulate.js records gap = cfMatchCount_at_confirm - _lastGameEndMc.
       // matchIdx is set at score SUBMIT time when cfMatchCount may be higher (other courts submitted).
