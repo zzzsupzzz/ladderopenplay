@@ -307,9 +307,10 @@ if (APP._multiWriterBannerHtml) {
   ok(APP._multiWriterBannerHtml() === '', 'multi-scorer banner stays empty with no recent other-device write');
 }
 
-// ── Tests: [CHALLENGE COURT] Court 1 reserved for the session top-6 ─────────
-section('Challenge Court — Court 1 holds only the session top-6');
+// ── Tests: [CHALLENGE COURT] middle court reserved for the session top-6 ────
+section('Challenge Court — middle court holds only the session top-6');
 try {
+  const CCNUM = Math.ceil(3/2); // middle court of 3 = court 2
   makeSession(20, 3);
   if (APP._initSessionRanks) APP._initSessionRanks();
   // Phase 2+ (np=20 → mc≥12), everyone recently played (not force-overdue), clear standings.
@@ -320,18 +321,29 @@ try {
   S.session.cfSuggestions = {};
   CF.batchGenerateSuggestions([1,2,3], null);
   const top6 = APP._sessionLbRows(S.session).slice(0,6).map(p=>p.id);
-  const c1 = S.session.cfSuggestions[1];
-  ok(c1 && Array.isArray(c1.allIds), 'Court 1 got a suggestion');
-  ok(c1 && c1.allIds.every(id=>top6.includes(id)), 'Court 1 contains ONLY the current top-6');
-  ok(c1 && c1.meta && c1.meta.challenge === true, 'Court 1 is flagged as a challenge match');
-  const others = [2,3].flatMap(c => { const s = S.session.cfSuggestions[c]; return s ? s.allIds : []; });
-  ok(others.length > 0 && others.every(id => !top6.includes(id)), 'top-6 never appear on courts 2/3');
-  // Default OFF: same setup, no flag → Court 1 is a normal match (no challenge reservation)
+  const cc = S.session.cfSuggestions[CCNUM];
+  ok(cc && Array.isArray(cc.allIds), `challenge court (middle = #${CCNUM}) got a suggestion`);
+  ok(cc && cc.allIds.every(id=>top6.includes(id)), 'challenge court contains ONLY the current top-6');
+  ok(cc && cc.meta && cc.meta.challenge === true, 'challenge court is flagged as a challenge match');
+  const others = [1,2,3].filter(c=>c!==CCNUM).flatMap(c => { const s = S.session.cfSuggestions[c]; return s ? s.allIds : []; });
+  ok(others.length > 0 && others.every(id => !top6.includes(id)), 'top-6 never appear on the non-challenge courts');
+  // Default OFF: same setup, no flag → middle court is a normal match
   S.session.cfChallengeCourt = false;
   S.session.cfSuggestions = {};
   CF.batchGenerateSuggestions([1,2,3], null);
-  const c1off = S.session.cfSuggestions[1];
-  ok(!(c1off && c1off.meta && c1off.meta.challenge), 'Challenge OFF → Court 1 is a normal match');
+  const ccoff = S.session.cfSuggestions[CCNUM];
+  ok(!(ccoff && ccoff.meta && ccoff.meta.challenge), 'Challenge OFF → middle court is a normal match');
+  // ADAPTIVE GATE: too few players (13 < K6 + (3-1)*4 = 14) → does NOT engage even when ON
+  makeSession(13, 3);
+  if (APP._initSessionRanks) APP._initSessionRanks();
+  S.session.cfMatchCount = 15;
+  S.session.players.forEach((sp,i)=>{ sp.matchesPlayed=3; sp.lastPlayedAtMatch=15; sp.lastConfirmedAtMatch=15; sp.wins=13-i; sp.losses=i; });
+  S.session.cfChallengeCourt = true;
+  S.session.cfCourts = { 1:{status:'ready'}, 2:{status:'ready'}, 3:{status:'ready'} };
+  S.session.cfSuggestions = {};
+  CF.batchGenerateSuggestions([1,2,3], null);
+  const ccThin = S.session.cfSuggestions[CCNUM];
+  ok(!(ccThin && ccThin.meta && ccThin.meta.challenge), 'adaptive gate: too few players → challenge court does NOT engage');
 } catch (e) {
   fail++; console.error('  ❌ Challenge Court test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }

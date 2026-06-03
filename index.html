@@ -6618,43 +6618,50 @@ const CF={
     let queue=S.session.cfQueue.filter(q=>!reservedIds.has(q.id));
 
     // ── [CHALLENGE COURT] ────────────────────────────────────────────────────
-    // Opt-in (cfChallengeCourt), 3+ courts, Phase 2+. Court 1 is reserved for the session's TOP-K
-    // (default 6) by current standings — a closed top-tier court. Those K are pulled out of the
-    // normal pool (so they only play Court 1) AND stamped into _cfChallengePoolIds so the full-queue
-    // hard-wait backstop won't yank a waiting top-K player onto a normal court. When Court 1 is
-    // ready, seat the 4 longest-waiting AVAILABLE top-K (the rest wait); NEVER backfill with lower
-    // ranks — if <4 are free, Court 1 waits. The pool is recomputed every generation, so climbing
-    // into / dropping out of the top-K = automatic promotion / relegation.
-    // Step 1: reserved seating + balanced 2v2. (KOTC winner-stay + hysteresis are later refinements.)
+    // Opt-in (cfChallengeCourt), Phase 2+. The MIDDLE court (default ⌈courts/2⌉, e.g. court 2 of 3 —
+    // overridable via cfChallengeCourtNum) is reserved for the session's TOP-K (default 6) by current
+    // standings — a closed top-tier court. Those K are pulled out of the normal pool AND stamped into
+    // _cfChallengePoolIds so the full-queue hard-wait backstop won't yank a waiting top-K player onto a
+    // normal court. When the challenge court is ready, seat the 4 longest-waiting AVAILABLE top-K (the
+    // rest wait); NEVER backfill with lower ranks. Pool recomputed every generation → climbing into /
+    // out of the top-K = automatic promotion / relegation.
+    // ADAPTIVE GATE: only engage when there are enough players to keep the OTHER courts fed —
+    // active ≥ K + (courts−1)×4. So it scales with turnout (won't reserve a court on a thin night)
+    // and self-disables on 2 courts unless the crowd is tiny. Recomputed live, so it turns on/off as
+    // players come and go. Step 1: reserved seating + balanced 2v2 (KOTC + hysteresis are later).
     _cfChallengePoolIds=new Set();
     {
+      const _nCourts=S.session.courts||1;
       const _ccK=Math.max(4,S.session.cfChallengeK||6);
+      const _ccNum=Math.min(_nCourts,Math.max(1,S.session.cfChallengeCourtNum||Math.ceil(_nCourts/2))); // middle court
+      const _activeN=(S.session.players||[]).filter(sp=>sp.status!=='left'&&!(S.session.cfPaused||[]).some(q=>q.id===sp.id)).length;
       const _ccOn=S.session.cfChallengeCourt===true
-        && (S.session.courts||1)>=3
+        && _nCourts>=3
         && this._sessPhaseNum()>=2
-        && Object.keys(S.session.cfRanks||{}).length>0;
+        && Object.keys(S.session.cfRanks||{}).length>0
+        && _activeN >= _ccK + (_nCourts-1)*4; // adaptive: enough players to feed the other courts
       if(_ccOn){
         const _pool=(typeof _sessionLbRows==='function'?_sessionLbRows(S.session):[])
           .filter(p=>p.status!=='left'&&!(S.session.cfPaused||[]).some(q=>q.id===p.id))
           .slice(0,_ccK).map(p=>p.id);
         if(_pool.length>=4){
           _cfChallengePoolIds=new Set(_pool);
-          if(readyCourts.includes(1)){
+          if(readyCourts.includes(_ccNum)){
             const _availTop=_pool.filter(id=>(S.session.cfQueue||[]).some(q=>q.id===id));
             if(_availTop.length>=4){
               const _four=_availTop.map(id=>({id,mg:this.matchGap(id),sr:this._rankSr(id)}))
                 .sort((a,b)=>b.mg-a.mg).slice(0,4);
               const _bp=MM.bestPair(_four.map(p=>({id:p.id,sr:p.sr})));
               const _t1=_bp.t1.map(p=>p.id),_t2=_bp.t2.map(p=>p.id);
-              S.session.cfSuggestions[1]={t1:_t1,t2:_t2,allIds:[..._t1,..._t2],ts:Date.now(),
+              S.session.cfSuggestions[_ccNum]={t1:_t1,t2:_t2,allIds:[..._t1,..._t2],ts:Date.now(),
                 meta:{challenge:true,gap:Math.round(Math.abs((_bp.t1[0].sr+_bp.t1[1].sr)/2-(_bp.t2[0].sr+_bp.t2[1].sr)/2))}};
             }else{
-              S.session.cfSuggestions[1]=null; // not enough top-K free — wait, do NOT backfill
+              S.session.cfSuggestions[_ccNum]=null; // not enough top-K free — wait, do NOT backfill
             }
-            readyCourts=readyCourts.filter(c=>c!==1);
+            readyCourts=readyCourts.filter(c=>c!==_ccNum);
           }
           queue=queue.filter(q=>!_cfChallengePoolIds.has(q.id)); // top-K never play the normal courts
-          if(!readyCourts.length)return; // only Court 1 was ready — challenge match seated, done
+          if(!readyCourts.length)return; // only the challenge court was ready — match seated, done
         }
       }
     }
@@ -9504,8 +9511,11 @@ function toggleChallengeCourt(){
   if(btn){btn.classList.toggle('bc',!!S.session.cfChallengeCourt);btn.classList.toggle('bg2',!S.session.cfChallengeCourt);}
   if(S.session.cfChallengeCourt&&(S.session.courts||1)<3){
     toast('👑 Challenge Court ON — but it needs 3+ courts to take effect','warn',4500);
+  }else if(S.session.cfChallengeCourt){
+    const _mid=Math.min(S.session.courts,Math.max(1,S.session.cfChallengeCourtNum||Math.ceil((S.session.courts||1)/2)));
+    toast(`👑 Challenge Court ON — Court ${(S.session.courtOffset||0)+_mid} reserved for the top 6 (kicks in from Phase 2, when enough players are in)`,'ok',4500);
   }else{
-    toast(S.session.cfChallengeCourt?'👑 Challenge Court ON — Court 1 reserved for the top 6 (from Phase 2)':'Challenge Court OFF',S.session.cfChallengeCourt?'ok':'warn',4000);
+    toast('Challenge Court OFF','warn',3000);
   }
   STORE.save('session');
   renderLive();
