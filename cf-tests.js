@@ -348,6 +348,64 @@ try {
   fail++; console.error('  ❌ Challenge Court test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
 
+// ── Tests: LIVE-PLAY stress — the real confirm → submit → regenerate loop ───
+// Drives the actual game loop headlessly (renders/toasts silenced) over many matches with the
+// Challenge Court ON, asserting the things that would BREAK A LIVE NIGHT: no exception, no court
+// stranded empty, wait stays bounded, and the challenge court never holds a non-top-6 player.
+section('live-play stress — confirm → submit → regenerate (no crash / no stuck court)');
+['renderLive','renderHistory','renderStandings','renderDB','renderRoster','renderArchive','updateHeader','updateProgress','startElapsed','startCFTick','toast','updatePvSelect','updatePvSessFilter'].forEach(fn=>{ try{ if(typeof ctx[fn]!=='undefined') ctx[fn]=()=>{}; }catch(e){} });
+try {
+  makeSession(20, 3);
+  if (APP._initSessionRanks) APP._initSessionRanks();
+  S.session.cfChallengeCourt = true; // exercise the Challenge Court under live play too
+  S.session.cfCourts = { 1:{status:'ready'}, 2:{status:'ready'}, 3:{status:'ready'} };
+  S.session.cfSuggestions = {};
+  let played = 0, maxGap = 0, stuck = false, ccBreach = 0, err = null;
+  const top6 = () => new Set(APP._sessionLbRows(S.session).slice(0,6).map(p=>p.id));
+  for (let step = 0; step < 60 && !err; step++) {
+    try {
+      // generate for any ready court without a suggestion
+      const ready = [1,2,3].filter(c => { const ct=S.session.cfCourts[c]; return (!ct||ct.status!=='playing') && !S.session.cfSuggestions[c]; });
+      if (ready.length) {
+        CF.batchGenerateSuggestions(ready, null);
+        // Validate the challenge invariant AT FORMATION TIME (before submits shuffle the standings):
+        // a freshly-generated court-2 challenge suggestion must contain only the current top-6.
+        if (ready.includes(2) && CF._sessPhaseNum() >= 2) {
+          const cc = S.session.cfSuggestions[2];
+          if (cc && cc.meta && cc.meta.challenge) { const t = top6(); if (!cc.allIds.every(id => t.has(id))) ccBreach++; }
+        }
+      }
+      // confirm any court that has a suggestion and isn't already playing
+      for (const c of [1,2,3]) if (S.session.cfSuggestions[c] && S.session.cfCourts[c]?.status!=='playing') CF.confirmSuggestion(c);
+      // submit a score on each playing court (alternate the winning side)
+      for (const c of [1,2,3]) {
+        const ct = S.session.cfCourts[c];
+        if (ct?.status==='playing' && ct.match) {
+          const win = (step + c) % 2 === 0;
+          CF._doSubmitScore(c, win ? 11 : (step % 10), win ? (step % 10) : 11);
+          played++;
+        }
+      }
+      // invariants
+      maxGap = Math.max(maxGap, ...S.session.players.map(sp => CF.matchGap(sp.id)));
+      [1,2,3].forEach(c => {
+        const ct = S.session.cfCourts[c];
+        if ((!ct || ct.status==='ready') && !S.session.cfSuggestions[c] && (S.session.cfQueue||[]).length >= 4) {
+          try { CF.batchGenerateSuggestions([c], null); } catch(e) {} // safety-net should fill it
+          if (!S.session.cfSuggestions[c] && (S.session.cfQueue||[]).length >= 4) stuck = true;
+        }
+      });
+    } catch(e) { err = e; }
+  }
+  ok(!err, 'live loop ran 60 steps without throwing' + (err ? ': ' + err.message + '\n' + (err.stack||'') : ''));
+  ok(played >= 30, `played a healthy number of matches headlessly (${played})`);
+  ok(!stuck, 'no court got permanently stuck (ready + no suggestion while queue ≥ 4)');
+  ok(maxGap <= 16, `no runaway wait — max matchGap stayed bounded (${maxGap})`);
+  ok(ccBreach === 0, `challenge court never held a non-top-6 player during live play (${ccBreach})`);
+} catch(e) {
+  fail++; console.error('  ❌ live-play stress threw during setup: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
 // ── Tests: undo (snapshot + restore of pre-confirm suggestion state) ────────
 section('undo — _snapUndo / undoLast restore the pre-action suggestion');
 ctx.renderLive = () => {}; // silence the re-render side-effect during the test
