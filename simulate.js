@@ -299,7 +299,16 @@ const SIM = (() => {
     const active = S.session.players.filter(sp => sp.status !== 'left' && !paused.has(sp.id));
     if (active.length < 2) return true;
     const permPairIds = new Set((S.session.cfPermPairs || []).flat());
+    // [CHALLENGE COURT] the reserved top-K play more by design (dedicated court) — that's an
+    // accepted tradeoff, not a fairness bug. Exclude them so this check still verifies the OTHER
+    // players are balanced without flagging the expected top-tier tilt.
+    let _ccPool = new Set();
+    if (S.session.cfChallengeCourt === true && (S.session.courts || 1) >= 3 && typeof _sessionLbRows === 'function') {
+      const _ccK = Math.max(4, S.session.cfChallengeK || 6);
+      _ccPool = new Set(_sessionLbRows(S.session).filter(p => p.status !== 'left' && !paused.has(p.id)).slice(0, _ccK).map(p => p.id));
+    }
     const settled = active.filter(sp => {
+      if (_ccPool.has(sp.id)) return false; // Challenge Court top-K — excluded (play more by design)
       if ((sp.matchesPlayed || 0) < nc) return false;
       // Perm pair members structurally wait for each other and accumulate a game-count
       // deficit vs solo players — exclude them like mid-add players.
@@ -795,6 +804,7 @@ const SIM = (() => {
           log(`--- [CHALLENGE COURT] middle court = #${_mid} · top-6 reservation (LATE-session matches) ---`);
           log(`  Middle court #${_mid}: ${midTop}/${midTot} all-top-6 (${_pct(midTop,midTot)}%)  ← HIGH if Challenge Court worked`);
           log(`  Other courts:   ${othTop}/${othTot} all-top-6 (${_pct(othTop,othTot)}%)  ← should be ~0% (top-6 reserved off them)`);
+          if(midTot>0) log('  (note: the top-6 play more games by design — excluded from the play-count fairness check)');
           if(midTot===0) log('  (no matches recorded on the middle court — was challengeCourt:true AND courts>=3?)');
         }
 
