@@ -307,6 +307,35 @@ if (APP._multiWriterBannerHtml) {
   ok(APP._multiWriterBannerHtml() === '', 'multi-scorer banner stays empty with no recent other-device write');
 }
 
+// ── Tests: [CHALLENGE COURT] Court 1 reserved for the session top-6 ─────────
+section('Challenge Court — Court 1 holds only the session top-6');
+try {
+  makeSession(20, 3);
+  if (APP._initSessionRanks) APP._initSessionRanks();
+  // Phase 2+ (np=20 → mc≥12), everyone recently played (not force-overdue), clear standings.
+  S.session.cfMatchCount = 15;
+  S.session.players.forEach((sp, i) => { sp.matchesPlayed=3; sp.lastPlayedAtMatch=15; sp.lastConfirmedAtMatch=15; sp.wins=20-i; sp.losses=i; sp.ptsFor=60; sp.ptsAgainst=40; });
+  S.session.cfChallengeCourt = true;
+  S.session.cfCourts = { 1:{status:'ready'}, 2:{status:'ready'}, 3:{status:'ready'} };
+  S.session.cfSuggestions = {};
+  CF.batchGenerateSuggestions([1,2,3], null);
+  const top6 = APP._sessionLbRows(S.session).slice(0,6).map(p=>p.id);
+  const c1 = S.session.cfSuggestions[1];
+  ok(c1 && Array.isArray(c1.allIds), 'Court 1 got a suggestion');
+  ok(c1 && c1.allIds.every(id=>top6.includes(id)), 'Court 1 contains ONLY the current top-6');
+  ok(c1 && c1.meta && c1.meta.challenge === true, 'Court 1 is flagged as a challenge match');
+  const others = [2,3].flatMap(c => { const s = S.session.cfSuggestions[c]; return s ? s.allIds : []; });
+  ok(others.length > 0 && others.every(id => !top6.includes(id)), 'top-6 never appear on courts 2/3');
+  // Default OFF: same setup, no flag → Court 1 is a normal match (no challenge reservation)
+  S.session.cfChallengeCourt = false;
+  S.session.cfSuggestions = {};
+  CF.batchGenerateSuggestions([1,2,3], null);
+  const c1off = S.session.cfSuggestions[1];
+  ok(!(c1off && c1off.meta && c1off.meta.challenge), 'Challenge OFF → Court 1 is a normal match');
+} catch (e) {
+  fail++; console.error('  ❌ Challenge Court test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
 // ── Tests: undo (snapshot + restore of pre-confirm suggestion state) ────────
 section('undo — _snapUndo / undoLast restore the pre-action suggestion');
 ctx.renderLive = () => {}; // silence the re-render side-effect during the test
