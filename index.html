@@ -6649,8 +6649,10 @@ const CF={
           if(readyCourts.includes(_ccNum)){
             const _availTop=_pool.filter(id=>(S.session.cfQueue||[]).some(q=>q.id===id));
             if(_availTop.length>=4){
-              const _four=_availTop.map(id=>({id,mg:this.matchGap(id),sr:this._rankSr(id)}))
-                .sort((a,b)=>b.mg-a.mg).slice(0,4);
+              // Seat the FEWEST-games top-K first (balance total play within the pool), then
+              // longest-waiting as a tiebreak — so all K rotate evenly instead of the same faces.
+              const _four=_availTop.map(id=>({id,mg:this.matchGap(id),g:(gsp(id)?.matchesPlayed||0),sr:this._rankSr(id)}))
+                .sort((a,b)=>(a.g-b.g)||(b.mg-a.mg)).slice(0,4);
               const _bp=MM.bestPair(_four.map(p=>({id:p.id,sr:p.sr})));
               const _t1=_bp.t1.map(p=>p.id),_t2=_bp.t2.map(p=>p.id);
               S.session.cfSuggestions[_ccNum]={t1:_t1,t2:_t2,allIds:[..._t1,..._t2],ts:Date.now(),
