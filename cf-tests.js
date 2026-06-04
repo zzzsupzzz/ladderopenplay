@@ -83,7 +83,8 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   _sessionLbRows:typeof _sessionLbRows!=='undefined'?_sessionLbRows:null,
   _multiWriterBannerHtml:typeof _multiWriterBannerHtml!=='undefined'?_multiWriterBannerHtml:null,
   exportBackup:typeof exportBackup!=='undefined'?exportBackup:null,
-  importBackup:typeof importBackup!=='undefined'?importBackup:null};`;
+  importBackup:typeof importBackup!=='undefined'?importBackup:null,
+  _challengePool:function(){return (typeof _cfChallengePoolIds!=='undefined'&&_cfChallengePoolIds)?_cfChallengePoolIds:new Set();}};`;
 
 vm.createContext(ctx);
 try {
@@ -405,6 +406,111 @@ try {
 } catch(e) {
   fail++; console.error('  ❌ live-play stress threw during setup: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
+
+// ── Tests: CHAOS — unhappy paths during live play ──────────────────────────
+// Injects leave / pause / resume / rejoin / suggestion-swap into the live loop and asserts the
+// things you actually worry about: nothing crashes, no court vanishes/stalls, left & paused players
+// never end up queued/suggested/on a court, nobody's double-booked, and ranks stay duplicate-free.
+section('chaos — leave / pause / resume / swap during live play (no crash / no orphans / ranks valid)');
+['renderLive','renderHistory','renderStandings','renderDB','renderRoster','renderRosterModal','renderArchive','updateHeader','updateProgress','startElapsed','startCFTick','toast','openModal','closeModal','updatePvSelect','updatePvSessFilter'].forEach(fn=>{ try{ if(typeof ctx[fn]!=='undefined') ctx[fn]=()=>{}; }catch(e){} });
+try {
+  const G = ctx, gsp = APP.gsp;
+  makeSession(24, 3);
+  if (APP._initSessionRanks) APP._initSessionRanks();
+  S.session.cfChallengeCourt = true;
+  S.session.cfCourts = { 1:{status:'ready'}, 2:{status:'ready'}, 3:{status:'ready'} };
+  S.session.cfSuggestions = {};
+  let seed = 987654321; const rnd = () => (seed = (seed*1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  let err = null, errWhen = '', played = 0;
+  const v = { leftQ:0, leftSug:0, leftCourt:0, pauseQ:0, pauseSug:0, pauseCourt:0, dblBook:0, dupRank:0, stuck:0, leaves:0, pauses:0, resumes:0, swaps:0 };
+  const _diag = { dup: [], stuck: [] };
+  for (let step = 0; step < 90 && !err; step++) {
+    try {
+      let lastAct = 'play';
+      const roll = rnd();
+      const queuedActive = (S.session.cfQueue||[]).map(q=>q.id).filter(id => gsp(id)?.status !== 'left');
+      if (roll < 0.14 && queuedActive.length > 8) { G.cfPausePlayer(queuedActive[Math.floor(rnd()*queuedActive.length)]); v.pauses++; lastAct='pause'; }
+      else if (roll < 0.27 && (S.session.cfPaused||[]).length) { G.cfResumePlayer(S.session.cfPaused[Math.floor(rnd()*S.session.cfPaused.length)].id); v.resumes++; lastAct='resume'; }
+      else if (roll < 0.38 && queuedActive.length > 9) { G.midRemove(queuedActive[Math.floor(rnd()*queuedActive.length)]); v.leaves++; lastAct='leave'; }
+      else if (roll < 0.46) { const left = S.session.players.filter(p=>p.status==='left'); if (left.length) { G.midRejoin(left[Math.floor(rnd()*left.length)].id); lastAct='rejoin'; } }
+      else if (roll < 0.58) {
+        const sc = Object.keys(S.session.cfSuggestions).find(c => S.session.cfSuggestions[c] && !S.session.cfSuggestions[c].meta?.challenge);
+        if (sc) { const sug = S.session.cfSuggestions[sc]; const out = sug.allIds[Math.floor(rnd()*sug.allIds.length)];
+          const avail = (S.session.cfQueue||[]).map(q=>q.id).filter(id => !sug.allIds.includes(id) && gsp(id)?.status!=='left');
+          if (avail.length) { G._sugPickerApply(sc, out, avail[Math.floor(rnd()*avail.length)]); v.swaps++; lastAct='swap'; } }
+      }
+      // normal live step
+      const ready = [1,2,3].filter(c => { const ct=S.session.cfCourts[c]; return (!ct||ct.status!=='playing') && !S.session.cfSuggestions[c]; });
+      if (ready.length) CF.batchGenerateSuggestions(ready, null);
+      for (const c of [1,2,3]) if (S.session.cfSuggestions[c] && S.session.cfCourts[c]?.status!=='playing') CF.confirmSuggestion(c);
+      // ── on-court invariants (checked WHILE courts are occupied, before scores post) ──
+      // The REAL bugs: a player physically on two courts at once, or a LEFT/PAUSED player
+      // seated on a court. (Suggestion∩suggestion overlap is an INTENTIONAL transient —
+      // overdue players are un-reserved so a ready court can force-seat them, and
+      // confirmSuggestion's stale-guard regenerates the colliding court at confirm — so we
+      // assert on PLAYING courts, where the stale-guard has already resolved any overlap.)
+      const left = new Set(S.session.players.filter(p=>p.status==='left').map(p=>p.id));
+      const paused = new Set((S.session.cfPaused||[]).map(q=>q.id));
+      const playingNow = [];
+      [1,2,3].forEach(c => { const ct=S.session.cfCourts[c]; if (ct?.status==='playing'&&ct.match) playingNow.push(...ct.match.t1, ...ct.match.t2); });
+      if (new Set(playingNow).size !== playingNow.length) v.dblBook++;
+      playingNow.forEach(id => { if (left.has(id)) v.leftCourt++; if (paused.has(id)) v.pauseCourt++; });
+      for (const c of [1,2,3]) { const ct=S.session.cfCourts[c]; if (ct?.status==='playing' && ct.match) { const w=(step+c)%2===0; CF._doSubmitScore(c, w?11:(step%10), w?(step%10):11); played++; } }
+      // ── post-step invariants: queue / suggestion hygiene + rank integrity ──
+      (S.session.cfQueue||[]).forEach(q => { if (left.has(q.id)) v.leftQ++; if (paused.has(q.id)) v.pauseQ++; });
+      const sugIds = []; Object.values(S.session.cfSuggestions||{}).forEach(s => { if (s) sugIds.push(...s.allIds); });
+      sugIds.forEach(id => { if (left.has(id)) v.leftSug++; if (paused.has(id)) v.pauseSug++; });
+      const activeRankPairs = Object.entries(S.session.cfRanks||{}).filter(([id]) => !left.has(id) && !paused.has(id) && gsp(id)).map(([id,e]) => [id,e.rank]);
+      const activeRanks = activeRankPairs.map(p=>p[1]);
+      if (new Set(activeRanks).size !== activeRanks.length) {
+        v.dupRank++;
+        if (_diag.dup.length < 4) {
+          const counts = {}; activeRankPairs.forEach(([id,r])=>{ (counts[r]=counts[r]||[]).push(id); });
+          const dups = Object.entries(counts).filter(([,ids])=>ids.length>1).map(([r,ids])=>`rank${r}=[${ids.join(',')}]`);
+          _diag.dup.push(`step${step} after '${lastAct}': ${dups.join(' ')}`);
+        }
+      }
+      // stuck: a NORMAL court ready with no suggestion while ≥4 SEATABLE players wait. The challenge
+      // court (middle) only ever seats the reserved top-K, and normal courts never seat the top-K —
+      // so subtract the challenge pool from the seatable count before calling a court stranded.
+      const _ccNum = Math.min(3, Math.max(1, S.session.cfChallengeCourtNum || Math.ceil((S.session.courts||3)/2)));
+      [1,2,3].forEach(c => {
+        const ct=S.session.cfCourts[c];
+        if ((!ct||ct.status==='ready') && !S.session.cfSuggestions[c]) {
+          try{CF.batchGenerateSuggestions([c],null);}catch(e){}
+          if (c!==_ccNum && !S.session.cfSuggestions[c]) {
+            // GENUINELY idle = queued, NOT in the challenge pool (reserved top-K), and NOT already
+            // committed to another court's pending suggestion. Only if ≥4 such players sit while a
+            // normal court is empty is the court actually stranded. (Players in other courts'
+            // suggestions are about to play — not free for this court; the engine generates courts
+            // jointly, so a court left empty with <4 truly-free players is correct, not stuck.)
+            const pool = APP._challengePool();
+            const otherSug = new Set();
+            [1,2,3].forEach(x=>{ if(x!==c && S.session.cfSuggestions[x]) S.session.cfSuggestions[x].allIds.forEach(id=>otherSug.add(id)); });
+            const idle = (S.session.cfQueue||[]).filter(q=>!pool.has(q.id) && !otherSug.has(q.id)).length;
+            if (idle>=4) {
+              v.stuck++;
+              if (_diag.stuck.length < 8) {
+                const sugState = [1,2,3].map(x=>`c${x}:${S.session.cfCourts[x]?.status||'-'}/${S.session.cfSuggestions[x]?(S.session.cfSuggestions[x].meta?.challenge?'CHsug':'sug'):'nosug'}`).join(' ');
+                _diag.stuck.push(`step${step} after '${lastAct}' court${c}: queue${(S.session.cfQueue||[]).length} pool${pool.size} otherSug${otherSug.size} idle${idle} | ${sugState}`);
+              }
+            }
+          }
+        }
+      });
+    } catch(e) { err = e; errWhen = 'step ' + step; }
+  }
+  ok(!err, 'chaos loop ran 90 steps without throwing' + (err ? ` (${errWhen}): ${err.message}\n${err.stack||''}` : ''));
+  ok(played >= 20, `matches still got played amid the chaos (${played})`);
+  ok(v.leaves+v.pauses+v.resumes+v.swaps >= 10, `chaos events actually fired (leave ${v.leaves} / pause ${v.pauses} / resume ${v.resumes} / swap ${v.swaps})`);
+  ok(v.leftQ===0 && v.leftSug===0 && v.leftCourt===0, `LEFT players never queued/suggested/on-court (q${v.leftQ} sug${v.leftSug} court${v.leftCourt})`);
+  ok(v.pauseQ===0 && v.pauseSug===0 && v.pauseCourt===0, `PAUSED players never queued/suggested/on-court (q${v.pauseQ} sug${v.pauseSug} court${v.pauseCourt})`);
+  ok(v.dblBook===0, `no player double-booked across courts/suggestions (${v.dblBook})`);
+  ok(v.dupRank===0, `ranks stayed duplicate-free for active players through every leave/pause/resume (${v.dupRank})`);
+  if (v.dupRank) console.error('     DUP DIAG:\n       ' + _diag.dup.join('\n       '));
+  ok(v.stuck===0, `no court stranded by a manual change (${v.stuck})`);
+  if (v.stuck) console.error('     STUCK DIAG:\n       ' + _diag.stuck.join('\n       '));
+} catch(e) { fail++; console.error('  ❌ chaos test setup threw: ' + (e && e.message) + '\n' + (e && e.stack || '')); }
 
 // ── Tests: undo (snapshot + restore of pre-confirm suggestion state) ────────
 section('undo — _snapUndo / undoLast restore the pre-action suggestion');

@@ -2032,9 +2032,19 @@ function _updateSessionRank(id,won,pd,opponentIds){
   const newRank=Math.max(1,Math.min(n,myRank-move)); // moving up = rank number decreases
   if(newRank===myRank){entry.games++;return;}
 
-  // Swap ranks with the player currently at newRank
+  // Swap ranks with the ACTIVE player currently at newRank.
+  // Paused/left players keep stale rank entries (see _compressRanks), so a paused
+  // player can share a rank number with an active one. Excluding them here means
+  // the swap only ever touches the dense active 1..n numbering — otherwise the
+  // lookup could land on a paused player's stale rank, leaving the active player
+  // at newRank undisplaced and two active players sharing a rank.
+  const _pausedRankIds=new Set((S.session.cfPaused||[]).map(q=>q.id));
   const displaced=Object.entries(S.session.cfRanks)
-    .find(([pid,e])=>e.rank===newRank&&pid!==id);
+    .find(([pid,e])=>{
+      if(e.rank!==newRank||pid===id)return false;
+      const sp=gsp(pid);
+      return sp&&sp.status!=='left'&&!_pausedRankIds.has(pid);
+    });
   if(displaced){
     S.session.cfRanks[displaced[0]].rank=myRank; // displaced player takes my old rank
   }
@@ -3126,12 +3136,15 @@ function cfResumePlayer(id){
   const p=gp(id);if(!p)return;
   const pi=(S.session.cfPaused||[]).findIndex(q=>q.id===id);
   if(pi===-1)return;
-  // Compress ranks after resume — re-numbers including the returning player without resetting tonight's positions.
-  if(S.session?.cfRanks)_compressRanks();
   const [entry]=S.session.cfPaused.splice(pi,1);
   // Re-enter queue with a FRESH wait clock — a voluntary pause is not queue wait, so the
   // resumed player's wait (and the wait-cap) should count from NOW, not from before the pause.
   S.session.cfQueue.push({id:entry.id,since:Date.now(),consec:entry.consec||0});
+  // Compress ranks AFTER the paused→queue move so the returning player is counted as ACTIVE
+  // and re-numbered into the dense 1..N sequence. Compressing while they were still in
+  // cfPaused excluded them (see _compressRanks), leaving their stale pre-pause rank to collide
+  // with an active player's renumbered rank — i.e. two active players sharing a rank number.
+  if(S.session?.cfRanks)_compressRanks();
   // Mark resumed so catch-up pressure is capped + reset the wait clocks to the resume point.
   // _resumedAtMatch is a DEDICATED resume anchor (kept separate from _joinedAtMatch, which is the
   // late-arrival join anchor and drives the post-hoc "count first gap" logic — overloading it
