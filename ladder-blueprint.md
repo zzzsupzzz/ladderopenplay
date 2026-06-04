@@ -221,6 +221,36 @@ Admin can always override (engine supports 1–6). Re-suggest if headcount cross
 players on only 3 courts), surface a hint to add a court. Changing court count mid-session must recompute
 the wait cap and bench math live (no restart).
 
+### 6.8 Bottom "dev court" — mirror the Challenge Court at the low end  ·  *priority: LOW (design note, not scheduled)*
+**Idea (captured from a design discussion — NOT built).** The Challenge Court reserves the middle court for
+the session top-6 (invisible, phase 2+, adaptive gate, pool recomputed every generation → automatic
+promotion/relegation). Mirror it at the bottom: reserve a court for the session **bottom-6** so the weakest
+players play peers — winnable, competitive games instead of being stomped/carried up. Bonus: pulling the tail
+out also tightens the *middle* courts' skill range, so everyone's matches improve, not just the tail's.
+
+**Same machine as the Challenge Court** — `_sessionLbRows` for membership (exclude left/paused), phase 2+,
+seat the 4 fewest-games / longest-waiting of the bottom-6, balanced 2v2, pool recomputed each generation,
+label organizer-only (invisible to players/observers).
+
+**Key constraint — it's a 4+ COURT feature.** Reserving a court costs a court. With the Challenge Court
+already reserving one, a *second* reservation must still leave a **≥2-court fluid middle**, or you've
+recreated rigid full-tiering (explicitly rejected — kills variety, fragile to turnout, loud stratification
+that contradicts the "everyone feels equal" goal). So scale the NUMBER of reserved courts, not just the gate:
+
+| Courts | ~People | Reserved | Middle |
+|--------|---------|----------|--------|
+| 2 | ~12–14 | none | all of it (small night — full mixing) |
+| 3 | ~18–21 | **1** end-cap (top *or* bottom) — today's Challenge Court | 2 courts, fluid |
+| 4 | ~24–28 | **2** — top **and** bottom | 2 courts, fluid |
+| 5–6 | ~30–42 | 2 end-caps | 3–4 courts, fluid |
+
+Gate the bottom court on `courts >= 4` (plus an adaptive player gate, e.g. `active >= 2K + (courts-2)*4`, so
+both reservations still feed the normal courts). **Do NOT** engage a second reserved court at 3 courts.
+
+**Cost (accepted, same as Challenge Court):** the bottom-6 see less partner variety and never "play up" — but
+playing up at the tail is usually a stomping anyway, so the trade is net positive. Membership self-corrects
+via live recompute; organizer can leave it off.
+
 ---
 
 ## 7. Data model additions
