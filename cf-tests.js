@@ -236,6 +236,35 @@ try {
   fail++; console.error('  ❌ Phase-1 balanced-random test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
 
+// ── Tests: ranked-only board (Phase-1 warm-up doesn't count toward W/L) ──────
+section('ranked-only board — Phase-1 warm-up calibrates but does NOT count W/L');
+['renderLive','renderStandings','renderHistory','renderDB','renderRoster','toast','openModal','closeModal','startElapsed','startCFTick','updateHeader'].forEach(fn=>{ try{ if(typeof ctx[fn]!=='undefined') ctx[fn]=()=>{}; }catch(e){} });
+try {
+  const gsp = APP.gsp;
+  const playMatch = (mc) => {
+    S.session.cfMatchCount = mc;
+    S.session.cfCourts = { 1: { status:'playing', match: { id:'tm'+mc, t1:['p0','p1'], t2:['p2','p3'], startTime: Date.now()-600000, status:'playing' } } };
+    const before = ['p0','p1','p2','p3'].map(id => ({ id, w:(gsp(id).wins||0), l:(gsp(id).losses||0), g:(gsp(id).matchesPlayed||0), r:gsp(id).sRating }));
+    CF._doSubmitScore(1, 11, 5); // p0,p1 win 11-5
+    return before.map(b => ({ id:b.id, dw:(gsp(b.id).wins||0)-b.w, dl:(gsp(b.id).losses||0)-b.l, dg:(gsp(b.id).matchesPlayed||0)-b.g, dr:gsp(b.id).sRating-b.r }));
+  };
+  // Phase 1 (mc=0): warm-up — NO W/L, but games-played + ELO still move (calibration).
+  makeSession(8, 2); if (APP._initSessionRanks) APP._initSessionRanks();
+  const p1 = playMatch(0);
+  ok(p1.every(x => x.dw === 0 && x.dl === 0), 'warm-up: no W/L recorded for any of the 4 players');
+  ok(p1.every(x => x.dg === 1), 'warm-up: matchesPlayed still +1 (warm-up counts as a game played)');
+  ok(p1.some(x => x.dr !== 0), 'warm-up: rating still moved (calibration intact)');
+  ok((S.session.cfLog[S.session.cfLog.length-1]||{}).phase === 1, 'warm-up: logged match stamped phase 1');
+  // Phase 3 (mc=12, np=8 → ≥9.6): ranked — W/L counts.
+  makeSession(8, 2); if (APP._initSessionRanks) APP._initSessionRanks();
+  const p3 = playMatch(12);
+  const wl = p3.reduce((s,x) => s + x.dw + x.dl, 0);
+  ok(wl === 4, `ranked: W/L recorded for all 4 players (got ${wl})`);
+  ok((S.session.cfLog[S.session.cfLog.length-1]||{}).phase >= 2, 'ranked: logged match stamped phase ≥ 2');
+} catch (e) {
+  fail++; console.error('  ❌ ranked-only board test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
 // ── Tests: season ladder movement (snapshot diff) ──────────────────────────
 section('_seasonLadderHtml() — week-over-week movement from rank snapshots');
 if (APP._seasonLadderHtml) {

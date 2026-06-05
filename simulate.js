@@ -276,10 +276,18 @@ const SIM = (() => {
 
   function verifyStats() {
     let ok = true;
+    // Games that count toward matchesPlayed but NOT toward W/L/T: Phase-1 warm-up (ranked-only board)
+    // and noElo (tie/incomplete). Count them per player so the invariant accounts for them.
+    const uncounted = {};
+    (S.session.cfLog || []).forEach(m => {
+      if (!(m.phase === 1 || m.noElo)) return;
+      [...(m.t1 || []), ...(m.t2 || [])].forEach(id => { uncounted[id] = (uncounted[id] || 0) + 1; });
+    });
     S.session.players.forEach(sp => {
       const total = (sp.wins || 0) + (sp.losses || 0) + (sp.ties || 0);
-      if (sp.status !== 'left' && total !== sp.matchesPlayed) {
-        err(`Stats mismatch for ${sp.name}: W${sp.wins}+L${sp.losses}+T${sp.ties}=${total} != matchesPlayed=${sp.matchesPlayed}`);
+      const counted = (sp.matchesPlayed || 0) - (uncounted[sp.id] || 0); // games that should yield a W/L/T
+      if (sp.status !== 'left' && total !== counted) {
+        err(`Stats mismatch for ${sp.name}: W${sp.wins}+L${sp.losses}+T${sp.ties}=${total} != counted games=${counted} (played ${sp.matchesPlayed}, ${uncounted[sp.id] || 0} warm-up/noElo)`);
         ok = false;
       }
     });
@@ -833,7 +841,7 @@ const SIM = (() => {
           arch.players.forEach(sp => { _acc[sp.id] = [0,1,2].map(() => ({ g:0, w:0, l:0, rf:null, rl:null, pg:0, og:0, gc:0 })); });
           _qp.forEach((m, i) => {
             const t1 = m.t1 || [], t2 = m.t2 || []; if (t1.length < 2 || t2.length < 2) return;
-            const ph = _phOf(i), rk = m.sessionRanks || [];
+            const ph = (m.phase ? Math.min(2, m.phase - 1) : _phOf(i)), rk = m.sessionRanks || [];
             const t1won = m.s1 > m.s2, t2won = m.s2 > m.s1, ids = [...t1, ...t2];
             ids.forEach((id, idx) => {
               const a = _acc[id] && _acc[id][ph]; if (!a) return;
@@ -876,7 +884,7 @@ const SIM = (() => {
           arch.players.forEach(sp => { st[sp.id] = { w:0, l:0, pd:0, rw:0, rl:0, rpd:0 }; });
           _qb.forEach((m, i) => {
             const t1 = m.t1 || [], t2 = m.t2 || []; if (t1.length < 2 || t2.length < 2) return;
-            const ranked = i >= _bb1, t1win = m.s1 > m.s2, t2win = m.s2 > m.s1, d = (m.s1||0) - (m.s2||0);
+            const ranked = (m.phase ? m.phase >= 2 : i >= _bb1), t1win = m.s1 > m.s2, t2win = m.s2 > m.s1, d = (m.s1||0) - (m.s2||0);
             [...t1, ...t2].forEach((id, idx) => {
               const s = st[id]; if (!s) return;
               const onT1 = idx < 2, myPd = onT1 ? d : -d;
@@ -891,7 +899,7 @@ const SIM = (() => {
           const byRtg    = [...arch.players].sort((a,b) => rc(b) - rc(a));
           const pos = (arr,id) => arr.findIndex(p => p.id === id) + 1;
           const mv = (from,to) => { const dd = from - to; return dd > 0 ? `↑${dd}` : dd < 0 ? `↓${-dd}` : '·'; };
-          log('--- Board sort comparison: WINS (current) · RANKED-only (excl P1) · RATING Δ ---');
+          log('--- Board sort comparison: WINS (incl warm-up, old behaviour) · RANKED-only (= the live board now) · RATING Δ ---');
           log('     Player       Wins  Ranked   RtgΔ     (W-L | rankedW-L | Δrtg)');
           byWins.forEach(sp => {
             const w = pos(byWins,sp.id), r = pos(byRanked,sp.id), g = pos(byRtg,sp.id), s = st[sp.id];
