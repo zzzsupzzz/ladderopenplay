@@ -324,24 +324,29 @@ if (APP._tierOf) {
   ok(APP._tierOf(0, 20) === null, '_tierOf: rank 0 → null');
 }
 if (APP._awardsHtml) {
+  // Ranked-only awards: A racks up a big WARM-UP (phase 1) gain + win, B does it in RANKED (phase 2-3).
+  // So Most Improved, Biggest Climber and Hot Hand should all go to B — A's warm-up doesn't count.
   const sess = {
     players: [
-      { id:'a', name:'A', sRating:1250, startRating:1200, isNR:false, wins:3, losses:0, matchesPlayed:3 },
-      { id:'b', name:'B', sRating:1180, startRating:1200, isNR:false, wins:1, losses:2 },
-      { id:'c', name:'C', sRating:1090, startRating:1100, isNR:false, wins:1, losses:2 },
-      { id:'d', name:'D', sRating:1070, startRating:1100, isNR:false, wins:1, losses:2 },
+      { id:'a', name:'A', sRating:1290, startRating:1200, isNR:false, wins:0, losses:2, matchesPlayed:3 },
+      { id:'b', name:'B', sRating:1260, startRating:1200, isNR:false, wins:2, losses:0, matchesPlayed:3 },
+      { id:'c', name:'C', sRating:1110, startRating:1100, isNR:false },
+      { id:'d', name:'D', sRating:1085, startRating:1100, isNR:false },
     ],
-    cfRanks: { a:{initRank:4,rank:1}, b:{initRank:1,rank:2}, c:{initRank:2,rank:3}, d:{initRank:3,rank:4} },
+    cfRanks: { a:{initRank:3,rank:3}, b:{initRank:4,rank:1}, c:{initRank:2,rank:3}, d:{initRank:1,rank:4} },
     cfLog: [
-      { t1:['a','c'], t2:['b','d'], s1:11, s2:6, sessionRanks:[4,2,1,3] },
-      { t1:['a','d'], t2:['b','c'], s1:11, s2:8, sessionRanks:[1,4,2,3] },
-      { t1:['a','b'], t2:['c','d'], s1:11, s2:9, sessionRanks:[1,2,3,4] },
+      // Phase 1 warm-up — A wins big (+70), warm-end rank 4 for B. Should NOT count for any award.
+      { t1:['a','c'], t2:['b','d'], s1:11, s2:6, phase:1, eloDeltas:[70,0,5,0], sessionRanks:[3,2,4,1] },
+      // Phase 2-3 ranked — B wins both (A loses both), B gains +60 and climbs 4→1. Counts.
+      { t1:['b','c'], t2:['a','d'], s1:11, s2:8, phase:2, eloDeltas:[50,5,-30,-5], sessionRanks:[2,3,3,4] },
+      { t1:['b','c'], t2:['a','d'], s1:11, s2:9, phase:3, eloDeltas:[10,2,-8,-2], sessionRanks:[1,3,3,4] },
     ],
   };
   const h = APP._awardsHtml(sess);
   ok(/NIGHT'S AWARDS/.test(h), '_awardsHtml: renders an awards panel');
-  ok(/MOST IMPROVED/.test(h),  '_awardsHtml: includes Most Improved (A +50)');
-  ok(/HOT HAND/.test(h),       '_awardsHtml: includes Hot Hand (A won 3)');
+  ok(/MOST IMPROVED<\/div><div[^>]*>B</.test(h),   '_awardsHtml: Most Improved is ranked-only (B +60, not warm-up A +70)');
+  ok(/BIGGEST CLIMBER<\/div><div[^>]*>B</.test(h),  '_awardsHtml: Biggest Climber is ranked-only (B)');
+  ok(/HOT HAND<\/div><div[^>]*>B</.test(h),         '_awardsHtml: Hot Hand is ranked-only (B, not warm-up A)');
 }
 if (APP._ratingSparkHtml) {
   S.db = [{ id:'a', name:'A', rating:1280, isNR:false }];
