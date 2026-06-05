@@ -864,6 +864,41 @@ const SIM = (() => {
           });
         }
 
+        // ── Board sort comparison: how the standings reshuffle under 3 rules ──
+        // WINS (current: wins→ptDiff→rating) · RANKED-only (P2-3 only, excludes the random warm-up) ·
+        // RATING Δ (ELO change — least-noisy skill measure). Shows each player's POSITION under each so
+        // you can see who's propped up by the warm-up vs who earned it once ranked. ↑/↓ = move vs WINS.
+        {
+          const _qb = arch.cfLog || [];
+          const _nb = arch.players.length || 16;
+          const _bb1 = Math.ceil(_nb * 0.6);
+          const st = {};
+          arch.players.forEach(sp => { st[sp.id] = { w:0, l:0, pd:0, rw:0, rl:0, rpd:0 }; });
+          _qb.forEach((m, i) => {
+            const t1 = m.t1 || [], t2 = m.t2 || []; if (t1.length < 2 || t2.length < 2) return;
+            const ranked = i >= _bb1, t1win = m.s1 > m.s2, t2win = m.s2 > m.s1, d = (m.s1||0) - (m.s2||0);
+            [...t1, ...t2].forEach((id, idx) => {
+              const s = st[id]; if (!s) return;
+              const onT1 = idx < 2, myPd = onT1 ? d : -d;
+              const won = (onT1 && t1win) || (!onT1 && t2win), lost = (onT1 && t2win) || (!onT1 && t1win);
+              s.pd += myPd; if (won) s.w++; else if (lost) s.l++;
+              if (ranked) { s.rpd += myPd; if (won) s.rw++; else if (lost) s.rl++; }
+            });
+          });
+          const rc = sp => Math.round((sp.sRating||0) - (sp.startRating||0));
+          const byWins   = [...arch.players].sort((a,b) => (st[b.id].w-st[a.id].w)   || (st[b.id].pd-st[a.id].pd)   || ((b.sRating||0)-(a.sRating||0)));
+          const byRanked = [...arch.players].sort((a,b) => (st[b.id].rw-st[a.id].rw) || (st[b.id].rpd-st[a.id].rpd) || ((b.sRating||0)-(a.sRating||0)));
+          const byRtg    = [...arch.players].sort((a,b) => rc(b) - rc(a));
+          const pos = (arr,id) => arr.findIndex(p => p.id === id) + 1;
+          const mv = (from,to) => { const dd = from - to; return dd > 0 ? `↑${dd}` : dd < 0 ? `↓${-dd}` : '·'; };
+          log('--- Board sort comparison: WINS (current) · RANKED-only (excl P1) · RATING Δ ---');
+          log('     Player       Wins  Ranked   RtgΔ     (W-L | rankedW-L | Δrtg)');
+          byWins.forEach(sp => {
+            const w = pos(byWins,sp.id), r = pos(byRanked,sp.id), g = pos(byRtg,sp.id), s = st[sp.id];
+            log(`  ${(sp.name+'          ').slice(0,11)}#${String(w).padStart(2)}    #${String(r).padStart(2)} ${mv(w,r).padEnd(3)}  #${String(g).padStart(2)} ${mv(w,g).padEnd(3)}   ${s.w}-${s.l} | ${s.rw}-${s.rl} | ${rc(sp)>=0?'+':''}${rc(sp)}`);
+          });
+        }
+
         if (doRender) render();
         if (live) await STORE.save();
       }
