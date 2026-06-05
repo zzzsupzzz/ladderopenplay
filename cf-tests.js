@@ -214,6 +214,24 @@ try {
   const sP3 = CF._scoreGroup(mk([0, 1, 8, 9]), null);
   const sP3PartnerGap = Math.max(Math.abs(sP3.t1[0].sr - sP3.t1[1].sr), Math.abs(sP3.t2[0].sr - sP3.t2[1].sr));
   ok(sP3PartnerGap < sPartnerGap, `Phase 3 keeps tighter partners than Phase 1 for the same foursome (P3 ${Math.round(sP3PartnerGap)} < P1 ${Math.round(sPartnerGap)})`);
+
+  // 5) TRUE-RANDOM opening (every player ≤1 game): the spread limit is OFF — even a top+bottom or a
+  //    3-strong-1-weak foursome forms (selection fully skill-blind), but teams still balance.
+  S.session.cfMatchCount = 0;
+  S.session.players.forEach(p => p.matchesPlayed = 0);             // everyone in their 1st game
+  const wildOpen = CF._scoreGroup(mk([0, 1, 18, 19]), null);      // spread ~18 — blocked once games accrue
+  const topHeavyOpen = CF._scoreGroup(mk([0, 1, 2, 18]), null);   // 3 strong + 1 weak ("top 3 with bottom")
+  const tightOpen = CF._scoreGroup(mk([0, 1, 2, 3]), null);
+  ok(Math.abs(wildOpen.score - tightOpen.score) < 40, `Opening: top+bottom foursome NOT blocked — true random (Δ=${Math.round(Math.abs(wildOpen.score - tightOpen.score))})`);
+  ok(Math.abs(topHeavyOpen.score - tightOpen.score) < 40, `Opening: 3-strong-1-weak foursome allowed too (Δ=${Math.round(Math.abs(topHeavyOpen.score - tightOpen.score))})`);
+  const woTeamGap = Math.abs((wildOpen.t1[0].sr + wildOpen.t1[1].sr) / 2 - (wildOpen.t2[0].sr + wildOpen.t2[1].sr) / 2);
+  ok(woTeamGap < 60, `Opening: wild foursome still split to balanced teams (team gap ${Math.round(woTeamGap)})`);
+  // 6) Once players are past their first 2 games (still Phase 1), the spread limit returns.
+  S.session.cfMatchCount = 10; // np=20 → <12 ⇒ still Phase 1
+  S.session.players.forEach(p => p.matchesPlayed = 2);
+  const wildLater = CF._scoreGroup(mk([0, 1, 18, 19]), null);
+  const tightLater = CF._scoreGroup(mk([0, 1, 2, 3]), null);
+  ok(wildLater.score > tightLater.score + 100, `After first 2 games: spread limit returns — wild foursome penalised (wild ${Math.round(wildLater.score)} > tight ${Math.round(tightLater.score)})`);
 } catch (e) {
   fail++; console.error('  ❌ Phase-1 balanced-random test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }

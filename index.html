@@ -6222,6 +6222,12 @@ const CF={
     // Phase flag for the Phase-1 BALANCED-RANDOM behaviour (split chooser + p1 below).
     // Progress-based, mirrors _sessPhaseNum(). Phase 1 = warm-up; 2-3 = ranked (unchanged).
     const _sgPhase=(()=>{const np=S.session?.activePlayers?.length||8,mc=S.session?.cfMatchCount||0;return mc<np*0.6?1:mc<np*1.2?2:3;})();
+    // TRUE-RANDOM opening — the first 2 games each (every group member has played ≤1): drop ALL skill
+    // bias. Any foursome may form (top may play bottom), NO spread limit, selection fully random. Teams
+    // are still balanced by the Phase-1 split below, so a carry game is as even as the random draw allows.
+    // Phase-1 only (late arrivals mid-session are excluded — they keep their inserted-rank matching).
+    const _maxGG=Math.max(0,...group.map(p=>gsp(p.id)?.matchesPlayed||0));
+    const _trueRandom=_sgPhase===1&&_maxGG<=1;
     _splits.sort((x,y)=>{
       // Priority 0: never-paired players must not be partners — highest constraint
       const nx=_splitHasNeverPair(x),ny=_splitHasNeverPair(y);
@@ -6357,7 +6363,10 @@ const CF={
     // Phase 1 = BALANCED RANDOM: keep ONLY team balance (crossImb) so group SELECTION ignores skill
     // (foursomes mix freely); drop partner-gap/spread/carry so the high-partner-gap split isn't punished.
     // Phases 2-3 unchanged (full skill tightening).
-    const p1Raw=_sgPhase===1 ? crossImb*1.5 : crossImb*1.5 + (t1gap+t2gap)*1.5 + spreadPen*1.5 + carryPen;
+    // _trueRandom (first 2 games): p1=0 → selection ignores skill entirely, so even an un-balanceable
+    // foursome (3 strong + 1 weak) isn't penalised. Otherwise Phase 1 keeps only team balance (crossImb);
+    // Phases 2-3 keep full skill tightening.
+    const p1Raw=_trueRandom ? 0 : _sgPhase===1 ? crossImb*1.5 : crossImb*1.5 + (t1gap+t2gap)*1.5 + spreadPen*1.5 + carryPen;
     const p1=Math.min(350,p1Raw);
 
     // P2: Play count fairness — strong 2nd priority but can't override P1 skill balance
@@ -6567,7 +6576,8 @@ const CF={
     let rankBandPen=0;
     {
       const _rks=group.map(p=>_sessionRank(p.id)).filter(r=>r>0);
-      if(_rks.length===4){
+      // !_trueRandom: the first-2-games opening has NO spread limit (top may play bottom).
+      if(_rks.length===4&&!_trueRandom){
         const _rSpread=Math.max(..._rks)-Math.min(..._rks);
         const _N4=_totalRanked();
         const _C4=S.session?.courts||1;
@@ -6603,7 +6613,9 @@ const CF={
       const _pc=this._phaseSkillCaps(group.map(p=>p.id));
       const _partnerOver=Math.max(0,Math.max(rawT1gap,rawT2gap)-_pc.partner);
       const _teamOver=Math.max(0,crossImb-_pc.team);
-      phaseGapPen=_partnerOver*1.2+_teamOver*1.0;
+      // Phase 1 balanced-random creates high partner gaps BY DESIGN (strong+weak split), so the partner
+      // cap must not punish them — keep only the team-balance term. The true-random opening drops both.
+      phaseGapPen=_trueRandom?0:(_sgPhase===1?_teamOver*1.0:_partnerOver*1.2+_teamOver*1.0);
     }
     return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+blowoutNudge+rankBandPen+neverPairPen+phaseGapPen,meta,t1,t2,group};
   },
