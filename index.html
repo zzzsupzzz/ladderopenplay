@@ -6219,6 +6219,9 @@ const CF={
       const k2=this.pairKey(sp.t2[0].id,sp.t2[1].id);
       return (_llMap[k1]?1:0)+(_llMap[k2]?1:0);
     };
+    // Phase flag for the Phase-1 BALANCED-RANDOM behaviour (split chooser + p1 below).
+    // Progress-based, mirrors _sessPhaseNum(). Phase 1 = warm-up; 2-3 = ranked (unchanged).
+    const _sgPhase=(()=>{const np=S.session?.activePlayers?.length||8,mc=S.session?.cfMatchCount||0;return mc<np*0.6?1:mc<np*1.2?2:3;})();
     _splits.sort((x,y)=>{
       // Priority 0: never-paired players must not be partners — highest constraint
       const nx=_splitHasNeverPair(x),ny=_splitHasNeverPair(y);
@@ -6233,8 +6236,13 @@ const CF={
       // so teammates are similar level (you play WITH a peer) rather than strong+weak carry
       // splits. Narrow foursomes (driven by phaseGapPen) keep teams balanced too; only forced
       // wide foursomes trade some team balance for tighter partners.
-      const gx=Math.abs((x.t1[0].sr+x.t1[1].sr)-(x.t2[0].sr+x.t2[1].sr))*0.5+(Math.abs(x.t1[0].sr-x.t1[1].sr)+Math.abs(x.t2[0].sr-x.t2[1].sr))*1.0+_splitCarry(maxGapX);
-      const gy=Math.abs((y.t1[0].sr+y.t1[1].sr)-(y.t2[0].sr+y.t2[1].sr))*0.5+(Math.abs(y.t1[0].sr-y.t1[1].sr)+Math.abs(y.t2[0].sr-y.t2[1].sr))*1.0+_splitCarry(maxGapY);
+      // Phase 1 = BALANCED RANDOM: rank splits by TEAM GAP only. The min-team-gap split of a spread
+      // foursome is the strong+weak pairing → even teams, HIGH partner gap by design (that's the goal:
+      // low opponent gap, high partner gap). Phases 2-3 keep tight-partners (within-team ×1.0 > cross ×0.5 + carry).
+      const _tgX=Math.abs((x.t1[0].sr+x.t1[1].sr)-(x.t2[0].sr+x.t2[1].sr));
+      const _tgY=Math.abs((y.t1[0].sr+y.t1[1].sr)-(y.t2[0].sr+y.t2[1].sr));
+      const gx=_sgPhase===1?_tgX:_tgX*0.5+(Math.abs(x.t1[0].sr-x.t1[1].sr)+Math.abs(x.t2[0].sr-x.t2[1].sr))*1.0+_splitCarry(maxGapX);
+      const gy=_sgPhase===1?_tgY:_tgY*0.5+(Math.abs(y.t1[0].sr-y.t1[1].sr)+Math.abs(y.t2[0].sr-y.t2[1].sr))*1.0+_splitCarry(maxGapY);
       return gx-gy;
     });
     let{t1,t2}=_splits[0];
@@ -6346,7 +6354,10 @@ const CF={
     // P1: Match balance — primary, capped at 350
     const maxTeamGap=Math.max(rawT1gap,rawT2gap);
     const carryPen=maxTeamGap>120?Math.pow((maxTeamGap-120)/80,2)*40:0;
-    const p1Raw=crossImb*1.5 + (t1gap+t2gap)*1.5 + spreadPen*1.5 + carryPen;
+    // Phase 1 = BALANCED RANDOM: keep ONLY team balance (crossImb) so group SELECTION ignores skill
+    // (foursomes mix freely); drop partner-gap/spread/carry so the high-partner-gap split isn't punished.
+    // Phases 2-3 unchanged (full skill tightening).
+    const p1Raw=_sgPhase===1 ? crossImb*1.5 : crossImb*1.5 + (t1gap+t2gap)*1.5 + spreadPen*1.5 + carryPen;
     const p1=Math.min(350,p1Raw);
 
     // P2: Play count fairness — strong 2nd priority but can't override P1 skill balance
@@ -8830,9 +8841,26 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     const el=document.getElementById('cf-sess-lbl');
     if(el)el.textContent=isLobby?'CHECK-IN LOBBY':(S.session.name||'CONTINUOUS FLOW');
     const sub=document.getElementById('cf-sess-sub');
-    if(sub)sub.textContent=isLobby
-      ?`${S.session.activePlayers.length} players checked in — press ▶ Begin Play when ready`
-      :`${(S.session.cfLog||[]).length} matches · ${S.session.activePlayers.length} players · ${(S.session.cfQueue||[]).length} queued`;
+    if(sub){
+      if(isLobby){
+        sub.textContent=`${S.session.activePlayers.length} players checked in — press ▶ Begin Play when ready`;
+      }else{
+        const _baseSub=`${(S.session.cfLog||[]).length} matches · ${S.session.activePlayers.length} players · ${(S.session.cfQueue||[]).length} queued`;
+        // Organizer-only phase badge — players/observers don't see the phase jargon. Shows the current
+        // phase + how many matches until the next one (so the organizer knows when ranked play kicks in).
+        let _phBadge='';
+        if(!OBSERVER_MODE&&!PLAYER_MODE){
+          const _ph=CF._sessPhaseNum();
+          const _np=S.session.activePlayers?.length||0,_mc=S.session.cfMatchCount||0;
+          const _m=_ph===1?{i:'🎲',n:'Warm-up',c:'var(--ac)',next:Math.max(0,Math.ceil(_np*0.6)-_mc),nn:'Ranked',tip:'Phase 1 — balanced-random warm-up: matchmaking ignores rank so everyone mixes; teams stay balanced and ranks calibrate.'}
+                  :_ph===2?{i:'📊',n:'Ranked',c:'var(--gr)',next:Math.max(0,Math.ceil(_np*1.2)-_mc),nn:'Competitive',tip:'Phase 2 — rank-based matchmaking is active.'}
+                  :{i:'🏆',n:'Competitive',c:'var(--go)',next:0,nn:'',tip:'Phase 3 — rank-based matchmaking, tightest.'};
+          const _nextTxt=_m.next>0?` · ${_m.nn} in ${_m.next}`:'';
+          _phBadge=` · <span style="color:${_m.c};font-weight:700" title="${esc(_m.tip)}">${_m.i} Phase ${_ph} · ${_m.n}${_nextTxt}</span>`;
+        }
+        sub.innerHTML=esc(_baseSub)+_phBadge;
+      }
+    }
     // Hide live-only controls in lobby
     const lobbyHide=['cf-ac-toggle','cf-ac-dur'];
     lobbyHide.forEach(id=>{const el2=document.getElementById(id);if(el2)el2.style.display=isLobby?'none':null;});
@@ -9039,7 +9067,12 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     const _formNote=_formCtx?` · Forms today: ${_formCtx}.`:'';
     const _pgapDesc=maxPartnerGapRk!=null?`partner gap ${maxPartnerGapRk} ranks`:`partner gap ${Math.max(t1pgap,t2pgap)}pts`;
     const _tgapDesc=teamRkGap!=null?`team gap ${Math.round(teamRkGap)} ranks`:`team gap ${meta.gap}pts`;
-    if((maxPartnerGapRk!=null&&maxPartnerGapRk>=_avoidPgap)||(teamRkGap!=null&&teamRkGap>=_avoidTeam)){
+    if(CF._sessPhaseNum()===1){
+      // Phase 1 = balanced-random warm-up: partner gap is HIGH by design (teams balanced strong+weak),
+      // so skill-match flags would fire on every match. Show a neutral warm-up chip instead of 🟡/🔴.
+      qualityLabel='🎲 Warm-up';qualityColor='var(--mu)';
+      qualityTitle=`Phase 1 — balanced-random warm-up. Teams are balanced; partners are intentionally mixed while ranks calibrate. Skill-match flags resume in Phase 2.${_formNote}`;
+    }else if((maxPartnerGapRk!=null&&maxPartnerGapRk>=_avoidPgap)||(teamRkGap!=null&&teamRkGap>=_avoidTeam)){
       qualityLabel='🔴 Avoid';qualityColor='var(--re)';
       qualityTitle=`Poor match — ${_pgapDesc}, ${_tgapDesc}. Consider reshuffling.${_formNote}`;
     }else if((maxPartnerGapRk!=null&&maxPartnerGapRk>=_warnPgap)||(teamRkGap!=null&&teamRkGap>=_warnTeam)){

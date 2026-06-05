@@ -175,15 +175,47 @@ const mk = ids => ids.map(i => {
   return { id: sp.id, sr: sp.sRating, mg: 0, pcg: 0, cmg: 0, waitMin: 0, _minGames: 0 };
 });
 try {
+  // Phase 3 (skill matters): tight foursome scores better than a wide one.
+  S.session.cfMatchCount = 40; // np=20 → ≥1.2*20=24 ⇒ Phase 3
   const tight = CF._scoreGroup(mk([0, 1, 2, 3]), null);   // four near-equal players
   const wide = CF._scoreGroup(mk([0, 1, 18, 19]), null);  // top-2 + bottom-2
   ok(tight && wide, 'scoreGroup returns a result for both foursomes');
-  ok(tight.score < wide.score, 'tight-rank foursome scores better (lower) than a wide one');
-  // best split of [top,top,bottom,bottom] should pair strong+weak to balance teams
+  ok(tight.score < wide.score, 'Phase 3: tight-rank foursome scores better (lower) than a wide one');
   const ids = wide.t1.map(p => p.id).concat(wide.t2.map(p => p.id));
   ok(ids.length === 4, 'scoreGroup produces a 4-player split (2v2)');
 } catch (e) {
   fail++; console.error('  ❌ _scoreGroup threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
+// ── Tests: Phase 1 = BALANCED RANDOM (warm-up) ──────────────────────────────
+// Phase 1 ignores skill for SELECTION (foursomes mix freely) but still balances the 2v2 teams —
+// so a spread foursome splits strong+weak: LOW team gap, HIGH partner gap by design. The match-quality
+// chip is suppressed (🎲 Warm-up) in this phase, so high partner gaps aren't flagged as mismatches.
+section('_scoreGroup() — Phase 1 balanced-random (skill-blind selection, team-balanced split)');
+try {
+  makeSession(20, 3);
+  if (APP._initSessionRanks) APP._initSessionRanks();
+  // Use foursomes WITHIN the rank-band hard limit (≤50% spread for 3c, so ~10 ranks). The hard
+  // "crazy mismatch" block (which prevents un-balanceable blowouts) still applies every phase —
+  // [0,1,8,9] spans 9 ranks, comfortably legal.
+  S.session.cfMatchCount = 0; // np=20 → <0.6*20=12 ⇒ Phase 1
+  const tP1 = CF._scoreGroup(mk([0, 1, 2, 3]), null);   // spread ~3
+  const sP1 = CF._scoreGroup(mk([0, 1, 8, 9]), null);   // spread ~9 (legal)
+  // 1) Selection is skill-blind: a tight and a spread (legal) foursome score ~equally in Phase 1.
+  ok(Math.abs(tP1.score - sP1.score) < 25, `Phase 1: tight vs spread foursome score ~equally — selection ignores skill (Δ=${Math.round(Math.abs(tP1.score - sP1.score))})`);
+  // 2) The spread foursome still splits to BALANCED teams (low cross-team gap).
+  const sTeamGap = Math.abs((sP1.t1[0].sr + sP1.t1[1].sr) / 2 - (sP1.t2[0].sr + sP1.t2[1].sr) / 2);
+  ok(sTeamGap < 60, `Phase 1: spread foursome splits to balanced teams — low team gap (${Math.round(sTeamGap)})`);
+  // 3) …via a strong+weak pairing → high partner gap (the intended Phase-1 signature).
+  const sPartnerGap = Math.max(Math.abs(sP1.t1[0].sr - sP1.t1[1].sr), Math.abs(sP1.t2[0].sr - sP1.t2[1].sr));
+  ok(sPartnerGap > 100, `Phase 1: spread foursome pairs strong+weak — high partner gap by design (${Math.round(sPartnerGap)})`);
+  // 4) Phase 3 (same foursome) keeps TIGHT partners: lower partner gap than Phase 1's split.
+  S.session.cfMatchCount = 40;
+  const sP3 = CF._scoreGroup(mk([0, 1, 8, 9]), null);
+  const sP3PartnerGap = Math.max(Math.abs(sP3.t1[0].sr - sP3.t1[1].sr), Math.abs(sP3.t2[0].sr - sP3.t2[1].sr));
+  ok(sP3PartnerGap < sPartnerGap, `Phase 3 keeps tighter partners than Phase 1 for the same foursome (P3 ${Math.round(sP3PartnerGap)} < P1 ${Math.round(sPartnerGap)})`);
+} catch (e) {
+  fail++; console.error('  ❌ Phase-1 balanced-random test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
 
 // ── Tests: season ladder movement (snapshot diff) ──────────────────────────
