@@ -1806,7 +1806,7 @@ const SIM = (() => {
       <button class="sim-close" onclick="document.getElementById('sim-panel').remove()">close</button>
       <h3>Simulator</h3>
       <div class="row">
-        <div><label>Players</label><input type="number" id="sim-players" value="26" min="4" max="30"/></div>
+        <div><label>Players</label><input type="number" id="sim-players" value="26" min="4" max="48"/></div>
         <div><label>Courts</label><input type="number" id="sim-courts" value="4" min="1" max="6"/></div>
         <div><label>Rounds</label><input type="number" id="sim-rounds" value="20" min="5" max="100"/></div>
       </div>
@@ -1830,7 +1830,7 @@ const SIM = (() => {
         <input type="checkbox" id="sim-challenge"/>
         <label for="sim-challenge">👑 Challenge Court (middle court = top 6 · needs 3+ courts)</label>
       </div>
-      <button class="sim-go" id="sim-run-btn" onclick="SIM._uiRun()">▶ Run Full Simulation</button>
+      <button class="sim-go" id="sim-run-btn" onclick="SIM._uiRun()">▶ Run Custom — uses Players / Courts / Rounds above</button>
       <button class="sim-go" style="background:#34d399;color:#052e16" onclick="SIM.run14({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,challengeCourt:document.getElementById('sim-challenge')?.checked??false})">14p / 2c</button>
       <button class="sim-go" style="background:#2dd4bf;color:#04201c" onclick="SIM.run15({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,challengeCourt:document.getElementById('sim-challenge')?.checked??false})">15p / 2c</button>
       <button class="sim-go" style="background:#14b8a6;color:#04201c" onclick="SIM.run16({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,challengeCourt:document.getElementById('sim-challenge')?.checked??false})">16p / 2c</button>
