@@ -999,9 +999,15 @@ const SYNC={
         remote.session.cfLog=_normalizeCfLog(remote.session.cfLog);
         remote.session.cfQueue=_normalizeQueueMap(remote.session.cfQueue);
         remote.session.cfPaused=_normalizeQueueMap(remote.session.cfPaused);
-        // players may arrive as a Firebase object (numeric-keyed) if written per-index
-        if(remote.session.players&&!Array.isArray(remote.session.players)){
-          remote.session.players=Object.values(remote.session.players).filter(Boolean);
+        // players may arrive as a Firebase object (numeric-keyed) if written per-index, OR as a
+        // real array WITH NULL HOLES when a middle element was deleted (RTDB returns [a,b,null,d]).
+        // Strip nullish entries in BOTH cases — a hole later throws in gsp/render (and was misread
+        // as a corrupt snapshot, wiping the local backup). Array.isArray was true for the hole case,
+        // so the old object-only branch skipped it.
+        if(remote.session.players){
+          remote.session.players=(Array.isArray(remote.session.players)
+            ? remote.session.players
+            : Object.values(remote.session.players)).filter(Boolean);
         }
       }
 
@@ -1038,7 +1044,8 @@ const SYNC={
       if(!isFirstLoad&&(!remote.db||remote.db.length===0)&&S.db?.length>0){
         console.warn(`[sync] db shrink blocked — remote.db empty but local has ${S.db.length} players`);
       }else{
-        S.db=remote.db||[];
+        // .filter(Boolean): same RTDB null-hole guard as session.players (db is always an array here).
+        S.db=(remote.db||[]).filter(Boolean);
       }
       // Active-court preservation: keep locally playing courts only when their match.id
       // is NOT already in the remote cfLog. Using match.id (not player set) means a
@@ -1368,8 +1375,13 @@ function _normalizeQueueMap(raw){
 /* § UTILS
 /* ── UTILS ───────────────────────────────────────── */
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5);}
-function gp(id){return S.db.find(p=>p.id===id);}
-function gsp(id){return S.session?.players.find(p=>p.id===id);}
+// Guard against null/undefined holes: Firebase RTDB round-trips an array that had a
+// deleted element back with null gaps (e.g. [a,b,null,d]). These accessors are called
+// everywhere (incl. mid-render in _applyRemote), so a hole used to throw "Cannot read
+// properties of null (reading 'id')" — which on the restore path was misread as a corrupt
+// snapshot and WIPED the local backup. Skipping nullish entries (they can never match an id).
+function gp(id){return S.db.find(p=>p&&p.id===id);}
+function gsp(id){return S.session?.players.find(p=>p&&p.id===id);}
 
 /* § AUDIT — organiser action log (cancel, swap, delete, court change) */
 const AUDIT={
@@ -3694,7 +3706,7 @@ function renderSessStd(){
   const hasCfRanks=hasMatchRanks||(sess.cfRanks&&Object.keys(sess.cfRanks).length>0);
   const totalRanked=(sess.cfRanks?Object.keys(sess.cfRanks).length:null)||sess.players.length||1;
 
-  sess.players.forEach(sp=>{
+  sess.players.filter(Boolean).forEach(sp=>{ // filter(Boolean): skip RTDB null holes (archived sessions can carry them)
     const myMatches=allMatches.filter(m=>[...m.t1,...m.t2].includes(sp.id));
     const mq={avgOpp:null,oppGap:null,worstPGap:null,partners:0,g:myMatches.length,maxWait:null,avgWait:null};
     if(!myMatches.length){mqMap[sp.id]=mq;return;}
@@ -4555,10 +4567,11 @@ function runImport(){
   if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
   if(!_importData)return;
   showCfm('<strong>Replace all data with this backup?</strong><br/><span style="font-size:.73rem;color:var(--mu)">Current players, ratings and history will be overwritten.</span>','📥 Import','bp',()=>{
-    if(_importData.players)S.db=_importData.players;
+    if(_importData.players)S.db=_importData.players.filter(Boolean); // strip RTDB null holes on ingest
     if(_importData.archive)S.archive=_importData.archive;
     if(_importData.session)S.session=_importData.session;
     else S.session=null;
+    if(S.session&&Array.isArray(S.session.players))S.session.players=S.session.players.filter(Boolean);
     S.checkedIn=new Set();
     _importData=null;
     STORE.save();
@@ -9697,9 +9710,10 @@ function _autoRestoreFromLocal(){
       document.getElementById('old-room-restore-btn').onclick=()=>{
         const d=JSON.parse(localStorage.getItem('pb_old_room_backup')||'null');
         if(d?.db){
-          S.db=d.db||[];
+          S.db=(d.db||[]).filter(Boolean); // strip RTDB null holes (see _autoRestoreFromLocal)
           S.archive=d.archive||[];
           S.session=d.session||null;
+          if(S.session&&Array.isArray(S.session.players))S.session.players=S.session.players.filter(Boolean);
           S.checkedIn.clear();
           (d.checkedIn||[]).forEach(id=>S.checkedIn.add(id));
           if(d.adminPin&&!S.adminPin)S.adminPin=d.adminPin;
@@ -9720,9 +9734,12 @@ function _autoRestoreFromLocal(){
     return false;
   }
 
-  // Apply snapshot into S
-  S.db=b.db||[];
+  // Apply snapshot into S. Strip any null/undefined holes the backup inherited from a Firebase
+  // round-trip (RTDB returns a deleted-middle array as [a,b,null,d]) — a hole here crashes the
+  // restore renders below, which the catch misreads as a corrupt snapshot and WIPES the backup.
+  S.db=(b.db||[]).filter(Boolean);
   S.session=b.session||null;
+  if(S.session&&Array.isArray(S.session.players))S.session.players=S.session.players.filter(Boolean);
   S.archive=b.archive||[];
   S.checkedIn.clear();
   (b.checkedIn||[]).forEach(id=>S.checkedIn.add(id));
