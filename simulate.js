@@ -790,11 +790,22 @@ const SIM = (() => {
             if (m.courtNum === _mid) midTot++;
             if (m.challenge === true) { if (m.courtNum === _mid) chMid++; else chOther++; }
           });
-          log(`--- [CHALLENGE COURT] middle court = #${_mid} (top-6-only, tagged at formation) ---`);
-          log(`  Challenge matches played: ${chMid} on court #${_mid}  ← > 0 means the Challenge Court engaged`);
-          log(`  Challenge matches that leaked onto other courts: ${chOther}  ← MUST be 0`);
-          if (chMid > 0) log('  ✅ Challenge Court worked — top-6-only matches ran on the middle court (they play more by design; excluded from the play-count check)');
-          else log('  (no challenge matches — was challengeCourt:true, courts>=3, and did the run reach Phase 2? short runs may not)');
+          if (!challengeCourt) {
+            log('--- [CHALLENGE COURT] not enabled for this run (pass challengeCourt:true to test it) ---');
+          } else if (courts < 3) {
+            // The engine intentionally disables the Challenge Court below 3 courts (needs _nCourts>=3):
+            // reserving 1 of 2 courts would strand everyone else on a single court. So 0 here is
+            // CORRECT — assert it's truly off rather than printing a misleading "courts>=3" diagnostic.
+            const leaked = chMid + chOther;
+            if (leaked === 0) log(`--- [CHALLENGE COURT] OFF at ${courts} courts (needs ≥3) — correctly disabled, 0 challenge matches tagged ✅ ---`);
+            else err(`[CHALLENGE COURT] must be OFF at ${courts} courts but ${leaked} challenge match(es) were tagged`);
+          } else {
+            log(`--- [CHALLENGE COURT] middle court = #${_mid} (top-6-only, tagged at formation) ---`);
+            log(`  Challenge matches played: ${chMid} on court #${_mid}  ← > 0 means the Challenge Court engaged`);
+            log(`  Challenge matches that leaked onto other courts: ${chOther}  ← MUST be 0`);
+            if (chMid > 0) log('  ✅ Challenge Court worked — top-6-only matches ran on the middle court (they play more by design; excluded from the play-count check)');
+            else log('  (no challenge matches — challengeCourt:true and courts≥3, so check the run reached Phase 2; short runs may not)');
+          }
         }
 
         log('--- Player Stats ---');
