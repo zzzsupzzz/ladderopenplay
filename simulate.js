@@ -819,6 +819,51 @@ const SIM = (() => {
           log(`  ${i+1}. ${sp.name}: ${sp.wins||0}W/${sp.losses||0}L ${sp.matchesPlayed||0}G  Rating:${Math.round(sp.sRating||0)} (${dStr})`);
         });
 
+        // ── Per-player phase breakdown (insight) ─────────────────────────────
+        // REAL phase boundaries: P1 = first 0.6*N matches (the random warm-up), P2 < 1.2*N, P3 = rest.
+        // Per phase, per player: W-L · rank trajectory (first→last session rank that phase) · pg = avg
+        // partner rank gap · og = avg opponent rank gap, all in RANKS. Reads each match's stamped
+        // sessionRanks. NOTE small samples (~2-4 games/phase) — read as a trend, not a verdict.
+        {
+          const _qp = arch.cfLog || [];
+          const _npp = arch.players.length || 16;
+          const _pb1 = Math.ceil(_npp * 0.6), _pb2 = Math.ceil(_npp * 1.2);
+          const _phOf = idx => idx < _pb1 ? 0 : idx < _pb2 ? 1 : 2;
+          const _acc = {};
+          arch.players.forEach(sp => { _acc[sp.id] = [0,1,2].map(() => ({ g:0, w:0, l:0, rf:null, rl:null, pg:0, og:0, gc:0 })); });
+          _qp.forEach((m, i) => {
+            const t1 = m.t1 || [], t2 = m.t2 || []; if (t1.length < 2 || t2.length < 2) return;
+            const ph = _phOf(i), rk = m.sessionRanks || [];
+            const t1won = m.s1 > m.s2, t2won = m.s2 > m.s1, ids = [...t1, ...t2];
+            ids.forEach((id, idx) => {
+              const a = _acc[id] && _acc[id][ph]; if (!a) return;
+              a.g++;
+              const onT1 = idx < 2;
+              if ((onT1 && t1won) || (!onT1 && t2won)) a.w++; else if (m.s1 !== m.s2) a.l++;
+              const mr = rk[idx] || 0;
+              if (mr > 0) { if (a.rf === null) a.rf = mr; a.rl = mr; }
+              const pIdx = onT1 ? (idx === 0 ? 1 : 0) : (idx === 2 ? 3 : 2);
+              const pr = rk[pIdx] || 0;
+              const oi = onT1 ? [2, 3] : [0, 1];
+              const or1 = rk[oi[0]] || 0, or2 = rk[oi[1]] || 0;
+              if (mr > 0 && pr > 0 && or1 > 0 && or2 > 0) { a.pg += Math.abs(mr - pr); a.og += Math.abs(mr - (or1 + or2) / 2); a.gc++; }
+            });
+          });
+          log('--- Per-Player Phase Breakdown (P1 = random warm-up · P2/P3 = ranked · r#→# rank · pg=partner gap · og=opp gap, in ranks) ---');
+          const _ord = [...arch.players].sort((a, b) => (b.wins || 0) - (a.wins || 0) || (b.sRating || 0) - (a.sRating || 0));
+          _ord.forEach(sp => {
+            const recs = _acc[sp.id];
+            const seg = [0, 1, 2].map(ph => {
+              const a = recs[ph];
+              if (a.g === 0) return `P${ph+1} —`;
+              const traj = (a.rf && a.rl) ? ` r${a.rf}→${a.rl}` : '';
+              const pg = a.gc ? Math.round(a.pg / a.gc) : '-', og = a.gc ? Math.round(a.og / a.gc) : '-';
+              return `P${ph+1} ${a.w}-${a.l}${traj} pg${pg} og${og}`;
+            }).join('  |  ');
+            log(`  ${sp.name}: ${seg}`);
+          });
+        }
+
         if (doRender) render();
         if (live) await STORE.save();
       }
