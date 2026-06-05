@@ -1630,6 +1630,14 @@ const SIM = (() => {
     // 13 start + 1 late arrival = 14 total max
     return run({ players: 13, courts: 2, rounds: 70, speed: 'fast', ...opts });
   }
+  function run15(opts = {}) {
+    // 14 start + 1 late arrival = 15 total max (2 courts → bench 7, wait cap stays 5)
+    return run({ players: 14, courts: 2, rounds: 70, speed: 'fast', ...opts });
+  }
+  function run16(opts = {}) {
+    // 15 start + 1 late arrival = 16 total max (2 courts → bench 8 = half the room sits; wait cap 5)
+    return run({ players: 15, courts: 2, rounds: 70, speed: 'fast', ...opts });
+  }
   function run20(opts = {}) {
     // 19 start + 1 late arrival = 20 total max
     return run({ players: 19, courts: 3, rounds: 70, speed: 'fast', ...opts });
@@ -1824,6 +1832,8 @@ const SIM = (() => {
       </div>
       <button class="sim-go" id="sim-run-btn" onclick="SIM._uiRun()">▶ Run Full Simulation</button>
       <button class="sim-go" style="background:#34d399;color:#052e16" onclick="SIM.run14({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,challengeCourt:document.getElementById('sim-challenge')?.checked??false})">14p / 2c</button>
+      <button class="sim-go" style="background:#2dd4bf;color:#04201c" onclick="SIM.run15({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,challengeCourt:document.getElementById('sim-challenge')?.checked??false})">15p / 2c</button>
+      <button class="sim-go" style="background:#14b8a6;color:#04201c" onclick="SIM.run16({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,challengeCourt:document.getElementById('sim-challenge')?.checked??false})">16p / 2c</button>
       <button class="sim-go" style="background:#38bdf8;color:#0c1a2e" onclick="SIM.run20({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,challengeCourt:document.getElementById('sim-challenge')?.checked??false})">20p / 3c</button>
       <button class="sim-go" style="background:#f59e0b;color:#1c0f00" onclick="SIM.run26({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,challengeCourt:document.getElementById('sim-challenge')?.checked??false})">26p / 4c</button>
       <button class="sim-go" style="background:#a78bfa;color:#1a0540" onclick="SIM.runOrganizer12({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,challengeCourt:document.getElementById('sim-challenge')?.checked??false})">⛓️ Organizer 14p/2c</button>
@@ -1874,6 +1884,6 @@ const SIM = (() => {
     else window.addEventListener('load', buildPanel);
   }
 
-  return { run, run14, run20, run26, runBugChecks, runOrganizer12, runPermPairCheck, stop, _uiRun, _continue, log: () => _log, errors: () => _errs };
+  return { run, run14, run15, run16, run20, run26, runBugChecks, runOrganizer12, runPermPairCheck, stop, _uiRun, _continue, log: () => _log, errors: () => _errs };
 
 })();
