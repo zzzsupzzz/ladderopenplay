@@ -307,6 +307,14 @@ if (APP._streakOf) {
   const st = APP._streakOf(log, 'a');
   eq(st.type, 'W', '_streakOf: trailing streak type is W');
   eq(st.n, 3, '_streakOf: trailing win streak is 3');
+  // Ranked-only: Phase-1 warm-up matches (phase:1) are skipped, so a warm-up win doesn't extend a streak.
+  const logWarm = [
+    { t1:['a','x'], t2:['y','z'], s1:11, s2:2, phase:1 }, // warm-up win — should NOT count
+    { t1:['a','x'], t2:['y','z'], s1:11, s2:5, phase:2 }, // ranked win
+    { t1:['a','x'], t2:['y','z'], s1:11, s2:7, phase:3 }, // ranked win → ranked streak = 2
+  ];
+  const stW = APP._streakOf(logWarm, 'a');
+  eq(stW.n, 2, '_streakOf: warm-up (phase 1) win is skipped — ranked streak is 2, not 3');
 }
 if (APP._tierOf) {
   eq(APP._tierOf(1, 20).key,  3, '_tierOf: rank 1/20 → Gold');

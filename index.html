@@ -3560,6 +3560,7 @@ function _multiWriterBannerHtml(){
 function _streakOf(log,id){
   let n=0,type='';
   for(const m of (log||[])){
+    if(m.phase===1)continue; // ranked-only: Phase-1 warm-up games don't count toward streaks
     if(!m.t1?.includes(id)&&!m.t2?.includes(id))continue;
     const inT1=m.t1.includes(id),won=inT1?m.s1>m.s2:m.s2>m.s1,tie=m.s1===m.s2;
     if(tie)continue; // a tie neither extends nor breaks a streak
@@ -3588,10 +3589,11 @@ function _awardsHtml(sess){
   const ranked=sess.players.filter(p=>!p.isNR);
   let mi=null;ranked.forEach(p=>{const d=Math.round((p.sRating||0)-(p.startRating||0));if(mi==null||d>mi.d)mi={id:p.id,d};});
   let bc=null;ranked.forEach(p=>{const cr=sess.cfRanks?.[p.id];if(!cr||cr.initRank==null||cr.rank==null)return;const c=cr.initRank-cr.rank;if(bc==null||c>bc.c)bc={id:p.id,c};});
-  let hh=null;ranked.forEach(p=>{let s=0,b=0;log.forEach(m=>{if(!m.t1?.includes(p.id)&&!m.t2?.includes(p.id))return;const inT1=m.t1.includes(p.id),won=inT1?m.s1>m.s2:m.s2>m.s1,tie=m.s1===m.s2;if(won){s++;if(s>b)b=s;}else if(!tie)s=0;});if(hh==null||b>hh.b)hh={id:p.id,b};});
+  let hh=null;ranked.forEach(p=>{let s=0,b=0;log.forEach(m=>{if(m.phase===1)return;if(!m.t1?.includes(p.id)&&!m.t2?.includes(p.id))return;const inT1=m.t1.includes(p.id),won=inT1?m.s1>m.s2:m.s2>m.s1,tie=m.s1===m.s2;if(won){s++;if(s>b)b=s;}else if(!tie)s=0;});if(hh==null||b>hh.b)hh={id:p.id,b};});
   const rnkAt=(m,id)=>{const ids=[...m.t1,...m.t2];const idx=ids.indexOf(id);if(idx>=0&&m.sessionRanks?.[idx]>0)return m.sessionRanks[idx];return sess.cfRanks?.[id]?.rank||0;};
   let gs=null;
   log.forEach(m=>{
+    if(m.phase===1)return; // ranked-only: Phase-1 warm-up upsets don't count
     if(!m.t1||!m.t2||m.s1===m.s2)return;
     const win=m.s1>m.s2?m.t1:m.t2,los=m.s1>m.s2?m.t2:m.t1;
     const wr=win.map(id=>rnkAt(m,id)).filter(r=>r>0),lr=los.map(id=>rnkAt(m,id)).filter(r=>r>0);
