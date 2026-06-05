@@ -9024,8 +9024,12 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     const _phaseCap=_maxPartnerGap(_N,_nc,0); // base cap for current phase+courts, no wait relaxation
     const _avoidPgap=_phaseCap;                        // avoid if matchmaker had to go beyond normal cap
     const _warnPgap=Math.max(2,Math.round(_phaseCap*0.60)); // warn if approaching cap
-    const _avoidTeam=Math.max(2,Math.round(_N*0.25));  // team balance: less phase-sensitive, stays static
-    const _warnTeam=Math.max(1,Math.round(_N*0.15));
+    // Team-balance thresholds scale with field size, with a SMALL-FIELD FLOOR so a 2-court session
+    // (N≈14-16) isn't flagged 🟡 on every normal match: a balanced 2-court game runs a ~2.5-rank team
+    // gap, so the warn line must sit above that. The floors only bite at 2 courts — 3c (N≈20) and 4c
+    // (N≈26) already exceed them via the N-ratio, so their behavior is unchanged.
+    const _avoidTeam=Math.max(5,Math.round(_N*0.25));  // 🔴 at ≥25% of field, min 5 ranks
+    const _warnTeam=Math.max(3,Math.round(_N*0.15));   // 🟡 at ≥15% of field, min 3 ranks
     let qualityLabel,qualityColor,qualityTitle;
     // Build form context string for tooltip
     const _formCtx=[...sug.t1,...sug.t2].map(id=>{
