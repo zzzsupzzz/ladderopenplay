@@ -1324,6 +1324,11 @@ const SYNC={
 
 // Players added before Firebase first-load completes. Merged with remote db on hydration.
 let _preHydrationPlayers=null;
+// True ONLY when a real local change was saved while the socket was DOWN (so it must be flushed on
+// reconnect). Gates the reconnect push so a device that merely went offline with NO edits never
+// re-pushes its stale state on reconnect — which would clobber another device's newer changes
+// (multi-device data loss). NOTE: distinct from SYNC._pendingWrite (the pre-ready write queue).
+let _dirtyOffline=false;
 
 /* § STORE */
 const STORE={
@@ -1341,6 +1346,7 @@ const STORE={
     }
     _backupToLocal();
     _setSaveStatus('saving');
+    if(!_fbConnected)_dirtyOffline=true; // a real change made while offline — flush it on reconnect
     return new Promise(resolve=>{
       SYNC.push(segment, resolve);
     });
@@ -1350,6 +1356,7 @@ const STORE={
   savePaths(pathUpdates){
     _backupToLocal();
     _setSaveStatus('saving');
+    if(!_fbConnected)_dirtyOffline=true; // a real change made while offline — flush it on reconnect
     return new Promise(resolve=>{
       SYNC.pushPaths(pathUpdates,resolve);
     });
@@ -9889,19 +9896,24 @@ function _trackConnection(db){
         localStorage.removeItem('pb_pending_pin_clear');
       }
       SYNC._updateBadge();
-      const el=document.getElementById('save-status');
-      if(el&&el.textContent==='⚡ offline'){
-        // Had a pending save while offline — push now that we're back online.
-        // CRITICAL: skip if Firebase hasn't hydrated yet. On initial page load,
-        // .info/connected always fires false→true before _applyRemote runs,
-        // so HAS_REMOTE_HYDRATED is still false and S.db = [].
-        // Pushing here would overwrite the real Firebase database with empty local state.
+      // Flush on reconnect ONLY if there's a GENUINE local change made while offline (_dirtyOffline).
+      // Do NOT push just because the socket dropped: a device that merely went offline with no edits
+      // would otherwise re-push its now-STALE full state and clobber another device's newer changes
+      // (the multi-device data-loss bug). With no pending write, we let the value listener re-deliver
+      // the latest remote and simply re-sync the indicator.
+      if(_dirtyOffline){
+        // CRITICAL: skip if Firebase hasn't hydrated yet. On initial page load, .info/connected
+        // fires false→true before _applyRemote runs, so HAS_REMOTE_HYDRATED is false and S.db=[] —
+        // pushing here would overwrite the real database with empty local state.
         if(HAS_REMOTE_HYDRATED){
           _setSaveStatus('saving');
           SYNC.push('all');
         }else{
           console.log('[sync] Reconnect push skipped — awaiting first Firebase hydration (S.db would be empty)');
         }
+      }else{
+        const el=document.getElementById('save-status');
+        if(el&&el.textContent==='⚡ offline')_setSaveStatus('saved'); // clear stale offline indicator; remote re-syncs via the listener
       }
     }else if(!_fbConnected){
       SYNC._updateBadge();
@@ -9926,6 +9938,7 @@ function _pushWithRetry(updates,attempt=0,onComplete=null){
   if(attempt===0){const c={};for(const k in updates)c[k]=_fbClean(updates[k]);updates=c;}
   SYNC.ref.update(updates)
     .then(()=>{
+      _dirtyOffline=false; // confirmed write reached the server — nothing pending to flush
       _setSaveStatus('saved');
       _backupToLocal(); // mirror confirmed write to local storage
       if(onComplete)onComplete(); // fire after confirmed write, not before
