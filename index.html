@@ -3770,7 +3770,10 @@ function renderSessStd(){
       const myTeam=inT1?m.t1:m.t2;
       const oppTeam=inT1?m.t2:m.t1;
       const partnerId=myTeam.find(x=>x!==sp.id);
-      if(partnerId)partnerSet.add(partnerId);
+      if(partnerId)partnerSet.add(partnerId); // P/G variety counts ALL games (incl warm-up)
+      // Ranked-only: P.GAP / OPP Δ are match-QUALITY metrics, so the random Phase-1 warm-up (with its
+      // intentionally huge partner gaps) must not count — they'd misrepresent the ranked board.
+      if(m.phase===1)return;
       if(hasCfRanks){
         // Rank-based gaps using match-time ranks (accurate) or final ranks (legacy fallback)
         const myRnk=_mRnkAt(m,sp.id);
