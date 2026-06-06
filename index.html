@@ -6838,8 +6838,14 @@ const CF={
 
     // Build pool with ratings + priority info
     const courtAvg=queue.reduce((s,q)=>s+this._rankSr(q.id),0)/queue.length; // rank-based avg
+    // Phase 1 (warm-up): randomize the NON-URGENT order so foursomes mix across the WHOLE pool each
+    // round — everyone gets to play with everyone — instead of the same group clustering and just
+    // rotating teams. Fairness is untouched: hungry/overdue players are still ordered first below;
+    // only the final tiebreak becomes random. _rnd is precomputed (stable) so the sort comparator
+    // stays consistent. Phases 2-3 keep skill-priority ordering.
+    const _p1rand=this._sessPhaseNum()===1;
     const pool=queue
-      .map(q=>({id:q.id,sr:this._rankSr(q.id),waitMin:(Date.now()-q.since)/60000,qEntry:q}))
+      .map(q=>({id:q.id,sr:this._rankSr(q.id),waitMin:(Date.now()-q.since)/60000,qEntry:q,_rnd:Math.random()}))
       .sort((a,b)=>{
         // Primary sort: large hunger difference (>10) forces hungry player first —
         // guarantees 0-game / far-behind players are in the search window.
@@ -6851,6 +6857,8 @@ const CF={
         const aWait=ga>=4,bWait=gb>=4;
         if(aWait!==bWait)return aWait?-1:1;
         if(aWait&&bWait&&ga!==gb)return gb-ga;
+        // Phase 1 warm-up: random mix among non-urgent players (skill order ignored → everyone mixes).
+        if(_p1rand)return a._rnd-b._rnd;
         // Fallback: composite wait+skill priority
         return this.queuePriority(b.qEntry,courtAvg)-this.queuePriority(a.qEntry,courtAvg);
       });
