@@ -3581,6 +3581,18 @@ function _tierOf(rank,total){
 // Translate an abstract rating gap into "≈ N wins" — players grok wins, not ELO points.
 // ~15 ≈ a typical win's rating swing in this engine. Floored at 1 so "you're close" still reads.
 function _winsToCatch(gapPts){return Math.max(1,Math.round((gapPts||0)/15));}
+// Rank a player held at the END of the Phase-1 warm-up (their last warm-up match's session rank,
+// falling back to the seed rank). Baseline for "ranked climb" = board spots climbed since ranked play
+// began. SHARED by the Biggest Climber award and the player-view climb so the two always agree.
+function _warmEndRankOf(sess,id){
+  let r=null;
+  (sess?.cfLog||[]).forEach(m=>{
+    if(m.phase!==1)return;
+    const ids=[...(m.t1||[]),...(m.t2||[])],idx=ids.indexOf(id);
+    if(idx>=0&&m.sessionRanks?.[idx]>0)r=m.sessionRanks[idx];
+  });
+  return r??(sess?.cfRanks?.[id]?.initRank??null);
+}
 // End-of-night superlatives for a (usually just-ended) session — the communal payoff.
 function _awardsHtml(sess){
   if(!sess||!sess.players||sess.players.length<3)return '';
@@ -3591,14 +3603,14 @@ function _awardsHtml(sess){
   // Biggest Climber = spots climbed during ranked play (rank at warm-up end − final rank). Phase-1
   // warm-up excluded. Reconstructed from the log so it needs no extra state and survives recalc; old
   // archives (no phase stamp) treat every match as ranked → same numbers as before.
-  const _rkRtg={},_warmEndRank={};
-  log.forEach(m=>{
-    const ids=[...(m.t1||[]),...(m.t2||[])];
-    if(m.phase===1){ids.forEach((id,idx)=>{if(m.sessionRanks?.[idx]>0)_warmEndRank[id]=m.sessionRanks[idx];});}
-    else{ids.forEach((id,idx)=>{if(Array.isArray(m.eloDeltas))_rkRtg[id]=(_rkRtg[id]||0)+(m.eloDeltas[idx]||0);});}
-  });
+  // Most Improved = rating gained in RANKED play (sum of ranked eloDeltas); warm-up (Phase 1) excluded.
+  const _rkRtg={};
+  log.forEach(m=>{ if(m.phase===1)return; [...(m.t1||[]),...(m.t2||[])].forEach((id,idx)=>{if(Array.isArray(m.eloDeltas))_rkRtg[id]=(_rkRtg[id]||0)+(m.eloDeltas[idx]||0);}); });
   let mi=null;ranked.forEach(p=>{const d=Math.round(_rkRtg[p.id]||0);if(mi==null||d>mi.d)mi={id:p.id,d};});
-  let bc=null;ranked.forEach(p=>{const cur=sess.cfRanks?.[p.id]?.rank;const start=(_warmEndRank[p.id]??sess.cfRanks?.[p.id]?.initRank);if(cur==null||start==null)return;const c=start-cur;if(bc==null||c>bc.c)bc={id:p.id,c};});
+  // Biggest Climber = board spots climbed during ranked play = warm-up-end rank − final STANDINGS
+  // position. Same _warmEndRankOf baseline + standings position as the player-view climb, so they agree.
+  const _lbPos={};(typeof _sessionLbRows==='function'?_sessionLbRows(sess):[]).forEach((p,i)=>{_lbPos[p.id]=i+1;});
+  let bc=null;ranked.forEach(p=>{const cur=_lbPos[p.id];const start=_warmEndRankOf(sess,p.id);if(cur==null||start==null)return;const c=start-cur;if(bc==null||c>bc.c)bc={id:p.id,c};});
   let hh=null;ranked.forEach(p=>{let s=0,b=0;log.forEach(m=>{if(m.phase===1)return;if(!m.t1?.includes(p.id)&&!m.t2?.includes(p.id))return;const inT1=m.t1.includes(p.id),won=inT1?m.s1>m.s2:m.s2>m.s1,tie=m.s1===m.s2;if(won){s++;if(s>b)b=s;}else if(!tie)s=0;});if(hh==null||b>hh.b)hh={id:p.id,b};});
   const rnkAt=(m,id)=>{const ids=[...m.t1,...m.t2];const idx=ids.indexOf(id);if(idx>=0&&m.sessionRanks?.[idx]>0)return m.sessionRanks[idx];return sess.cfRanks?.[id]?.rank||0;};
   let gs=null;
@@ -4107,7 +4119,8 @@ function renderArchive(){
           const gn=id=>esc(getArchiveName(id,sess.players));
           const t1n=m.t1.map(gn).join(' & '),t2n=m.t2.map(gn).join(' & ');
           const tie=m.s1===m.s2,t1w=m.s1>m.s2;
-          return `<div class="hm"><div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div><div class="hscore" style="${tie?'color:var(--go)':''}">${m.s1}–${m.s2}</div><div style="flex:1;text-align:right;font-weight:${!t1w&&!tie?700:400};color:${!t1w&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div><button class="sedit" style="width:auto;margin-top:0" onclick="openEditScoreArchiveCF(${mi},'${sess.id}')">✏️</button></div>`;
+          const warmupTag=m.phase===1?`<span style="font-size:.6rem;color:var(--ac)" title="Phase 1 warm-up — didn't count toward the board">🎲</span>`:'';
+          return `<div class="hm"><div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${warmupTag}${t1n}</div><div class="hscore" style="${tie?'color:var(--go)':''}">${m.s1}–${m.s2}</div><div style="flex:1;text-align:right;font-weight:${!t1w&&!tie?700:400};color:${!t1w&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div><button class="sedit" style="width:auto;margin-top:0" onclick="openEditScoreArchiveCF(${mi},'${sess.id}')">✏️</button></div>`;
         }).join('')
       :legacyMatches.map(m=>{
           const gn=id=>esc(getArchiveName(id,sess.players));
@@ -10097,8 +10110,9 @@ function renderHistory(){
     const matchRows=[...lastArch.cfLog].reverse().map(m=>{
       const t1n=m.t1.map(gnArch).join(' & '),t2n=m.t2.map(gnArch).join(' & ');
       const sc=`${m.s1}–${m.s2}`,tie=m.s1===m.s2,t1w=m.s1>m.s2;
+      const warmupTag=m.phase===1?`<span style="font-size:.6rem;color:var(--ac)" title="Phase 1 warm-up — didn't count toward the board">🎲</span>`:'';
       return `<div class="hm" style="flex-wrap:wrap;gap:4px">
-        <span style="font-size:.65rem;color:var(--cy);min-width:46px">C${m.courtNum}</span>
+        <span style="font-size:.65rem;color:var(--cy);min-width:46px">C${m.courtNum}${warmupTag}</span>
         <div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div>
         <div class="hscore" style="${tie?'color:var(--go)':''}">${sc}</div>
         <div style="flex:1;text-align:right;font-weight:${!t1w&&!tie?700:400};color:${!t1w&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div>
@@ -10138,13 +10152,14 @@ function renderHistory(){
     const durMin=durMs?Math.round(durMs/60000)+'min':'';
     const extTag=m.extended?`<span style="font-size:.62rem;color:var(--or)"> extended</span>`:'';
     const noRatingTag=m.noElo?`<span style="font-size:.62rem;color:var(--mu);background:var(--s2);border:1px solid var(--bd);border-radius:4px;padding:1px 5px">no rating</span>`:'';
+    const warmupTag=m.phase===1?`<span style="font-size:.62rem;color:var(--ac);background:var(--s2);border:1px solid var(--bd);border-radius:4px;padding:1px 5px" title="Phase 1 random warm-up — calibrates rating &amp; rank but doesn't count toward the board/awards">🎲 warm-up</span>`:'';
     return `<div class="hm" style="flex-wrap:wrap;gap:4px">
       <span style="font-size:.65rem;color:var(--cy);min-width:46px">C${(S.session?.courtOffset||0)+m.courtNum}</span>
       <div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div>
       <div class="hscore" style="${tie?'color:var(--go)':''}">${sc}</div>
       <div style="flex:1;text-align:right;font-weight:${!t1w&&!tie?700:400};color:${!t1w&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div>
       <span style="font-size:.63rem;color:var(--m2)">${durMin}${extTag}</span>
-      ${noRatingTag}
+      ${warmupTag}${noRatingTag}
       <button class="sedit" style="width:auto;margin-top:0" onclick="openEditScoreCF(${origIdx})">✏️ Edit</button>
     </div>`;
   }).join('');
@@ -10423,7 +10438,9 @@ function renderPlayerView(){
     const _rk=_myIdx>=0?_myIdx+1:0, _tot=_lbRows.length;
     // Tonight's climb — the felt "ladder progression". climb = seed rank − current rank
     // (positive = moved up). Uses initRank already tracked per player in cfRanks.
-    const _initR=S.session?.cfRanks?.[id]?.initRank;
+    // Climb baseline = rank at the END of the warm-up (same as the Biggest Climber award), so the
+    // player's "Climbed N spots" and the award agree. Board only moves in ranked play → this is the ranked climb.
+    const _initR=_warmEndRankOf(S.session,id);
     const _climb=(_initR!=null&&_rk)?(_initR-_rk):0;
     const _climbHtml=!_rk||sp.isNR?''
       :_climb>0?`<div style="font-size:.82rem;font-weight:700;color:var(--gr);margin:-2px 0 4px">▲ Climbed ${_climb} spot${_climb===1?'':'s'} tonight <span style="color:var(--mu);font-weight:400">(from #${_initR})</span></div>`
