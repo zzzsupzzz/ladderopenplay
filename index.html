@@ -4377,12 +4377,23 @@ function _sugPickerApply(courtNum,outId,inId){
   // Return outId to queue if not already there
   if(!S.session.cfQueue.find(q=>q.id===outId))
     S.session.cfQueue.push({id:outId,since:Date.now(),consec:0});
-  const newIds=sug.allIds.map(id=>id===outId?inId:id);
-  const players=newIds.map(id=>({id,sr:_rankToScore(id)}));
-  const{t1,t2}=MM.bestPair(players);
-  const gap=Math.abs((t1[0].sr+t1[1].sr)/2-(t2[0].sr+t2[1].sr)/2);
+  // IN-PLACE substitution: the swapped-in player takes the EXACT team slot of the one removed —
+  // the other three keep their positions. (Previously this re-split all four via bestPair, which
+  // looked like a full reshuffle and moved everyone around.) Fall back to bestPair only if the
+  // suggestion somehow has no team split.
+  let t1,t2;
+  if(Array.isArray(sug.t1)&&Array.isArray(sug.t2)&&[...sug.t1,...sug.t2].includes(outId)){
+    const _sub=arr=>arr.map(id=>id===outId?inId:id);
+    t1=_sub(sug.t1); t2=_sub(sug.t2);
+  }else{
+    const _bp=MM.bestPair(sug.allIds.map(id=>id===outId?inId:id).map(id=>({id,sr:_rankToScore(id)})));
+    t1=_bp.t1.map(p=>p.id); t2=_bp.t2.map(p=>p.id);
+  }
+  const newIds=[...t1,...t2];
+  const _avg=arr=>(_rankToScore(arr[0])+_rankToScore(arr[1]))/2;
+  const gap=Math.abs(_avg(t1)-_avg(t2));
   S.session.cfSuggestions[courtNum]={...sug,
-    t1:t1.map(p=>p.id),t2:t2.map(p=>p.id),allIds:newIds,
+    t1,t2,allIds:newIds,
     meta:{...sug.meta,gap:Math.round(gap),gapWarn:gap>80}};
   // Refresh other ready courts, reserving this suggestion's players
   CF._reserveAndRefreshOtherCourts(courtNum,newIds);
@@ -8862,33 +8873,51 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
   },
 
   /* Manual override */
+  // Manual team editor — the organiser picks the exact matchup for this court: who's on Team 1 vs
+  // Team 2 (NO auto-split). Pre-filled with the current suggestion so it's quick to tweak. Choose
+  // from the current four + everyone queued, so you can rearrange teams or swap in a benched player.
   openManual(courtNum){
-    const queue=(S.session?.cfQueue||[]).map(q=>q.id);
-    const opts=queue.map(id=>`<option value="${id}">${esc(gp(id)?.name||'?')} (${Math.round(this.cfRating(id))})</option>`).join('');
-    openModal(`<div class="modal-title">✏️ Manual — Court ${courtNum}</div>
-      <p style="font-size:.74rem;color:var(--mu);margin-bottom:10px">Pick 4 players from the queue:</p>
-      ${['1','2','3','4'].map(n=>`<label>PLAYER ${n}</label><select id="man-p${n}" class="inp" style="margin-bottom:7px"><option value="">— select —</option>${opts}</select>`).join('')}
-      <div style="display:flex;gap:7px;margin-top:8px">
-        <button class="btn bp" style="flex:1" onclick="CF.confirmManual(${courtNum})">Assign</button>
+    const sug=S.session?.cfSuggestions[courtNum];
+    const curIds=sug?(sug.allIds||[]):[];
+    const poolIds=[...new Set([...curIds,...((S.session?.cfQueue||[]).map(q=>q.id))])]
+      .filter(id=>gp(id)).sort((a,b)=>(gp(a)?.name||'').localeCompare(gp(b)?.name||''));
+    const rk=id=>S.session?.cfRanks?(_sessionRank(id)?'#'+_sessionRank(id):'NR'):'('+Math.round(this.cfRating(id))+')';
+    const slot=(n,sel)=>`<select id="man-p${n}" class="inp" style="margin-bottom:6px"><option value="">— select —</option>${poolIds.map(id=>`<option value="${id}"${id===sel?' selected':''}>${esc(gp(id)?.name||'?')} ${rk(id)}</option>`).join('')}</select>`;
+    const t1=sug?.t1||[],t2=sug?.t2||[];
+    const offset=S.session?.courtOffset||0;
+    openModal(`<div class="modal-title">✏️ Manual Teams — Court ${offset+courtNum}</div>
+      <p style="font-size:.73rem;color:var(--mu);margin-bottom:10px">Choose who plays on each team for this court. Sets the suggestion — press <strong>✓ Confirm</strong> on the court to start.</p>
+      <div style="display:flex;gap:10px">
+        <div style="flex:1"><label style="color:var(--ac)">TEAM 1</label>${slot(1,t1[0])}${slot(2,t1[1])}</div>
+        <div style="flex:1"><label style="color:var(--or)">TEAM 2</label>${slot(3,t2[0])}${slot(4,t2[1])}</div>
+      </div>
+      <div style="display:flex;gap:7px;margin-top:10px">
+        <button class="btn bp" style="flex:1" onclick="CF.confirmManual(${courtNum})">Set teams</button>
         <button class="btn bg2" onclick="closeModal()">Cancel</button>
       </div>`);
   },
 
   confirmManual(courtNum){
     if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
-    const ids=['1','2','3','4'].map(n=>document.getElementById(`man-p${n}`)?.value).filter(Boolean);
-    if(new Set(ids).size!==4){toast('Select 4 different players','err');return;}
-    this._snapUndo(courtNum,'Manual pick');
-    const players=ids.map(id=>({id,sr:this._rankSr(id),waitMin:0}));
-    const{t1,t2}=MM.bestPair(players);
-    const gap=Math.abs((t1[0].sr+t1[1].sr)/2-(t2[0].sr+t2[1].sr)/2);
-    S.session.cfSuggestions[courtNum]={courtNum,t1:t1.map(p=>p.id),t2:t2.map(p=>p.id),allIds:ids,
-      meta:{gap:Math.round(gap),gapWarn:gap>80,maxWait:0,urgentWait:false,splitOverride:false,repeatMatchup:false,shortGameBoost:false}};
+    const t1=['1','2'].map(n=>document.getElementById(`man-p${n}`)?.value).filter(Boolean);
+    const t2=['3','4'].map(n=>document.getElementById(`man-p${n}`)?.value).filter(Boolean);
+    const ids=[...t1,...t2];
+    if(ids.length!==4||new Set(ids).size!==4){toast('Pick 4 different players — 2 per team','err');return;}
+    this._snapUndo(courtNum,'Manual teams');
+    const prev=S.session.cfSuggestions[courtNum];
+    // Return any previously-suggested player no longer in this matchup to the queue, and pull any
+    // chosen player out of pause into the queue. Suggestions don't dequeue — confirmSuggestion does.
+    (prev?.allIds||[]).forEach(id=>{ if(!ids.includes(id)&&!S.session.cfQueue.find(q=>q.id===id)&&gsp(id)?.status!=='left')S.session.cfQueue.push({id,since:Date.now(),consec:0}); });
+    ids.forEach(id=>{ const pa=S.session.cfPaused?.find(q=>q.id===id); if(pa&&!S.session.cfQueue.find(q=>q.id===id)){S.session.cfPaused=S.session.cfPaused.filter(q=>q.id!==id);S.session.cfQueue.unshift({id,since:pa.since||Date.now(),consec:0});} });
+    const _avg=arr=>(this._rankSr(arr[0])+this._rankSr(arr[1]))/2;
+    const gap=Math.abs(_avg(t1)-_avg(t2));
+    // Use the organiser's EXACT team assignment — no bestPair re-split.
+    S.session.cfSuggestions[courtNum]={...(prev||{courtNum}),t1,t2,allIds:ids,
+      meta:{...(prev?.meta||{}),gap:Math.round(gap),gapWarn:gap>80,manual:true}};
     closeModal();cancelAutoConfirm(courtNum);
-    // Refresh other ready courts before confirming — manual assignment may use players
-    // already shown in another court's pending suggestion; refresh prevents stale previews
     this._reserveAndRefreshOtherCourts(courtNum,ids);
-    this.confirmSuggestion(courtNum);
+    STORE.save('session');renderLive();
+    toast('Teams set — press ✓ Confirm to start','ok');
   },
 
   /* ── Render CF live view ── */
@@ -9252,6 +9281,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       <div style="display:flex;gap:7px;flex-wrap:wrap">
         <button class="btn bp" style="flex:1 1 100%" onclick="cancelAutoConfirm(${courtNum});CF.confirmSuggestion(${courtNum})">✓ Confirm — Start Court ${(S.session?.courtOffset||0)+courtNum}</button>
         <button class="btn bs sm" title="Full reshuffle" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleSuggestion(${courtNum})">↺ Reshuffle</button>
+        <button class="btn bs sm" title="Manually pick the teams for this court" onclick="cancelAutoConfirm(${courtNum});CF.openManual(${courtNum})">✏️ Manual</button>
         ${this._undo&&this._undo.court===courtNum?`<button class="btn bs sm" style="color:var(--go)" title="Undo the last change to this court (${esc(this._undo.action)})" onclick="CF.undoLast()">↶ Undo</button>`:''}
         <button class="btn bs sm adv-only" title="Partial reshuffle — lock some players" onclick="cancelAutoConfirm(${courtNum});CF.openPartialReshuffle(${courtNum})">🔒 Lock+Shuffle</button>
         ${sug.meta?.constraintReason&&['wait-override','outlier-wait','playtime-catch-up'].includes(sug.meta.constraintReason)?`<button class="btn bs sm adv-only" style="color:var(--cy)" title="Regenerate prioritising match quality — ignores wait/fairness pressure this once" onclick="cancelAutoConfirm(${courtNum});CF.reshuffleQualityFirst(${courtNum})">⚖ Quality</button>`:``}
