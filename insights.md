@@ -188,3 +188,19 @@ Runs with real `STORE.save()` so Firebase pushes updates in real time — useful
 - `-Command` with inline PowerShell eats `$` signs — use `-File` with a `.ps1` file instead
 - Relative paths in hooks may not resolve from the hook's working directory — use absolute paths
 - Always add `-ExecutionPolicy Bypass` when running `.ps1` files from hooks
+
+## Ladder Courts: Static Court-Band Anchoring Is Structurally Infeasible (Sim-Proven)
+
+Attempted: Phase 3 "ladder courts" where court 1 permanently hosts the top rank band, court nc the bottom, via a wait-decaying score penalty (_tierPen) for off-band placement.
+
+**Result across sim runs (19p/3c): court-band adherence stays at the ~33-37% random baseline regardless of penalty strength (55/110/150 per band-step), and strong anchors DEGRADE group cohesion (P3 spread blew up to 9.8 vs ~7 baseline) because the optimizer chases unavailable home-band players.**
+
+Root cause: bench rotation. With ~7 benched of 19, a player rests ~1-2 court-openings and gets seated on whichever court opens when their turn comes. Courts open in near-round-robin, so each band drifts across courts in a cycle (observed: top band cycling court 1 -> 3 -> 2). A static anchor fights this drift every round and loses; only ~2 of a band's 6-7 players are rested when "their" court opens.
+
+What works instead (current design):
+- Same-level play = GROUP cohesion, driven by the rank-band spread penalty (rankBandPen) whose soft target now ramps continuously through Phase 2 (60/50%->40/35% of N) and by the phase skill caps. P3 spread lands at ~band width (6.9-7.4 for band size 6.3).
+- _tierPen kept at tiebreak strength (40/band-step, wait-decayed): nudges placement when groups are otherwise equal, never overrides cohesion or fairness.
+- Joint multi-court path maps formed groups to courts by avg rank when 2+ courts are ready simultaneously (free relabeling, no quality cost).
+- UI must follow the players, not promise a court: _courtTierChip labels each live/suggested court by the band ACTUALLY playing on it (TOP/MID/RISING). A static "Court 1 = R1-6" label would lie ~2/3 of the time.
+
+Investigation pattern that caught this: unit tests proved the scoring math correct (top group on court 1 scores 0), yet live sims showed BELOW-random adherence — when statics pass but dynamics fail, look for rotation/availability structure, not scoring bugs.

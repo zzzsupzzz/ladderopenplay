@@ -236,6 +236,59 @@ try {
   fail++; console.error('  ❌ Phase-1 balanced-random test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
 
+// ── Tests: ladder arc — Phase-2 band ramp + Phase-3 court tiers ─────────────
+// Phase 2: the rank-band soft target slides CONTINUOUSLY from its P2-start value to the P3
+// value as cfMatchCount advances, so the same moderately-wide foursome scores progressively
+// worse through the middle of the session. Phase 3: _tierPen anchors court 1 to the top band
+// of the standings (court nc = bottom band) as a soft, wait-decaying score bias.
+section('ladder arc — Phase-2 band ramp + Phase-3 court-tier affinity (_tierPen)');
+try {
+  // Ramp (2 courts, 14p): soft target 50%→40% of N across P2 (mc 9..16). Spread-8 foursome
+  // [ranks 1,2,8,9] sits over the soft target but under the hard limit → pure soft-zone signal.
+  makeSession(14, 2);
+  if (APP._initSessionRanks) APP._initSessionRanks();
+  S.session.players.forEach(p => { p.matchesPlayed = 5; });
+  S.session.cfMatchCount = 9;  // just into Phase 2 (np*0.6 = 8.4)
+  S.session.players.forEach(p => { p.lastPlayedAtMatch = S.session.cfMatchCount; });
+  const earlyP2 = CF._scoreGroup(mk([0, 1, 7, 8]), null);
+  S.session.cfMatchCount = 16; // late Phase 2 (P3 starts at 17)
+  S.session.players.forEach(p => { p.lastPlayedAtMatch = S.session.cfMatchCount; });
+  const lateP2 = CF._scoreGroup(mk([0, 1, 7, 8]), null);
+  ok(lateP2.score > earlyP2.score, `P2 ramp: same wide foursome scores worse late in P2 than early (${Math.round(lateP2.score)} > ${Math.round(earlyP2.score)})`);
+
+  // _tierPen (3 courts, 18p): bands of 6 — court 1 = ranks 1-6, court 2 = 7-12, court 3 = 13-18.
+  makeSession(18, 3);
+  if (APP._initSessionRanks) APP._initSessionRanks();
+  S.session.cfMatchCount = 30; // np=18 → P3 at mc>=21.6
+  S.session.players.forEach(p => { p.matchesPlayed = 5; p.lastPlayedAtMatch = 30; }); // matchGap 0
+  const topG = mk([0, 1, 2, 3]); // ranks 1-4 → top band
+  eq(CF._tierPen(topG, 1), 0, '_tierPen: top-band group on court 1 → 0 (home court)');
+  const off1 = CF._tierPen(topG, 2), off2 = CF._tierPen(topG, 3);
+  ok(off1 > 0, `_tierPen: top-band group on court 2 → penalised (${Math.round(off1)})`);
+  ok(off2 > off1, `_tierPen: court 3 (two bands off) > court 2 (${Math.round(off2)} > ${Math.round(off1)})`);
+  eq(CF._tierPen(topG, null), 0, '_tierPen: no destination court → 0 (court-agnostic callers unaffected)');
+  S.session.cfMatchCount = 15; // Phase 2
+  eq(CF._tierPen(topG, 3), 0, '_tierPen: Phase 2 → 0 (tiers are Phase-3 only)');
+  S.session.cfMatchCount = 30;
+  // Wait decay: penalty fades as a member's matchGap approaches the wait cap (wait beats tier).
+  const fullPull = CF._tierPen(mk([0, 1, 2, 3]), 3);
+  S.session.players.forEach(p => { p.lastPlayedAtMatch = 30 - CF.waitCap(); }); // all AT the cap
+  eq(CF._tierPen(mk([0, 1, 2, 3]), 3), 0, '_tierPen: members at the wait cap → tier pull fully decayed to 0');
+  S.session.players.forEach(p => { p.lastPlayedAtMatch = 28; }); // matchGap 2 — partial decay
+  const partial = CF._tierPen(mk([0, 1, 2, 3]), 3);
+  ok(partial > 0 && partial < fullPull, `_tierPen: partial wait → partial decay (0 < ${Math.round(partial)} < ${Math.round(fullPull)})`);
+  // End-to-end: _scoreGroup prefers the home court for a top-band group in P3.
+  S.session.players.forEach(p => { p.lastPlayedAtMatch = 30; });
+  const sHome = CF._scoreGroup(mk([0, 1, 2, 3]), null, 1);
+  const sAway = CF._scoreGroup(mk([0, 1, 2, 3]), null, 3);
+  ok(sAway.score > sHome.score, `_scoreGroup: top-band group scores worse bound for court 3 than court 1 (${Math.round(sAway.score)} > ${Math.round(sHome.score)})`);
+  // Uncalibrated guard: <4 games → no tier pull (rank not trustworthy yet).
+  S.session.players.forEach(p => { p.matchesPlayed = 2; });
+  eq(CF._tierPen(mk([0, 1, 2, 3]), 3), 0, '_tierPen: players with <4 games → 0 (uncalibrated ranks)');
+} catch (e) {
+  fail++; console.error('  ❌ ladder-arc test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
 // ── Tests: ranked-only board (Phase-1 warm-up doesn't count toward W/L) ──────
 section('ranked-only board — Phase-1 warm-up calibrates but does NOT count W/L');
 ['renderLive','renderStandings','renderHistory','renderDB','renderRoster','toast','openModal','closeModal','startElapsed','startCFTick','updateHeader'].forEach(fn=>{ try{ if(typeof ctx[fn]!=='undefined') ctx[fn]=()=>{}; }catch(e){} });

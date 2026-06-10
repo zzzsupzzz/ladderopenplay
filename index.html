@@ -1743,6 +1743,24 @@ function _totalRanked(){
   return _totalRankedCache;
 }
 
+// Phase-3 ladder-court chip: labels a court by the rank band ACTUALLY playing on it right now
+// (dynamic — computed from the four players, not a static court promise; sim-proven that bench
+// rotation moves bands across courts, so a fixed label would lie). Organizer-only, Phase 3 only.
+function _courtTierChip(ids){
+  if(!S.session||S.session.status!=='active'||!Array.isArray(ids)||ids.length!==4)return'';
+  if(typeof OBSERVER_MODE!=='undefined'&&(OBSERVER_MODE||PLAYER_MODE))return'';
+  if(CF._sessPhaseNum()!==3)return'';
+  const nc=S.session.courts||1;if(nc<2)return'';
+  const N=_totalRanked();if(N<8)return'';
+  const rks=ids.map(id=>_sessionRank(id)).filter(r=>r>0);
+  if(rks.length!==4)return'';
+  const bandSize=Math.ceil(N/nc);
+  const avgBand=rks.reduce((s,r)=>s+Math.min(nc-1,Math.floor((r-1)/bandSize)),0)/4;
+  const band=Math.round(avgBand);
+  const lbl=band===0?'🏆 TOP':band>=nc-1?'🌱 RISING':'🥈 MID';
+  return ` <span style="font-size:.6rem;font-weight:700;color:var(--go);background:rgba(250,204,21,.1);border:1px solid rgba(250,204,21,.25);border-radius:5px;padding:1px 5px;vertical-align:middle" title="Phase 3 — this match is a ${band===0?'top':band>=nc-1?'lower':'middle'}-band game (ranks ${rks.sort((a,b)=>a-b).join(', ')} of ${N}). Same-level matchups tighten through the night; the band label follows the players, not the court.">${lbl}</span>`;
+}
+
 // ── Session phase (elapsed time) ─────────────────────────────────────────────
 // Phase 1: 0–60 min  — ranks are noisy, wider tolerance
 // Phase 2: 60–120 min — ranks settling, moderate tolerance
@@ -6248,7 +6266,7 @@ const CF={
   dequeue(ids){if(S.session)S.session.cfQueue=S.session.cfQueue.filter(q=>!ids.includes(q.id));},
 
   /* Score a candidate group of 4 — lower is better */
-  _scoreGroup(group,mustSplitPair){
+  _scoreGroup(group,mustSplitPair,tierCourt){
     // NOTE: a phase "progression weight" (loose early → tight late) was tried here and reverted.
     // The descending partner-gap arc is structurally impossible: early-session availability lets
     // the engine pick ~random-or-tighter partners, while late session is CONSTRAINT-FORCED into
@@ -6637,9 +6655,18 @@ const CF={
         // Phase 3 guard: fall back to Phase 2 limits if any player is uncalibrated
         const _minGames=Math.min(...group.map(p=>gsp(p.id)?.matchesPlayed||0));
         const _effPhase=(_phase===3&&_minGames<4)?2:_phase;
-        const _softPct=_is2c
-          ?(_effPhase===1?0.60:_effPhase===2?0.50:0.40)
-          :(_effPhase===1?0.50:_effPhase===2?0.40:0.35);
+        // Phase 2 ramps CONTINUOUSLY: the soft target slides from the Phase-2 start value down
+        // to the Phase-3 target as cfMatchCount advances, so the room visibly sorts itself
+        // through the middle of the session instead of jumping at the phase boundary.
+        let _softPct;
+        if(_effPhase===1)_softPct=_is2c?0.60:0.50;
+        else if(_effPhase===3)_softPct=_is2c?0.40:0.35;
+        else{
+          const _npR=S.session?.activePlayers?.length||8,_mcR=S.session?.cfMatchCount||0;
+          const _t=Math.min(1,Math.max(0,(_mcR-_npR*0.6)/(_npR*0.6))); // 0 at P2 start → 1 at P3 boundary
+          const _from=_is2c?0.50:0.40,_to=_is2c?0.40:0.35;
+          _softPct=_from-(_from-_to)*_t;
+        }
         const _softTarget=Math.max(3,Math.round(_N4*_softPct));
         if(_rSpread>_hardLimit){
           // Crazy mismatch — essentially block this group (still escapable if queue is empty)
@@ -6667,7 +6694,10 @@ const CF={
       // cap must not punish them — keep only the team-balance term. The true-random opening drops both.
       phaseGapPen=_trueRandom?0:(_sgPhase===1?_teamOver*1.0:_partnerOver*1.2+_teamOver*1.0);
     }
-    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+blowoutNudge+rankBandPen+neverPairPen+phaseGapPen,meta,t1,t2,group};
+    // Phase-3 ladder-court affinity: callers that know the destination court pass it;
+    // court-agnostic callers (swap picker, hard-wait takeover, joint formation) omit it → 0.
+    const tierPen=this._tierPen(group,tierCourt);
+    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+blowoutNudge+rankBandPen+neverPairPen+phaseGapPen+tierPen,meta,t1,t2,group};
   },
 
   /* Generate a suggestion for a court */
@@ -6982,7 +7012,7 @@ const CF={
           const spn=sp2.length;let bScore=Infinity;
           for(let i=0;i<spn-3;i++)for(let j=i+1;j<spn-2;j++)for(let k=j+1;k<spn-1;k++)for(let l=k+1;l<spn;l++){
             const g=[sp2[i],sp2[j],sp2[k],sp2[l]];
-            const res=this._scoreGroup(g,mustSplit);
+            const res=this._scoreGroup(g,mustSplit,c);
             if(!this._withinTeamGapOk(res.t1,res.t2,300))continue;
             if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
             if(res.score<bScore){bScore=res.score;best={...res,group:g};}
@@ -6996,7 +7026,7 @@ const CF={
             const so=subOthers.length;let bScore=Infinity;
             for(let i=0;i<so-2;i++)for(let j=i+1;j<so-1;j++)for(let k=j+1;k<so;k++){
               const g=[subAnchor,subOthers[i],subOthers[j],subOthers[k]];
-              const res=this._scoreGroup(g,mustSplit);
+              const res=this._scoreGroup(g,mustSplit,c);
               if(!this._withinTeamGapOk(res.t1,res.t2,300))continue;
               if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
               if(res.score<bScore){bScore=res.score;best={...res,group:g};}
@@ -7006,7 +7036,7 @@ const CF={
               let bScore2=Infinity;
               for(let i=0;i<so-2;i++)for(let j=i+1;j<so-1;j++)for(let k=j+1;k<so;k++){
                 const g=[subAnchor,subOthers[i],subOthers[j],subOthers[k]];
-                const res=this._scoreGroup(g,mustSplit);
+                const res=this._scoreGroup(g,mustSplit,c);
                 if(!this._withinTeamGapOk(res.t1,res.t2,500))continue;
                 if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
                 if(res.score<bScore2){bScore2=res.score;best={...res,group:g};}
@@ -7017,7 +7047,7 @@ const CF={
               let nScore=Infinity;
               for(let i=0;i<so-2;i++)for(let j=i+1;j<so-1;j++)for(let k=j+1;k<so;k++){
                 const g=[subAnchor,subOthers[i],subOthers[j],subOthers[k]];
-                const res=this._scoreGroup(g,mustSplit);
+                const res=this._scoreGroup(g,mustSplit,c);
                 if(res.score<nScore){nScore=res.score;best={...res,group:g};}
               }
               // Phase 2: force-include most-overdue 'other' (matchGap>=nc*2+1)
@@ -7028,14 +7058,14 @@ const CF={
                 let _fScore3=Infinity;
                 for(let i=0;i<_ro3-1;i++)for(let j=i+1;j<_ro3;j++){
                   const g=[subAnchor,_fOther3,_remO3[i],_remO3[j]];
-                  const res=this._scoreGroup(g,mustSplit);
+                  const res=this._scoreGroup(g,mustSplit,c);
                   if(res.score<_fScore3){_fScore3=res.score;best={...res,group:g};}
                 }
               }
             }
           }
         }
-        if(!best)best=this._findBestGroup(subRaw,mustSplit,nrIds,n);
+        if(!best)best=this._findBestGroup(subRaw,mustSplit,nrIds,n,null,null,c);
         if(!best){S.session.cfSuggestions[c]=null;continue;}
         filled.push({c,best});
         // Remove assigned players so they aren't used twice across courts
@@ -7185,7 +7215,7 @@ const CF={
           // Primary: normal quality cap
           for(let i=0;i<olen-2;i++)for(let j=i+1;j<olen-1;j++)for(let k=j+1;k<olen;k++){
             const g=[anchor,others[i],others[j],others[k]];
-            const res=this._scoreGroup(g,mustSplit);
+            const res=this._scoreGroup(g,mustSplit,c);
             if(!this._withinTeamGapOk(res.t1,res.t2,300))continue;
             if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
             if(res.score<bScore){bScore=res.score;best={...res,group:g};}
@@ -7194,7 +7224,7 @@ const CF={
           if(!best&&(this.matchGap(anchor.id)>=_greedyCritT||(anchor.cmg??0)>=_greedyHmwT)){
             for(let i=0;i<olen-2;i++)for(let j=i+1;j<olen-1;j++)for(let k=j+1;k<olen;k++){
               const g=[anchor,others[i],others[j],others[k]];
-              const res=this._scoreGroup(g,mustSplit);
+              const res=this._scoreGroup(g,mustSplit,c);
               if(!this._withinTeamGapOk(res.t1,res.t2,500))continue;
               if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
               if(res.score<bScore){bScore=res.score;best={...res,group:g};}
@@ -7205,7 +7235,7 @@ const CF={
             let nScore=Infinity;
             for(let i=0;i<olen-2;i++)for(let j=i+1;j<olen-1;j++)for(let k=j+1;k<olen;k++){
               const g=[anchor,others[i],others[j],others[k]];
-              const res=this._scoreGroup(g,mustSplit);
+              const res=this._scoreGroup(g,mustSplit,c);
               if(res.score<nScore){nScore=res.score;best={...res,group:g};}
             }
             // Phase 2: force-include most-overdue 'other' (matchGap>=nc*2+1)
@@ -7216,18 +7246,30 @@ const CF={
               let _fScore2=Infinity;
               for(let i=0;i<_ro2-1;i++)for(let j=i+1;j<_ro2;j++){
                 const g=[anchor,_fOther2,_remO2[i],_remO2[j]];
-                const res=this._scoreGroup(g,mustSplit);
+                const res=this._scoreGroup(g,mustSplit,c);
                 if(res.score<_fScore2){_fScore2=res.score;best={...res,group:g};}
               }
             }
           }
         }
-        if(!best)best=this._findBestGroup(rem.slice(0,Math.min(12,rem.length)),mustSplit,nrIds,n);
+        if(!best)best=this._findBestGroup(rem.slice(0,Math.min(12,rem.length)),mustSplit,nrIds,n,null,null,c);
         if(best){
           this._storeSuggestion(c,best,finishedMatchByCourtNum?.[c]);
           const usedIds=new Set(best.group.map(g=>g.id));
           rem=rem.filter(p=>!usedIds.has(p.id));
         } else S.session.cfSuggestions[c]=null;
+      });
+    }else if(this._sessPhaseNum()===3&&(S.session?.courts||1)>=2){
+      // Phase-3 ladder courts: map each formed group to the court matching its rank band —
+      // the top-ranked group plays court 1, the next band court 2, etc. Group FORMATION above
+      // stays court-agnostic (tightness-driven); this step only decides placement so the
+      // "court 1 = top court" identity holds when several courts open at once.
+      const byRank=bestAlloc.map(b=>({b,avgRk:b.group.reduce((s,p)=>s+(_sessionRank(p.id)||999),0)/b.group.length}));
+      byRank.sort((a,bx)=>a.avgRk-bx.avgRk); // best (lowest rank number) first
+      const courtsAsc=[...readyCourts].sort((a,bx)=>a-bx);
+      byRank.forEach((item,i)=>{
+        const c=courtsAsc[i];
+        this._storeSuggestion(c,item.b,finishedMatchByCourtNum?.[c]);
       });
     }else{
       // Assign best allocation to courts sorted by quality (best match → middle court via assignCourts logic)
@@ -7482,6 +7524,39 @@ const CF={
     const teamRanks=(phase==='A'?5:phase==='B'?4:_pp.cTeam)+slack;
     return {partner:Math.round(partnerRanks*srPerRank),team:Math.round(teamRanks*srPerRank),partnerRanks,teamRanks,phase};
   },
+  // ── Phase-3 soft court tiers ("ladder courts") ───────────────────────────
+  // In Phase 3 the night's standings split into nc bands (band size = ceil(N/nc)) and each
+  // court anchors one: court 1 = top band … court nc = bottom. A group destined for a court
+  // pays a per-player penalty for each band-step a member sits from that court's band.
+  // TIEBREAK-STRENGTH by design (sim-proven): bench rotation drifts bands across courts in
+  // continuous play, so a strong anchor can't hold court identity (adherence stays ~random)
+  // and only degrades group cohesion by chasing it. 40/step nudges placement when groups are
+  // otherwise equal; SAME-LEVEL play itself comes from the rank-band spread penalty + ramp.
+  // Decays linearly with the player's wait (vanishing at the wait cap), so a sitting player
+  // bleeds into the adjacent court's pool instead of waiting for "their" court. Mandatory /
+  // hard-wait paths never pass a court → untouched. <4 games = uncalibrated rank → skipped.
+  _tierPen(group,tierCourt){
+    if(!tierCourt||this._sessPhaseNum()!==3)return 0;
+    const nc=S.session?.courts||1;
+    if(nc<2)return 0;
+    const N=_totalRanked();
+    if(N<8)return 0; // too few ranked players for meaningful bands
+    const bandSize=Math.ceil(N/nc);
+    const courtBand=Math.min(nc-1,tierCourt-1); // court 1 = band 0 (top)
+    const cap=this.waitCap();
+    let pen=0;
+    for(const p of group){
+      if((gsp(p.id)?.matchesPlayed||0)<4)continue; // rank not calibrated yet
+      const rk=_sessionRank(p.id);
+      if(rk<=0)continue;
+      const pBand=Math.min(nc-1,Math.floor((rk-1)/bandSize));
+      const off=Math.abs(pBand-courtBand);
+      if(!off)continue;
+      const decay=Math.max(0,1-this.matchGap(p.id)/cap); // longer sit → weaker tier pull
+      pen+=off*40*decay;
+    }
+    return pen;
+  },
   // Loose hard outer guard (~11 ranks) — blocks only egregious carry pairings. Graduated
   // tightness is driven by the phaseGapPen score term in _scoreGroup (NOT a tight gate), so
   // hard-to-match players are never deselected into wait-cap-breaching clusters.
@@ -7503,7 +7578,7 @@ const CF={
     return phase==='C'?1:2;
   },
 
-  _findBestGroup(candidates,mustSplit,nrIds,totalQueue,lastMatchupKey=null,isShownFn=null){
+  _findBestGroup(candidates,mustSplit,nrIds,totalQueue,lastMatchupKey=null,isShownFn=null,tierCourt=null){
     let best=null,bestScore=Infinity;
     const n=candidates.length;
     const hasCooldownPair=(res)=>
@@ -7519,7 +7594,7 @@ const CF={
     for(let i=0;i<n-3;i++)for(let j=i+1;j<n-2;j++)for(let k=j+1;k<n-1;k++)for(let l=k+1;l<n;l++){
       const group=[candidates[i],candidates[j],candidates[k],candidates[l]];
       if(isShownFn&&isShownFn(group))continue;
-      const res=this._scoreGroup(group,mustSplit);
+      const res=this._scoreGroup(group,mustSplit,tierCourt);
       if(!this._phaseSkillOk(res.t1,res.t2,candidates.map(p=>p.id)))continue;
       if(hasCooldownPair(res)){_blockedByCooldown=true;continue;}
       if(isBackToBack(res)){_blockedByBTB=true;continue;}
@@ -7530,7 +7605,7 @@ const CF={
     for(let i=0;i<n-3;i++)for(let j=i+1;j<n-2;j++)for(let k=j+1;k<n-1;k++)for(let l=k+1;l<n;l++){
       const group=[candidates[i],candidates[j],candidates[k],candidates[l]];
       if(isShownFn&&isShownFn(group))continue;
-      const res=this._scoreGroup(group,mustSplit);
+      const res=this._scoreGroup(group,mustSplit,tierCourt);
       if(!this._withinTeamGapOk(res.t1,res.t2,400))continue;
       const _mg2=Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0);
       if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],_mg2))continue;
@@ -7544,7 +7619,7 @@ const CF={
     const fallbackReason=_candidateCount<8?'thin':_blockedByBTB?'rematch':_blockedByCooldown?'cooldown':'thin';
     for(let i=0;i<n-3;i++)for(let j=i+1;j<n-2;j++)for(let k=j+1;k<n-1;k++)for(let l=k+1;l<n;l++){
       const group=[candidates[i],candidates[j],candidates[k],candidates[l]];
-      const res=this._scoreGroup(group,mustSplit);
+      const res=this._scoreGroup(group,mustSplit,tierCourt);
       if(res.score<bestScore){bestScore=res.score;best=res;}
     }
     if(!best&&candidates.length>=4){best=this._scoreGroup(candidates.slice(0,4),mustSplit);}
@@ -7847,13 +7922,13 @@ const CF={
       let best=null,bestScore=Infinity;
       if(needed===0){
         // Exactly 4 pinned — only one group possible
-        const res=this._scoreGroup(pinnedList,mustSplit);
+        const res=this._scoreGroup(pinnedList,mustSplit,courtNum);
         best={...res,group:pinnedList};
       } else {
         const cn=candidates.length;
-        if(needed===1){for(let i=0;i<cn;i++){const g=[...pinnedList,candidates[i]];if(_isShown(g))continue;const res=this._scoreGroup(g,mustSplit);if(res.score<bestScore){bestScore=res.score;best={...res,group:g};}}}
-        else if(needed===2){for(let i=0;i<cn-1;i++)for(let j=i+1;j<cn;j++){const g=[...pinnedList,candidates[i],candidates[j]];if(_isShown(g))continue;const res=this._scoreGroup(g,mustSplit);if(res.score<bestScore){bestScore=res.score;best={...res,group:g};}}}
-        else if(needed===3){for(let i=0;i<cn-2;i++)for(let j=i+1;j<cn-1;j++)for(let k=j+1;k<cn;k++){const g=[...pinnedList,candidates[i],candidates[j],candidates[k]];if(_isShown(g))continue;const res=this._scoreGroup(g,mustSplit);if(res.score<bestScore){bestScore=res.score;best={...res,group:g};}}}
+        if(needed===1){for(let i=0;i<cn;i++){const g=[...pinnedList,candidates[i]];if(_isShown(g))continue;const res=this._scoreGroup(g,mustSplit,courtNum);if(res.score<bestScore){bestScore=res.score;best={...res,group:g};}}}
+        else if(needed===2){for(let i=0;i<cn-1;i++)for(let j=i+1;j<cn;j++){const g=[...pinnedList,candidates[i],candidates[j]];if(_isShown(g))continue;const res=this._scoreGroup(g,mustSplit,courtNum);if(res.score<bestScore){bestScore=res.score;best={...res,group:g};}}}
+        else if(needed===3){for(let i=0;i<cn-2;i++)for(let j=i+1;j<cn-1;j++)for(let k=j+1;k<cn;k++){const g=[...pinnedList,candidates[i],candidates[j],candidates[k]];if(_isShown(g))continue;const res=this._scoreGroup(g,mustSplit,courtNum);if(res.score<bestScore){bestScore=res.score;best={...res,group:g};}}}
       }
       if(best){this._storeSuggestion(courtNum,best,finishedMatch);return;}
     }
@@ -7875,7 +7950,7 @@ const CF={
       for(let i=0;i<pn-3;i++)for(let j=i+1;j<pn-2;j++)for(let k=j+1;k<pn-1;k++)for(let l=k+1;l<pn;l++){
         const group=[pp[i],pp[j],pp[k],pp[l]];
         if(_isShown(group))continue; // skip previously shown combos
-        const res=this._scoreGroup(group,mustSplit);
+        const res=this._scoreGroup(group,mustSplit,courtNum);
         // Quality gate: phase-aware partner+team skill caps (tighten as players accrue games)
         if(!this._phaseSkillOk(res.t1,res.t2,group.map(p=>p.id)))continue;
             if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
@@ -7922,7 +7997,7 @@ const CF={
       for(let i=0;i<n-2;i++)for(let j=i+1;j<n-1;j++)for(let k=j+1;k<n;k++){
         const group=[anchor,...[others[i],others[j],others[k]]];
         if(_isShown(group))continue; // skip previously shown combos
-        const res=this._scoreGroup(group,mustSplit);
+        const res=this._scoreGroup(group,mustSplit,courtNum);
         if(!this._phaseSkillOk(res.t1,res.t2,group.map(p=>p.id)))continue;
             if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
         if(res.score<bestScore){bestScore=res.score;best={...res,group};}
@@ -7934,7 +8009,7 @@ const CF={
         for(let i=0;i<n-2;i++)for(let j=i+1;j<n-1;j++)for(let k=j+1;k<n;k++){
           const group=[anchor,...[others[i],others[j],others[k]]];
           if(_isShown(group))continue;
-          const res=this._scoreGroup(group,mustSplit);
+          const res=this._scoreGroup(group,mustSplit,courtNum);
           if(!this._withinTeamGapOk(res.t1,res.t2,500))continue; // full sr range — any combo valid
           if(!_ranksCompatible([res.t1[0].id,res.t1[1].id],[res.t2[0].id,res.t2[1].id],Math.max(res.t1[0].mg||0,res.t1[1].mg||0,res.t2[0].mg||0,res.t2[1].mg||0)))continue;
           if(res.score<bestScore){bestScore=res.score;best={...res,group};}
@@ -7947,7 +8022,7 @@ const CF={
         let nScore=Infinity;
         for(let i=0;i<n-2;i++)for(let j=i+1;j<n-1;j++)for(let k=j+1;k<n;k++){
           const group=[anchor,...[others[i],others[j],others[k]]];
-          const res=this._scoreGroup(group,mustSplit);
+          const res=this._scoreGroup(group,mustSplit,courtNum);
           if(res.score<nScore){nScore=res.score;best={...res,group};}
         }
       }
@@ -7961,7 +8036,7 @@ const CF={
     //   - MGL players (gap>=4) are in the pool via greedy anchor below
     const top=orderedPool.slice(0,Math.min(14,orderedPool.length));
     const _lastKey=S.session?.cfCourts?.[courtNum]?.lastMatchupKey||null;
-    let best=this._findBestGroup(top,mustSplit,nrIds,orderedPool.length,_lastKey,_isShown);
+    let best=this._findBestGroup(top,mustSplit,nrIds,orderedPool.length,_lastKey,_isShown,courtNum);
 
     // ── Match quality floor ──────────────────────────────────────────────
     // If the best group from passes 1/2 has bad skill balance, retry with
@@ -7973,7 +8048,7 @@ const CF={
       const bestP1=Math.abs((best.t1[0].sr+best.t1[1].sr)/2-(best.t2[0].sr+best.t2[1].sr)/2)*1.5
                   +Math.abs(best.t1[0].sr-best.t1[1].sr)/50+Math.abs(best.t2[0].sr-best.t2[1].sr)/50;
       if(bestP1>270){
-        const fallback=this._scoreGroup(top.slice(0,4),mustSplit);
+        const fallback=this._scoreGroup(top.slice(0,4),mustSplit,courtNum);
         best={...fallback,group:top.slice(0,4),fallbackPass:3,fallbackReason:'quality-floor'};
       }
     }
@@ -8948,7 +9023,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
           const _np=S.session.activePlayers?.length||0,_mc=S.session.cfMatchCount||0;
           const _m=_ph===1?{i:'🎲',n:'Warm-up',c:'var(--ac)',next:Math.max(0,Math.ceil(_np*0.6)-_mc),nn:'Ranked',tip:'Phase 1 — balanced-random warm-up: matchmaking ignores rank so everyone mixes; teams stay balanced and ranks calibrate.'}
                   :_ph===2?{i:'📊',n:'Ranked',c:'var(--gr)',next:Math.max(0,Math.ceil(_np*1.2)-_mc),nn:'Competitive',tip:'Phase 2 — rank-based matchmaking is active.'}
-                  :{i:'🏆',n:'Competitive',c:'var(--go)',next:0,nn:'',tip:'Phase 3 — rank-based matchmaking, tightest.'};
+                  :{i:'🏆',n:'Competitive',c:'var(--go)',next:0,nn:'',tip:'Phase 3 — tightest matchmaking: games form within rank bands (same-level matchups). Court chips show which band is playing where. Waiting always overrides the band pull.'};
           const _nextTxt=_m.next>0?` · ${_m.nn} in ${_m.next}`:'';
           _phBadge=` · <span style="color:${_m.c};font-weight:700" title="${esc(_m.tip)}">${_m.i} Phase ${_ph} · ${_m.n}${_nextTxt}</span>`;
         }
@@ -9277,7 +9352,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       <div style="font-size:.55rem;color:var(--m2);margin-top:2px">tap a name to swap</div></div>`;
     };
     return `<div class="cf-suggest" data-court="${courtNum}">
-      <div class="cf-suggest-hd">${(sug.meta?.challenge&&!OBSERVER_MODE&&!PLAYER_MODE)?'👑 CHALLENGE COURT':'🏓 COURT '+((S.session?.courtOffset||0)+courtNum)} — READY</div>
+      <div class="cf-suggest-hd">${(sug.meta?.challenge&&!OBSERVER_MODE&&!PLAYER_MODE)?'👑 CHALLENGE COURT':'🏓 COURT '+((S.session?.courtOffset||0)+courtNum)} — READY${_courtTierChip([...(sug.t1||[]),...(sug.t2||[])])}</div>
       <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:9px">
         ${pTeam(sug.t1,t1Avg,t1pgap,t1rk0,t1rk1)}<div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--m2)">VS</div>${pTeam(sug.t2,t2Avg,t2pgap,t2rk0,t2rk1)}
       </div>
@@ -9320,7 +9395,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     const extTag=ext?`<span style="font-size:.62rem;font-weight:700;color:var(--or);background:rgba(251,147,60,.12);border:1px solid rgba(251,147,60,.3);border-radius:5px;padding:1px 5px">EXTENDED</span>`:'';
     return `<div class="court-card ${ext?'extended':''}">
       <div class="chead">
-        <span class="clbl">COURT ${(S.session?.courtOffset||0)+courtNum}</span>
+        <span class="clbl">COURT ${(S.session?.courtOffset||0)+courtNum}${_courtTierChip([...m.t1,...m.t2])}</span>
         <div style="display:flex;align-items:center;gap:8px">
           ${extTag}
           <span data-cf-elapsed="${courtNum}" class="ct-timer">--:--</span>
