@@ -84,6 +84,7 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   _multiWriterBannerHtml:typeof _multiWriterBannerHtml!=='undefined'?_multiWriterBannerHtml:null,
   exportBackup:typeof exportBackup!=='undefined'?exportBackup:null,
   importBackup:typeof importBackup!=='undefined'?importBackup:null,
+  _updateSessionRank:typeof _updateSessionRank!=='undefined'?_updateSessionRank:null,
   _challengePool:function(){return (typeof _cfChallengePoolIds!=='undefined'&&_cfChallengePoolIds)?_cfChallengePoolIds:new Set();}};`;
 
 vm.createContext(ctx);
@@ -289,6 +290,82 @@ try {
   eq(CF._tierPen(mk([0, 1, 2, 3]), 3), 0, '_tierPen: players with <4 games → 0 (uncalibrated ranks)');
 } catch (e) {
   fail++; console.error('  ❌ ladder-arc test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
+// ── Tests: ENDGAME mode + no-groundhog rules + form balancing + margin ranks ─
+// Endgame (mc >= np*1.5): variety memory off, tightest spread — but the same four can't
+// immediately re-form (rule 1), partners can't repeat back-to-back (existing cooldown),
+// and a foursome rematch must redraw the teams (rule 3). Form: tonight's ranked record
+// nudges effective strength for TEAM BALANCING only. Margin: blowouts move ranks harder
+// while the ladder is calibrating (phases 1-2), clamped at ±4.
+section('endgame — closeness>variety, no-groundhog rules, form split, margin-aware ranks');
+try {
+  makeSession(20, 3);
+  if (APP._initSessionRanks) APP._initSessionRanks();
+  S.session.players.forEach(p => { p.matchesPlayed = 5; p.lastPlayedAtMatch = 30; });
+  // _isEndgame boundary: np=20 → endgame at mc>=30
+  S.session.cfMatchCount = 29; eq(CF._isEndgame(), false, '_isEndgame: mc 29 → not yet (np*1.5=30)');
+  S.session.cfMatchCount = 30; eq(CF._isEndgame(), true, '_isEndgame: mc 30 → endgame');
+
+  // Rule 1: just-played foursome (any court) is heavily deprioritized
+  const g4 = mk([0, 1, 2, 3]);
+  const gk = g4.map(p => p.id).sort().join(',');
+  S.session.cfRecentGroups = [];
+  const fresh = CF._scoreGroup(g4, null).score;
+  S.session.cfRecentGroups = [gk];
+  const recent = CF._scoreGroup(g4, null).score;
+  ok(recent >= fresh + 700, `rule 1: just-played foursome deprioritized (+${Math.round(recent - fresh)})`);
+  S.session.cfRecentGroups = [];
+
+  // Rule 3: a foursome rematch must use DIFFERENT teams than last time
+  const res1 = CF._scoreGroup(g4, null);
+  const key1 = CF.matchupKey(res1.t1.map(p => p.id), res1.t2.map(p => p.id));
+  S.session.cfGroupLastSplit = {}; S.session.cfGroupLastSplit[gk] = key1;
+  const res2 = CF._scoreGroup(g4, null);
+  const key2 = CF.matchupKey(res2.t1.map(p => p.id), res2.t2.map(p => p.id));
+  ok(key2 !== key1, 'rule 3: same foursome re-forms with different battle lines (split redrawn)');
+  S.session.cfGroupLastSplit = {};
+
+  // Endgame spread tightening: the same wide group is penalized harder in endgame than in P3
+  S.session.cfMatchCount = 25; // Phase 3, pre-endgame
+  const wideP3 = CF._scoreGroup(mk([0, 1, 7, 8]), null).score;
+  S.session.cfMatchCount = 30; // endgame
+  const wideEG = CF._scoreGroup(mk([0, 1, 7, 8]), null).score;
+  ok(wideEG > wideP3, `endgame: spread target tightens (${Math.round(wideEG)} > ${Math.round(wideP3)})`);
+
+  // Form adjustment: ranked form nudges effective strength, capped at ±2 ranks, needs ≥2 games
+  const pA = S.session.players[5], pB = S.session.players[6];
+  pA.wins = 4; pA.losses = 0; pA.ties = 0; pA.ptsFor = 44; pA.ptsAgainst = 20;
+  pB.wins = 0; pB.losses = 4; pB.ties = 0; pB.ptsFor = 20; pB.ptsAgainst = 44;
+  const adjA = CF._formAdjSr(pA.id), adjB = CF._formAdjSr(pB.id);
+  ok(adjA > 0, `form: hot player balanced as stronger (+${Math.round(adjA)}sr)`);
+  ok(adjB < 0, `form: slumping player balanced as weaker (${Math.round(adjB)}sr)`);
+  const perRank = 500 / 19;
+  ok(Math.abs(adjA) <= 2 * perRank + 0.01 && Math.abs(adjB) <= 2 * perRank + 0.01, 'form: nudge capped at ±2 ranks');
+  pA.wins = 1; pA.losses = 0;
+  eq(CF._formAdjSr(pA.id), 0, 'form: <2 ranked games → no adjustment (no evidence yet)');
+
+  // Margin-aware ranks: in calibration (P1-2), an 11-1 win vs better opponents moves ranks
+  // more than an 11-9 — and movement is clamped at 4.
+  const _byRank = r => S.session.players.find(p => APP._sessionRank(p.id) === r).id;
+  makeSession(20, 3);
+  if (APP._initSessionRanks) APP._initSessionRanks();
+  S.session.cfMatchCount = 5; // calibrating (P1)
+  Object.values(S.session.cfRanks).forEach(e => { e.games = 4; }); // full speedMult
+  let midId = _byRank(11), oppIds = [_byRank(3), _byRank(4)];
+  APP._updateSessionRank(midId, true, 10, oppIds);
+  const moveBlowout = 11 - APP._sessionRank(midId);
+  makeSession(20, 3);
+  if (APP._initSessionRanks) APP._initSessionRanks();
+  S.session.cfMatchCount = 5;
+  Object.values(S.session.cfRanks).forEach(e => { e.games = 4; });
+  midId = _byRank(11); oppIds = [_byRank(3), _byRank(4)];
+  APP._updateSessionRank(midId, true, 2, oppIds);
+  const moveSqueaker = 11 - APP._sessionRank(midId);
+  ok(moveBlowout > moveSqueaker, `margin-aware: blowout moves more than squeaker while calibrating (${moveBlowout} > ${moveSqueaker})`);
+  ok(moveBlowout <= 4, `margin-aware: movement clamped at 4 (got ${moveBlowout})`);
+} catch (e) {
+  fail++; console.error('  ❌ endgame test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
 
 // ── Tests: ranked-only board (Phase-1 warm-up doesn't count toward W/L) ──────

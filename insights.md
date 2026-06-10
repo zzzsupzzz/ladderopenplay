@@ -214,3 +214,15 @@ Decision: balanced teams every phase. Split comparator is now team-gap primary (
 Sim result (3x 20p/3c): P2/P3 team gap dropped from 4-7 to ~3 avg; blowout-level matches (team gap >=5 ranks) fell to 0-3 per phase. Partner gap in P3 runs 3-5 (the carry shape, by design).
 
 Quality chip updated to match the policy: red "Avoid" = big team gap (blowout) or wide AND unbalanced; a wide-but-balanced game shows an informational "Carry" chip instead; P.GAP legend explains high values are intentional carry games.
+
+## Endgame Mode + Form Balancing + Margin-Aware Ranks (the "even endgame" package)
+
+Goal: players leave saying "the matches were even" - the last games matter most (recency).
+
+1. ENDGAME (auto at mc >= np*1.5, deep Phase 3): variety memory ("played them earlier tonight") switches OFF (_p3Mult -> 0) and the spread target tightens one more notch (2c 0.35 / 3c+ 0.28 of N). Rationale: by the last hour everyone in your band has already played each other, so repeat-avoidance actively forces WIDE games just to find "fresh" pairings. No-groundhog guards stay on: pair cooldown, per-court back-to-back block, PLUS two new ones - cfRecentGroups (last nc submitted foursomes, any court, +800 penalty on immediate re-form) and cfGroupLastSplit (a foursome rematch must redraw the teams, +300 in the split comparator). Sim-proven: same-four-same-teams consecutive reruns = 0 across runs; endgame spread tightens (e.g. 8.8 -> 6.2); badge shows "Phase 3 - Endgame".
+
+2. FORM-ADJUSTED BALANCING (_formAdjSr): tonight's ranked record (net wins x0.4 + point diff x0.05, capped +/-2 ranks, needs >=2 ranked games) shifts effective sr in the SPLIT COMPARATOR ONLY - a slumping #3 balances like a #5. Standings, ranks, and group selection untouched. Session-pure (warm-up/noElo games excluded from wins/ptsFor already).
+
+3. MARGIN-AWARE RANK MOVEMENT: in phases 1-2 (calibration) the pdMult table extends to 1.8x (PD>=8) / 2.2x (PD>=10) so 11-3 teaches the ladder more than 11-9; Phase 3 keeps the gentle table for stability. |move| clamped at 4 so one fluke can never teleport anyone.
+
+Design principle reaffirmed: closeness vs variety is the binding late-session tradeoff; pay variety, buy closeness at the end. All three features are session-pure (no persistent-rating influence) per the organizer's explicit requirement.

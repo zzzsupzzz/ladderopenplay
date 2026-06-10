@@ -2051,9 +2051,18 @@ function _updateSessionRank(id,won,pd,opponentIds){
     base = relRank<-2?-3:relRank<0?-2:-1; // lost to weaker=-3, similar=-2, better=-1
   }
 
-  // PD multiplier
+  // PD multiplier — MARGIN-AWARE in phases 1-2: a blowout is the loudest evidence the
+  // ranks are wrong, so while the ladder is still calibrating, big margins move ranks
+  // harder (11-3 teaches more than 11-9). Phase 3 keeps the gentler table — by then the
+  // ladder should be trusted, and stability matters more than fast correction. Bounded
+  // by the |move| clamp below so one fluke game can never teleport anyone.
   const absPD=Math.abs(pd||0);
-  const pdMult=absPD>=7?1.5:absPD>=4?1.2:0.8;
+  const _npMv=S.session?.activePlayers?.length||8;
+  const _mcMv=S.session?.cfMatchCount||0;
+  const _calibrating=_mcMv<_npMv*1.2; // phases 1-2
+  const pdMult=_calibrating
+    ?(absPD>=10?2.2:absPD>=8?1.8:absPD>=7?1.5:absPD>=4?1.2:0.8)
+    :(absPD>=7?1.5:absPD>=4?1.2:0.8);
 
   // Speed multiplier: DAMPEN early games so first-impression mistakes don't cascade.
   // Games 1-2 → 0.3× (barely moves), game 3 → 0.6×, games 4-5 → 1.0×, 6+ → 0.7×
@@ -2062,7 +2071,7 @@ function _updateSessionRank(id,won,pd,opponentIds){
   const games=entry.games||0;
   const speedMult=games<2?0.3:games<3?0.6:games<6?1.0:0.7;
 
-  const move=Math.round(base*pdMult*speedMult);
+  const move=Math.max(-4,Math.min(4,Math.round(base*pdMult*speedMult)));
   if(move===0){entry.games++;return;}
 
   // Apply rank swap — winner moves up (lower number), loser moves down
@@ -6138,6 +6147,34 @@ const CF={
     const mc=S.session?.cfMatchCount||0;
     return mc<np*0.6?1:mc<np*1.2?2:3;
   },
+  // ── ENDGAME (deep Phase 3, mc >= np*1.5): closeness > variety ──────────────
+  // The final stretch of the night optimizes for the closest possible matches: the
+  // repeat-avoidance memory ("played them earlier tonight") is switched OFF and the
+  // group-spread target tightens. The SHORT-TERM no-groundhog guards stay on: pair
+  // cooldown (no back-to-back same partner), per-court back-to-back matchup block,
+  // the global recent-foursome penalty, and the forced-different-split rule — so the
+  // same four never re-run the same battle lines, they just stop being avoided.
+  _isEndgame(){
+    const np=S.session?.activePlayers?.length||8;
+    const mc=S.session?.cfMatchCount||0;
+    return mc>=np*1.5;
+  },
+  // Tonight's-form nudge for TEAM BALANCING only (standings/ranks untouched).
+  // "A high-ranked player having a bad night should be matched accordingly": net ranked
+  // record + ranked point diff shift the player's effective strength by up to ±2 ranks
+  // when the split chooser balances teams. Session-pure (warm-up and noElo games are
+  // already excluded from wins/losses/ptsFor). <2 ranked games = no evidence → 0.
+  _formAdjSr(id){
+    const sp=gsp(id);if(!sp)return 0;
+    const g=(sp.wins||0)+(sp.losses||0)+(sp.ties||0);
+    if(g<2)return 0;
+    const N=_totalRanked()||16;
+    const perRank=500/Math.max(N-1,1);
+    const net=(sp.wins||0)-(sp.losses||0);
+    const pdiff=(sp.ptsFor||0)-(sp.ptsAgainst||0);
+    const f=Math.max(-2,Math.min(2,net*0.4+pdiff*0.05));
+    return f*perRank; // sr is "higher = stronger": good form adds, bad form subtracts
+  },
   waitCapForPhase(phase){
     const nc=S.session?.courts||1;
     const mult=S.session?.cfWaitCapMult??2;
@@ -6295,6 +6332,15 @@ const CF={
     // Phase-1 only (late arrivals mid-session are excluded — they keep their inserted-rank matching).
     const _maxGG=Math.max(0,...group.map(p=>gsp(p.id)?.matchesPlayed||0));
     const _trueRandom=_sgPhase===1&&_maxGG<=1;
+    // Tonight's-form adjustment: balance teams by how each player is ACTUALLY playing
+    // tonight (rank-sr ± up to 2 ranks of ranked form), not just their ladder position.
+    const _fAdj={};group.forEach(p=>{_fAdj[p.id]=this._formAdjSr(p.id);});
+    const _asr=p=>p.sr+(_fAdj[p.id]||0);
+    // No-groundhog rule 3: if this exact foursome played before, the split that repeats
+    // their LAST team arrangement is deprioritized — a rematch must redraw the battle lines.
+    const _gk4=group.map(p=>p.id).sort().join(',');
+    const _lastSplitKey=(S.session?.cfGroupLastSplit||{})[_gk4]||null;
+    const _repSplit=sp=>_lastSplitKey&&this.matchupKey(sp.t1.map(p=>p.id),sp.t2.map(p=>p.id))===_lastSplitKey?300:0;
     _splits.sort((x,y)=>{
       // Priority 0: never-paired players must not be partners — highest constraint
       const nx=_splitHasNeverPair(x),ny=_splitHasNeverPair(y);
@@ -6311,10 +6357,11 @@ const CF={
       // which case both partners AND teams end up close. Phase 1 keeps pure team gap (unchanged).
       // The old anti-carry term (_splitCarry) is intentionally NOT in the objective: carry is now
       // the accepted shape for forced-wide groups, blowouts are the failure mode being engineered out.
-      const _tgX=Math.abs((x.t1[0].sr+x.t1[1].sr)-(x.t2[0].sr+x.t2[1].sr));
-      const _tgY=Math.abs((y.t1[0].sr+y.t1[1].sr)-(y.t2[0].sr+y.t2[1].sr));
-      const gx=_sgPhase===1?_tgX:_tgX*1.0+(Math.abs(x.t1[0].sr-x.t1[1].sr)+Math.abs(x.t2[0].sr-x.t2[1].sr))*0.15;
-      const gy=_sgPhase===1?_tgY:_tgY*1.0+(Math.abs(y.t1[0].sr-y.t1[1].sr)+Math.abs(y.t2[0].sr-y.t2[1].sr))*0.15;
+      // Team gaps use FORM-ADJUSTED strength (_asr): a slumping #3 balances like a #5 tonight.
+      const _tgX=Math.abs((_asr(x.t1[0])+_asr(x.t1[1]))-(_asr(x.t2[0])+_asr(x.t2[1])));
+      const _tgY=Math.abs((_asr(y.t1[0])+_asr(y.t1[1]))-(_asr(y.t2[0])+_asr(y.t2[1])));
+      const gx=(_sgPhase===1?_tgX:_tgX*1.0+(Math.abs(_asr(x.t1[0])-_asr(x.t1[1]))+Math.abs(_asr(x.t2[0])-_asr(x.t2[1])))*0.15)+_repSplit(x);
+      const gy=(_sgPhase===1?_tgY:_tgY*1.0+(Math.abs(_asr(y.t1[0])-_asr(y.t1[1]))+Math.abs(_asr(y.t2[0])-_asr(y.t2[1])))*0.15)+_repSplit(y);
       return gx-gy;
     });
     let{t1,t2}=_splits[0];
@@ -6475,7 +6522,8 @@ const CF={
     // Phase 1: 100% (fresh session, encourage variety)
     // Phase 2: 60%  (quality and variety balanced)
     // Phase 3: 30%  (accept repeats freely — a good rematch > a bad new match)
-    const _p3Mult=(_phase===1?1.0:_phase===2?0.6:0.3)*this._presetParams().variety;
+    // ENDGAME: 0%   (closeness is everything; short-term no-groundhog guards still apply)
+    const _p3Mult=(this._isEndgame()?0:_phase===1?1.0:_phase===2?0.6:0.3)*this._presetParams().variety;
     const p3Raw=partRpt*3 + oppRpt*5 + matchRpt + groupRpt + overlapPen + splitPen + consecPen;
     const p3Base=p3Raw>200?Math.round(200*p3Raw/Math.max(p3Raw,1)):p3Raw;
     const p3=Math.round(p3Base*_p3Mult);
@@ -6658,7 +6706,9 @@ const CF={
         // through the middle of the session instead of jumping at the phase boundary.
         let _softPct;
         if(_effPhase===1)_softPct=_is2c?0.60:0.50;
-        else if(_effPhase===3)_softPct=_is2c?0.40:0.35;
+        // ENDGAME tightens the target one more notch (variety pressure is off, so the
+        // engine can actually hit it without reaching outside the band for "fresh" faces).
+        else if(_effPhase===3)_softPct=this._isEndgame()?(_is2c?0.35:0.28):(_is2c?0.40:0.35);
         else{
           const _npR=S.session?.activePlayers?.length||8,_mcR=S.session?.cfMatchCount||0;
           const _t=Math.min(1,Math.max(0,(_mcR-_npR*0.6)/(_npR*0.6))); // 0 at P2 start → 1 at P3 boundary
@@ -6695,7 +6745,12 @@ const CF={
     // Phase-3 ladder-court affinity: callers that know the destination court pass it;
     // court-agnostic callers (swap picker, hard-wait takeover, joint formation) omit it → 0.
     const tierPen=this._tierPen(group,tierCourt);
-    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+blowoutNudge+rankBandPen+neverPairPen+phaseGapPen+tierPen,meta,t1,t2,group};
+    // No-groundhog rule 1 (global, every phase): a foursome that played within the last nc
+    // submitted matches (ANY court) is heavily deprioritized — each player mixes with at
+    // least one different person before the same four re-form. A penalty rather than a hard
+    // filter, so a too-thin pool can still field a match instead of idling the court.
+    const recentGroupPen=(S.session?.cfRecentGroups||[]).includes(_gk4)?800:0;
+    return{score:total+nrProtPen+losingPairPen+justLostPen+hotColdPen+blowoutNudge+rankBandPen+neverPairPen+phaseGapPen+tierPen+recentGroupPen,meta,t1,t2,group};
   },
 
   /* Generate a suggestion for a court */
@@ -8325,6 +8380,15 @@ const CF={
       [...winners].forEach(id=>_updateSessionRank(id,true,pd,losers));
       [...losers].forEach(id=>_updateSessionRank(id,false,pd,winners));
     }
+    // No-groundhog tracking: remember the foursome (rule 1 — no immediate re-form on any
+    // court) and its team arrangement (rule 3 — a later rematch must redraw the teams).
+    {
+      const _gkSub=[...m.t1,...m.t2].sort().join(',');
+      const _rg=S.session.cfRecentGroups=S.session.cfRecentGroups||[];
+      _rg.push(_gkSub);
+      while(_rg.length>(S.session.courts||1))_rg.shift();
+      (S.session.cfGroupLastSplit=S.session.cfGroupLastSplit||{})[_gkSub]=this.matchupKey(m.t1,m.t2);
+    }
     // Single batched NR promotion check — write db only (session handled by savePaths below)
     const _anyPromo=[...m.t1,...m.t2].map(id=>checkNRPromotion(id)).some(Boolean);
     if(_anyPromo)STORE.save('db');
@@ -9021,6 +9085,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
           const _np=S.session.activePlayers?.length||0,_mc=S.session.cfMatchCount||0;
           const _m=_ph===1?{i:'🎲',n:'Warm-up',c:'var(--ac)',next:Math.max(0,Math.ceil(_np*0.6)-_mc),nn:'Ranked',tip:'Phase 1 — balanced-random warm-up: matchmaking ignores rank so everyone mixes; teams stay balanced and ranks calibrate.'}
                   :_ph===2?{i:'📊',n:'Ranked',c:'var(--gr)',next:Math.max(0,Math.ceil(_np*1.2)-_mc),nn:'Competitive',tip:'Phase 2 — rank-based matchmaking is active.'}
+                  :CF._isEndgame()?{i:'🔥',n:'Endgame',c:'var(--re)',next:0,nn:'',tip:'Endgame — the final stretch optimizes purely for the CLOSEST matches: variety memory is off (rematches welcome), spread target is tightest, teams balance by tonight\'s form. Same-four/same-teams reruns are still blocked.'}
                   :{i:'🏆',n:'Competitive',c:'var(--go)',next:0,nn:'',tip:'Phase 3 — tightest matchmaking: games form within rank bands (same-level matchups). Court chips show which band is playing where. Waiting always overrides the band pull.'};
           const _nextTxt=_m.next>0?` · ${_m.nn} in ${_m.next}`:'';
           _phBadge=` · <span style="color:${_m.c};font-weight:700" title="${esc(_m.tip)}">${_m.i} Phase ${_ph} · ${_m.n}${_nextTxt}</span>`;
