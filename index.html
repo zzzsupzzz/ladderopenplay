@@ -2059,17 +2059,25 @@ function _updateSessionRank(id,won,pd,opponentIds){
   const absPD=Math.abs(pd||0);
   const _npMv=S.session?.activePlayers?.length||8;
   const _mcMv=S.session?.cfMatchCount||0;
-  const _calibrating=_mcMv<_npMv*1.2; // phases 1-2
+  // A late arrival is PERSONALLY calibrating regardless of the session phase — they skipped
+  // the warm-up, so their rank is a pure entered-rating GUESS that must self-correct fast.
+  // Treat them as "calibrating" (bigger margin multiplier) so blowouts move them hard even
+  // if they joined mid Phase-3.
+  const isLate=entry.isLateArrival;
+  const _calibrating=_mcMv<_npMv*1.2||isLate; // phases 1-2, or any late arrival's first games
   const pdMult=_calibrating
     ?(absPD>=10?2.2:absPD>=8?1.8:absPD>=7?1.5:absPD>=4?1.2:0.8)
     :(absPD>=7?1.5:absPD>=4?1.2:0.8);
 
   // Speed multiplier: DAMPEN early games so first-impression mistakes don't cascade.
   // Games 1-2 → 0.3× (barely moves), game 3 → 0.6×, games 4-5 → 1.0×, 6+ → 0.7×
-  // Late arrivals are inserted at an estimated rank — same dampening applies.
-  const isLate=entry.isLateArrival;
+  // EXCEPTION — late arrivals: ACCELERATE their first 3 games (1.5×) instead of damping, so
+  // a wrong entered-rating estimate snaps to its real spot in 2-3 games rather than lingering
+  // and skewing the bands. The isLateArrival flag clears after nc games (see _doSubmitScore).
   const games=entry.games||0;
-  const speedMult=games<2?0.3:games<3?0.6:games<6?1.0:0.7;
+  const speedMult=isLate
+    ?(games<3?1.5:games<6?1.0:0.7)
+    :(games<2?0.3:games<3?0.6:games<6?1.0:0.7);
 
   const move=Math.max(-4,Math.min(4,Math.round(base*pdMult*speedMult)));
   if(move===0){entry.games++;return;}

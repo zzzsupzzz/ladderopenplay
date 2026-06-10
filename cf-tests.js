@@ -369,6 +369,40 @@ try {
   fail++; console.error('  ❌ endgame test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
 
+// ── Tests: late arrival fast-calibration ─────────────────────────────────────
+// A late arrival skipped warm-up, so their rank is a pure entered-rating guess. Their first
+// games must move FAST (accelerated, not damped) so the estimate snaps to its real spot —
+// even mid Phase-3 (they're personally calibrating). Identical blowout → late player's rank
+// moves more than a normal mid-session player's.
+section('late arrival — rank fast-calibrates (first games move hard, even in Phase 3)');
+try {
+  makeSession(20, 3);
+  if (APP._initSessionRanks) APP._initSessionRanks();
+  S.session.cfMatchCount = 40; // deep Phase 3 — normal players are stable here
+  S.session.players.forEach(p => { p.matchesPlayed = 6; });
+  const _byRank = r => S.session.players.find(p => APP._sessionRank(p.id) === r).id;
+  // Normal mid-pack player, 1 rank-update done, loses a blowout to better opponents
+  const normId = _byRank(11);
+  S.session.cfRanks[normId].games = 1; S.session.cfRanks[normId].isLateArrival = false;
+  const normBefore = APP._sessionRank(normId);
+  APP._updateSessionRank(normId, false, 10, [_byRank(3), _byRank(4)]);
+  const normMove = Math.abs(APP._sessionRank(normId) - normBefore);
+  // Late arrival at the same rank position, same blowout loss
+  makeSession(20, 3);
+  if (APP._initSessionRanks) APP._initSessionRanks();
+  S.session.cfMatchCount = 40;
+  S.session.players.forEach(p => { p.matchesPlayed = 6; });
+  const lateId = _byRank(11);
+  S.session.cfRanks[lateId].games = 1; S.session.cfRanks[lateId].isLateArrival = true;
+  const lateBefore = APP._sessionRank(lateId);
+  APP._updateSessionRank(lateId, false, 10, [_byRank(3), _byRank(4)]);
+  const lateMove = Math.abs(APP._sessionRank(lateId) - lateBefore);
+  ok(lateMove > normMove, `late arrival's rank moves more than a settled player's on the same blowout (late ${lateMove} > normal ${normMove})`);
+  ok(lateMove > 0, 'late arrival actually moves in Phase 3 (not frozen by the gentle table)');
+} catch (e) {
+  fail++; console.error('  ❌ late-arrival test threw: ' + (e && e.message));
+}
+
 // ── Tests: _pvRecord — player's personal record INCLUDES warm-up ────────────
 // The board is ranked-only, but a player's own view should show their whole night.
 section('_pvRecord() — personal record counts every game, warm-up split out');
