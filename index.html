@@ -2935,6 +2935,7 @@ function midRemove(id){
     return;
   }
   sp.status='left';S.session.activePlayers=S.session.activePlayers.filter(x=>x!==id);
+  if(sp._absentSince==null)sp._absentSince=S.session.cfMatchCount||0; // open absence window (closed on rejoin)
   if(S.session.cfMode){
     S.session.cfQueue=(S.session.cfQueue||[]).filter(q=>q.id!==id);
     S.session.cfPaused=(S.session.cfPaused||[]).filter(q=>q.id!==id);
@@ -3154,12 +3155,23 @@ function cfCancelPauseAfter(id){
   STORE.save('session');renderLive();
   toast(`Pause-after cancelled for ${gp(id)?.name||'?'}`,'ok');
 }
+// Absence tracking for the standings WAIT column: a pause or a leave opens an absence window
+// (sp._absentSince), and a resume or rejoin closes it into sp._absences [{from,to}]. The WAIT
+// calc subtracts these windows so a voluntary break / leave is never counted as queue wait.
+function _closeAbsence(sp){
+  if(!sp||sp._absentSince==null)return;
+  if(!Array.isArray(sp._absences))sp._absences=[];
+  const to=S.session?.cfMatchCount||0;
+  if(to>sp._absentSince)sp._absences.push({from:sp._absentSince,to});
+  delete sp._absentSince;
+}
 function cfPausePlayer(id){
   if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
   if(!S.session?.cfMode)return;
   const p=gp(id);if(!p)return;
   const qi=S.session.cfQueue.findIndex(q=>q.id===id);
   if(qi===-1){toast(`${p.name} is not in queue`,'warn');return;}
+  {const _sp=gsp(id);if(_sp&&_sp._absentSince==null)_sp._absentSince=S.session.cfMatchCount||0;} // open absence window
   // Compress ranks after pause — re-numbers active players without resetting tonight's positions.
   if(S.session?.cfRanks)_compressRanks();
   const [entry]=S.session.cfQueue.splice(qi,1);
@@ -3202,7 +3214,7 @@ function cfResumePlayer(id){
   // late-arrival join anchor and drives the post-hoc "count first gap" logic — overloading it
   // corrupts a session-start player's gap reconstruction). sessionWaitAnchor resets the live
   // standings WAIT clock. A voluntary pause is not queue wait, so all of these start from NOW.
-  const _spResume=gsp(id);if(_spResume){_spResume.resumedFromPause=true;_spResume._resumedAtMatch=S.session.cfMatchCount||0;_spResume.sessionWaitAnchor=(S.session.cfMatchCount||0)+1;}
+  const _spResume=gsp(id);if(_spResume){_spResume.resumedFromPause=true;_spResume._resumedAtMatch=S.session.cfMatchCount||0;_spResume.sessionWaitAnchor=(S.session.cfMatchCount||0)+1;_closeAbsence(_spResume);} // close absence window
   STORE.save('session');renderLive();toast(`${p.name} back in queue ✓`,'ok');
 }
 
@@ -3211,6 +3223,7 @@ function midRejoin(id){
   if(!S.session)return;
   const p=gp(id),sp=gsp(id);if(!p)return;
   if(sp)sp.status='active';
+  _closeAbsence(sp); // close the absence window opened at leave (so WAIT excludes the time away)
   if(!S.session.activePlayers.includes(id))S.session.activePlayers.push(id);
   if(S.session.cfMode){
     // Re-add to cfQueue if not already queued or paused
@@ -3695,6 +3708,39 @@ function _ratingSparkHtml(id){
     <div style="font-size:.62rem;color:var(--mu);margin-top:3px">Best: ${max} · Now: ${pts[pts.length-1]}</div>
   </div>`;
 }
+// Pure WAIT-gap calculator — shared by the standings render AND the headless tests, so the number
+// shown in the WAIT column can never silently diverge from the engine's wait accounting again.
+// Returns {maxWait, avgWait} in completed matches, EXCLUDING any absence the player took: a
+// voluntary pause or a leave is not queue wait, so the matches that elapsed while they were out
+// must not inflate the gap.
+//   games:    [{cmc, endAnchor}] sorted ascending — cmc = cfMatchCount at game START,
+//             endAnchor = matchIdx+1 (cfMatchCount just after that game ended)
+//   joinMc:   late-join anchor (0 = session-start player → the first gap is not counted)
+//   absences: [{from,to}] cfMatchCount windows the player was paused/left; overlap is subtracted.
+//             null → fall back to the legacy single-resume anchor (old archived sessions).
+//   resumeMc: legacy resume anchor, used ONLY when absences is null.
+function _waitGapStats(games,joinMc,absences,resumeMc){
+  let anchor=joinMc||0,maxW=0,sumW=0,n=0,firstDone=(joinMc||0)>0;
+  for(const gm of games){
+    if(gm.cmc<0)continue;
+    if(firstDone){
+      let gap;
+      if(absences){
+        gap=gm.cmc-anchor;
+        for(const ab of absences){const ov=Math.min(gm.cmc,ab.to)-Math.max(anchor,ab.from);if(ov>0)gap-=ov;}
+        if(gap<0)gap=0;
+      }else{
+        // Legacy: clamp the spanning gap to the single resume point (a pause isn't queue wait).
+        const effAnchor=(resumeMc>anchor&&gm.cmc>=resumeMc)?resumeMc:anchor;
+        gap=gm.cmc-effAnchor;
+      }
+      if(gap>maxW)maxW=gap;sumW+=gap;n++;
+    }
+    firstDone=true;
+    anchor=gm.endAnchor;
+  }
+  return {maxWait:maxW,avgWait:n?parseFloat((sumW/n).toFixed(1)):0};
+}
 function renderSessStd(){
   const el=document.getElementById('sess-std');
   if(!el)return;
@@ -3783,36 +3829,18 @@ function renderSessStd(){
     if(myMatches.length>0){
       // Queue-time-only WAIT: gap = confirmMc_next - (matchIdx_prev + 1).
       // confirmMc = cfMatchCount at game START (confirm time). Sort by this for correct order.
-      // matchIdx = cfMatchCount at score SUBMIT (game end). anchor = matchIdx+1 after each game.
-      // This excludes in-game time (other courts submitting while this player is mid-game),
-      // so WAIT only counts the queue time between games. Bounded at nc*2+1 by cmg nuclear.
-      // simulate.js mirrors this: _lastGameEndMc[id] = cfMatchCount after _doSubmitScore = matchIdx+1.
+      // matchIdx = cfMatchCount at score SUBMIT (game end). endAnchor = matchIdx+1 after each game.
+      // This excludes in-game time (other courts submitting while this player is mid-game), so WAIT
+      // only counts queue time between games. _waitGapStats then subtracts any absence (pause/leave)
+      // window — those elapsed matches aren't queue wait. (Was producing a false WAIT 11 when a
+      // leave→rejoin gap was counted in full; sp._absences now records the gap so it's excluded.)
       const cmcOf=m=>m.confirmMc!=null?m.confirmMc:(m.matchIdx!=null?m.matchIdx:allMatches.findIndex(x=>x.id===m.id));
-      const sorted=[...myMatches].sort((a,b)=>cmcOf(a)-cmcOf(b));
-      const joinMc=sp._joinedAtMatch??0;
-      const resumeMc=sp._resumedAtMatch??0; // dedicated pause/resume anchor (0 = never paused)
-      let anchor=joinMc,maxW=0,sumW=0,gapCount=0;
-      // firstDone: true = count this gap. For late joiners (joinMc>0) count first gap (simulate.js
-      // initialises _lastGameEndMc at join). For session-start players (joinMc=0) skip first gap
-      // (simulate.js leaves _lastGameEndMc undefined, so condition `!==undefined` fails first time).
-      let firstDone=joinMc>0;
-      for(const gm of sorted){
-        const cmc=cmcOf(gm);if(cmc<0)continue;
-        if(firstDone){
-          // Resume-aware: if this gap SPANS a pause/resume (anchor is before the resume point
-          // _resumedAtMatch, and this game starts after it), measure only from the resume — a
-          // voluntary pause is not queue wait. Pre-pause and post-resume gaps use the normal
-          // anchor. This mirrors the sim gate, which resets its clock at resume (cfResumePlayer).
-          const effAnchor=(resumeMc>anchor&&cmc>=resumeMc)?resumeMc:anchor;
-          const gap=cmc-effAnchor;if(gap>maxW)maxW=gap;sumW+=gap;gapCount++;
-        }
-        firstDone=true;
-        // Queue-time-only anchor: matchIdx+1 = cfMatchCount after this game's submit (game-end time).
-        // Falls back to confirmMc+1 for legacy entries without matchIdx.
-        anchor=gm.matchIdx!=null?gm.matchIdx+1:cmc+1;
-      }
-      mq.maxWait=maxW;
-      mq.avgWait=gapCount>0?parseFloat((sumW/gapCount).toFixed(1)):0;
+      const _games=[...myMatches].sort((a,b)=>cmcOf(a)-cmcOf(b))
+        .map(gm=>{const c=cmcOf(gm);return{cmc:c,endAnchor:gm.matchIdx!=null?gm.matchIdx+1:c+1};});
+      const _abs=Array.isArray(sp._absences)?sp._absences:null;
+      const _stats=_waitGapStats(_games,sp._joinedAtMatch??0,_abs,sp._resumedAtMatch??0);
+      mq.maxWait=_stats.maxWait;
+      mq.avgWait=_stats.avgWait;
     }
     const oppGaps=[];
     let worstPGap=0;
@@ -5130,7 +5158,7 @@ function doEndSession(){
   }
   showCfm(`End <strong>${esc(S.session.name)}</strong>?<br/><span style="font-size:.74rem;color:var(--mu)">Ratings saved to database.</span>`,'🏁 End Session','bp',()=>{
     const arch={id:S.session.id,name:S.session.name,date:S.session.date,cfMode:true,
-      players:S.session.players.map(sp=>{const p=gp(sp.id)||{};return{id:sp.id,name:sp.name||p.name||'?',tag:sp.tag||p.tag||'',sRating:sp.sRating,startRating:sp.startRating,wins:sp.wins,losses:sp.losses,ties:sp.ties,matchesPlayed:sp.matchesPlayed,ptsFor:sp.ptsFor,ptsAgainst:sp.ptsAgainst,_joinedAtMatch:sp._joinedAtMatch??null,_resumedAtMatch:sp._resumedAtMatch??null};}),
+      players:S.session.players.map(sp=>{const p=gp(sp.id)||{};return{id:sp.id,name:sp.name||p.name||'?',tag:sp.tag||p.tag||'',sRating:sp.sRating,startRating:sp.startRating,wins:sp.wins,losses:sp.losses,ties:sp.ties,matchesPlayed:sp.matchesPlayed,ptsFor:sp.ptsFor,ptsAgainst:sp.ptsAgainst,_joinedAtMatch:sp._joinedAtMatch??null,_resumedAtMatch:sp._resumedAtMatch??null,_absences:Array.isArray(sp._absences)?sp._absences:null};}),
       cfRanks:JSON.parse(JSON.stringify(S.session.cfRanks||{})),
       cfLog:JSON.parse(JSON.stringify(S.session.cfLog||[]))};
     S.archive.unshift(arch);

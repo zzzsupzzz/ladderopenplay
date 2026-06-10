@@ -85,7 +85,8 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   exportBackup:typeof exportBackup!=='undefined'?exportBackup:null,
   importBackup:typeof importBackup!=='undefined'?importBackup:null,
   _updateSessionRank:typeof _updateSessionRank!=='undefined'?_updateSessionRank:null,
-  _pvRecord:typeof _pvRecord!=='undefined'?_pvRecord:null};`;
+  _pvRecord:typeof _pvRecord!=='undefined'?_pvRecord:null,
+  _waitGapStats:typeof _waitGapStats!=='undefined'?_waitGapStats:null};`;
 
 vm.createContext(ctx);
 try {
@@ -366,6 +367,36 @@ try {
   ok(moveBlowout <= 4, `margin-aware: movement clamped at 4 (got ${moveBlowout})`);
 } catch (e) {
   fail++; console.error('  ❌ endgame test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
+// ── Tests: _waitGapStats — WAIT column excludes pause/leave absences ─────────
+// Regression for the false "WAIT 11": a leave→rejoin (or pause→resume) gap must NOT count the
+// matches that elapsed while the player was out. The standings render and these tests share this
+// exact function, so the displayed WAIT can't diverge from the engine's accounting.
+section('_waitGapStats() — absences (pause/leave) excluded from the WAIT column');
+try {
+  // Games at cfMatchCount 0,2,4,6 — a session-start player (joinMc 0 → first gap skipped).
+  // endAnchor = the match-count just after each game ends.
+  const g = (cmc, end) => ({ cmc, endAnchor: end });
+  const games = [g(0,1), g(2,3), g(4,5), g(6,7)];
+  // No absence: gaps are 2-1=1 each (skip first) → max 1.
+  eq(APP._waitGapStats(games, 0, [], 0).maxWait, 1, 'no absence: normal between-games gap');
+  // Contiguous games (mc0→mc1, no real wait), then LEFT after the game ending at anchor 2 and
+  // rejoined to play at mc15. Raw gap 15-2=13; absence window {2,15} fully overlaps → wait 0, not 13.
+  const leaveGames = [g(0,1), g(1,2), g(15,16)];
+  const left = APP._waitGapStats(leaveGames, 0, [{from:2,to:15}], 0);
+  eq(left.maxWait, 0, 'leave→rejoin: the time away is NOT counted as wait (was the false WAIT 11)');
+  // Real wait BEFORE leaving still counts: paused at mc5 (anchor was 3) → gap 5-3=2 before the break.
+  const partial = APP._waitGapStats([g(0,1), g(2,3), g(16,17)], 0, [{from:5,to:16}], 0);
+  eq(partial.maxWait, 2, 'wait accrued before the absence still counts (5-3=2)');
+  // DOUBLE pause: two windows both excluded (the second hole the single-anchor logic missed).
+  const dbl = APP._waitGapStats([g(0,1), g(10,11), g(20,21)], 0, [{from:1,to:10},{from:11,to:20}], 0);
+  eq(dbl.maxWait, 0, 'two separate absences are both excluded');
+  // Legacy fallback (no _absences array): single resume anchor clamps the spanning gap.
+  const legacy = APP._waitGapStats([g(0,1), g(2,3), g(16,17)], 0, null, 14);
+  eq(legacy.maxWait, 2, 'legacy resumeMc path: spanning gap clamped to resume (16-14=2)');
+} catch (e) {
+  fail++; console.error('  ❌ _waitGapStats test threw: ' + (e && e.message));
 }
 
 // ── Tests: late arrival fast-calibration ─────────────────────────────────────
