@@ -204,3 +204,13 @@ What works instead (current design):
 - UI must follow the players, not promise a court: _courtTierChip labels each live/suggested court by the band ACTUALLY playing on it (TOP/MID/RISING). A static "Court 1 = R1-6" label would lie ~2/3 of the time.
 
 Investigation pattern that caught this: unit tests proved the scoring math correct (top group on court 1 scores 0), yet live sims showed BELOW-random adherence — when statics pass but dynamics fail, look for rotation/availability structure, not scoring bugs.
+
+## Split B: Balanced Teams Beat Tight Partners (Organizer Decision, All Ranked Phases)
+
+The bench can only offer ~7-rank-wide foursomes at 20p/3c (order statistics: best foursome from an 8-person bench of 20 ranks spans ~7). That width must land somewhere: on the TEAM side (tight partners vs tight partners = predictable blowout) or on the PARTNER side (strong+weak each team = close carry game). The old P2/3 split chooser weighted partner tightness 2x team balance -> blowouts -> the standings/console showed team gaps of 4-7 ranks and the quality chip read "avoid" on most ranked matches.
+
+Decision: balanced teams every phase. Split comparator is now team-gap primary (x1.0) with partner tightness as a light tiebreak (x0.15); the anti-carry term (_splitCarry) was removed from the split objective. Group-spread penalties (rankBandPen ramp + phaseGapPen) still prefer tight foursomes whenever available - when the bench cooperates, BOTH gaps are small.
+
+Sim result (3x 20p/3c): P2/P3 team gap dropped from 4-7 to ~3 avg; blowout-level matches (team gap >=5 ranks) fell to 0-3 per phase. Partner gap in P3 runs 3-5 (the carry shape, by design).
+
+Quality chip updated to match the policy: red "Avoid" = big team gap (blowout) or wide AND unbalanced; a wide-but-balanced game shows an informational "Carry" chip instead; P.GAP legend explains high values are intentional carry games.

@@ -3895,7 +3895,7 @@ function renderSessStd(){
   }).join('');
 
   el.innerHTML=labelHtml+(isFinal?_awardsHtml(sess):'')+stakesHtml+`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Wins / Losses / Ties">W/L</th><th title="Rating change this session">+/−</th><th title="Current session rating">RTG</th><th title="Opponent gap: avg opponent session rank minus yours. Green = well matched, red = big mismatch">OPP Δ</th><th title="Worst partner gap: biggest session rank difference with a teammate">P.GAP</th><th title="Unique partners / total games played">P/G</th><th title="Worst wait: most completed matches by others while this player sat in queue between games. Green ≤ courts, orange ≤ courts×2, red = too long">WAIT</th></tr></thead><tbody>${rows}</tbody></table>
-  <div style="font-size:.62rem;color:var(--m2);margin-top:5px;padding:0 2px">+/− = rating change · OPP Δ = avg opponent session rank vs yours (<span style="color:var(--gr)">green</span>=close, <span style="color:var(--re)">red</span>=mismatch) · P.GAP = worst partner gap · P/G = unique partners / games · WAIT = max matches others played while you sat out between games · <strong style="color:var(--tx)">W/L counts ranked play only</strong> — Phase 1 warm-up games calibrate your rating &amp; rank but don't count toward the board</div>`;
+  <div style="font-size:.62rem;color:var(--m2);margin-top:5px;padding:0 2px">+/− = rating change · OPP Δ = avg opponent session rank vs yours (<span style="color:var(--gr)">green</span>=close, <span style="color:var(--re)">red</span>=mismatch) · P.GAP = worst partner gap (a high value usually means a balanced carry game — teams are split strong+weak ON PURPOSE so the match stays close) · P/G = unique partners / games · WAIT = max matches others played while you sat out between games · <strong style="color:var(--tx)">W/L counts ranked play only</strong> — Phase 1 warm-up games calibrate your rating &amp; rank but don't count toward the board</div>`;
 }
 // renderAllTime removed — all-time ratings visible in Setup player list
 
@@ -6275,7 +6275,6 @@ const CF={
     // effort) and deliver "progression" via the UI phase badge + standings stakes, not the gap.
     const[_a,_b,_c,_d]=group;
     const _splits=[{t1:[_a,_b],t2:[_c,_d]},{t1:[_a,_c],t2:[_b,_d]},{t1:[_a,_d],t2:[_b,_c]}];
-    const _splitCarry=g=>g>120?Math.pow((g-120)/80,2)*40:0;
     // Hard-block helpers: never-pair and just-lost partners must be on opposite teams.
     // Applied as primary sort keys so the best valid split is always selected first.
     const _npMap=S.session?.neverPair||{};
@@ -6303,20 +6302,19 @@ const CF={
       // Priority 1: avoid splits that pair just-lost partners together
       const lx=_splitHasJustLost(x),ly=_splitHasJustLost(y);
       if(lx!==ly)return lx-ly;
-      // Secondary: minimize within-team gap + cross-team imbalance
-      const maxGapX=Math.max(Math.abs(x.t1[0].sr-x.t1[1].sr),Math.abs(x.t2[0].sr-x.t2[1].sr));
-      const maxGapY=Math.max(Math.abs(y.t1[0].sr-y.t1[1].sr),Math.abs(y.t2[0].sr-y.t2[1].sr));
-      // Ladder "tight partners": weight within-team partner gap ABOVE cross-team balance,
-      // so teammates are similar level (you play WITH a peer) rather than strong+weak carry
-      // splits. Narrow foursomes (driven by phaseGapPen) keep teams balanced too; only forced
-      // wide foursomes trade some team balance for tighter partners.
-      // Phase 1 = BALANCED RANDOM: rank splits by TEAM GAP only. The min-team-gap split of a spread
-      // foursome is the strong+weak pairing → even teams, HIGH partner gap by design (that's the goal:
-      // low opponent gap, high partner gap). Phases 2-3 keep tight-partners (within-team ×1.0 > cross ×0.5 + carry).
+      // SPLIT B — BALANCED TEAMS, every phase (organizer decision, replacing "tight partners"):
+      // team balance is the PRIMARY objective; partner tightness is a light tiebreak. A wide
+      // foursome (the bench usually can't offer better than ~7 ranks at 20p/3c) therefore splits
+      // strong+weak vs strong+weak → close, contested game with two moderately-uneven pairings —
+      // instead of top pair vs bottom pair → predictable blowout. The group-spread penalties
+      // (rankBandPen + phaseGapPen) still push for TIGHT foursomes whenever the bench allows, in
+      // which case both partners AND teams end up close. Phase 1 keeps pure team gap (unchanged).
+      // The old anti-carry term (_splitCarry) is intentionally NOT in the objective: carry is now
+      // the accepted shape for forced-wide groups, blowouts are the failure mode being engineered out.
       const _tgX=Math.abs((x.t1[0].sr+x.t1[1].sr)-(x.t2[0].sr+x.t2[1].sr));
       const _tgY=Math.abs((y.t1[0].sr+y.t1[1].sr)-(y.t2[0].sr+y.t2[1].sr));
-      const gx=_sgPhase===1?_tgX:_tgX*0.5+(Math.abs(x.t1[0].sr-x.t1[1].sr)+Math.abs(x.t2[0].sr-x.t2[1].sr))*1.0+_splitCarry(maxGapX);
-      const gy=_sgPhase===1?_tgY:_tgY*0.5+(Math.abs(y.t1[0].sr-y.t1[1].sr)+Math.abs(y.t2[0].sr-y.t2[1].sr))*1.0+_splitCarry(maxGapY);
+      const gx=_sgPhase===1?_tgX:_tgX*1.0+(Math.abs(x.t1[0].sr-x.t1[1].sr)+Math.abs(x.t2[0].sr-x.t2[1].sr))*0.15;
+      const gy=_sgPhase===1?_tgY:_tgY*1.0+(Math.abs(y.t1[0].sr-y.t1[1].sr)+Math.abs(y.t2[0].sr-y.t2[1].sr))*0.15;
       return gx-gy;
     });
     let{t1,t2}=_splits[0];
@@ -9241,10 +9239,17 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       // so skill-match flags would fire on every match. Show a neutral warm-up chip instead of 🟡/🔴.
       qualityLabel='🎲 Warm-up';qualityColor='var(--mu)';
       qualityTitle=`Phase 1 — balanced-random warm-up. Teams are balanced; partners are intentionally mixed while ranks calibrate. Skill-match flags resume in Phase 2.${_formNote}`;
-    }else if((maxPartnerGapRk!=null&&maxPartnerGapRk>=_avoidPgap)||(teamRkGap!=null&&teamRkGap>=_avoidTeam)){
+    }else if((teamRkGap!=null&&teamRkGap>=_avoidTeam)||(maxPartnerGapRk!=null&&maxPartnerGapRk>=_avoidPgap&&(teamRkGap==null||teamRkGap>=_warnTeam))){
+      // 🔴 = blowout risk (big TEAM gap) or wide AND unbalanced. Under the balanced-team split
+      // policy (Split B) a wide-but-balanced game is intended, not a failure — see ↔ Carry below.
       qualityLabel='🔴 Avoid';qualityColor='var(--re)';
       qualityTitle=`Poor match — ${_pgapDesc}, ${_tgapDesc}. Consider reshuffling.${_formNote}`;
-    }else if((maxPartnerGapRk!=null&&maxPartnerGapRk>=_warnPgap)||(teamRkGap!=null&&teamRkGap>=_warnTeam)){
+    }else if(maxPartnerGapRk!=null&&maxPartnerGapRk>=_avoidPgap){
+      // Wide pairings but BALANCED teams: the engine's best available shape when the bench only
+      // offers a wide foursome — close game, strong+weak on each side. Informational, not a flag.
+      qualityLabel='↔ Carry';qualityColor='var(--cy)';
+      qualityTitle=`Balanced carry game — teams are even (${_tgapDesc}) but each pairs strong+weak (${_pgapDesc}). Best available when the bench is spread; expect a close score.${_formNote}`;
+    }else if((maxPartnerGapRk!=null&&maxPartnerGapRk>=_warnPgap&&(teamRkGap==null||teamRkGap>=_warnTeam))||(teamRkGap!=null&&teamRkGap>=_warnTeam)){
       qualityLabel='🟡 Slight mismatch';qualityColor='var(--go)';
       qualityTitle=`Mild imbalance — ${_pgapDesc}, ${_tgapDesc}.${_formNote}`;
     }else{

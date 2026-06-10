@@ -209,11 +209,13 @@ try {
   // 3) …via a strong+weak pairing → high partner gap (the intended Phase-1 signature).
   const sPartnerGap = Math.max(Math.abs(sP1.t1[0].sr - sP1.t1[1].sr), Math.abs(sP1.t2[0].sr - sP1.t2[1].sr));
   ok(sPartnerGap > 100, `Phase 1: spread foursome pairs strong+weak — high partner gap by design (${Math.round(sPartnerGap)})`);
-  // 4) Phase 3 (same foursome) keeps TIGHT partners: lower partner gap than Phase 1's split.
+  // 4) SPLIT B (organizer decision): Phase 2/3 ALSO split wide foursomes to BALANCED teams —
+  //    a forced-wide group becomes a close carry game (strong+weak each side), never a
+  //    top-pair-vs-bottom-pair blowout. Group-spread penalties still prefer tight foursomes.
   S.session.cfMatchCount = 40;
   const sP3 = CF._scoreGroup(mk([0, 1, 8, 9]), null);
-  const sP3PartnerGap = Math.max(Math.abs(sP3.t1[0].sr - sP3.t1[1].sr), Math.abs(sP3.t2[0].sr - sP3.t2[1].sr));
-  ok(sP3PartnerGap < sPartnerGap, `Phase 3 keeps tighter partners than Phase 1 for the same foursome (P3 ${Math.round(sP3PartnerGap)} < P1 ${Math.round(sPartnerGap)})`);
+  const sP3TeamGap = Math.abs((sP3.t1[0].sr + sP3.t1[1].sr) / 2 - (sP3.t2[0].sr + sP3.t2[1].sr) / 2);
+  ok(sP3TeamGap < 60, `Split B: Phase 3 wide foursome splits to balanced teams — no blowout (team gap ${Math.round(sP3TeamGap)})`);
 
   // 5) TRUE-RANDOM opening (every player ≤1 game): the spread limit is OFF — even a top+bottom or a
   //    3-strong-1-weak foursome forms (selection fully skill-blind), but teams still balance.
