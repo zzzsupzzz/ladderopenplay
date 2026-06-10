@@ -10503,6 +10503,22 @@ function _pvLegendHtml(){
     </div>
   </details>`;
 }
+// A player's PERSONAL record for a session — counts EVERY game they played (Phase-1 warm-up
+// included), split out from the ranked portion. The board/standings stay ranked-only (warm-up
+// calibrates rating + rank but doesn't count there); this is the player's own "my whole night"
+// tally for the player view. Returns overall {g,w,l,t} + warm-up portion {wg,ww,wl,wt}.
+function _pvRecord(log,id){
+  let g=0,w=0,l=0,t=0,wg=0,ww=0,wl=0,wt=0;
+  (log||[]).forEach(m=>{
+    if(m.s1==null||m.s2==null)return;
+    const inT1=m.t1?.includes(id),inT2=m.t2?.includes(id);
+    if(!inT1&&!inT2)return;
+    const won=inT1?m.s1>m.s2:m.s2>m.s1, tie=m.s1===m.s2;
+    g++; if(tie)t++; else if(won)w++; else l++;
+    if(m.phase===1){wg++; if(tie)wt++; else if(won)ww++; else wl++;}
+  });
+  return {g,w,l,t,wg,ww,wl,wt};
+}
 function renderPlayerView(){
   _assertOwner('pv-content','renderPlayerView');
   if(!isActiveTab('player')&&!PLAYER_MODE)return;
@@ -10662,17 +10678,25 @@ function renderPlayerView(){
     const rankHtml=(_rk&&_tot&&!sp.isNR)
       ?`<div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--go);margin:2px 0 0">RANK #${_rk} <span style="font-size:.8rem;color:var(--mu)">of ${_tot}</span>${_tierBadge}</div>${_climbHtml}${_catchHtml}`
       :'';
+    // Personal record = EVERY game tonight, warm-up included (the player's "whole night").
+    // The board/rank above stay ranked-only; the note explains the split when warm-up exists.
+    const _rec=_pvRecord(S.session?.cfLog,id);
+    const _warmNote=_rec.wg>0
+      ? `<div style="font-size:.66rem;color:var(--mu);margin-top:7px">🎲 Includes ${_rec.wg} warm-up game${_rec.wg===1?'':'s'} (${_rec.ww}W–${_rec.wl}L) — these calibrate your rating &amp; rank but don't count on the board.</div>`
+      : '';
     sessHtml=`<div class="pv-hero">
       <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;color:var(--tx)">${esc(p.name)}${p.tag?`<span class="ptag">${esc(p.tag)}</span>`:''}</div>
       <div class="pv-sub">TODAY'S SESSION</div>
       ${rankHtml}
       <div style="font-family:'Bebas Neue',sans-serif;font-size:2.4rem;color:var(--cy);margin:6px 0">${sp.isNR?'NR':Math.round(sp.sRating)} ${nrTag}</div>
-      <div style="display:flex;gap:10px;justify-content:center;margin-top:6px">
-        <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--gr)">${sp.wins}</div><div style="font-size:.62rem;color:var(--mu)">WINS</div></div>
-        <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--re)">${sp.losses}</div><div style="font-size:.62rem;color:var(--mu)">LOSSES</div></div>
+      <div style="display:flex;gap:10px;justify-content:center;margin-top:6px;flex-wrap:wrap">
+        <div style="text-align:center" title="Total games you played tonight, including warm-up"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--cy)">${_rec.g}</div><div style="font-size:.62rem;color:var(--mu)">GAMES</div></div>
+        <div style="text-align:center" title="All your wins tonight, warm-up included"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--gr)">${_rec.w}</div><div style="font-size:.62rem;color:var(--mu)">WINS</div></div>
+        <div style="text-align:center" title="All your losses tonight, warm-up included"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--re)">${_rec.l}</div><div style="font-size:.62rem;color:var(--mu)">LOSSES</div></div>
         <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:${d>=0?'var(--gr)':'var(--re)'}">${d>=0?'+':''}${d}</div><div style="font-size:.62rem;color:var(--mu)">Rating</div></div>
-        <div style="text-align:center"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--mu)">${pd>=0?'+':''}${pd}</div><div style="font-size:.62rem;color:var(--mu)">PTS DIFF</div></div>
+        <div style="text-align:center" title="Points scored minus conceded, ranked games only"><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--mu)">${pd>=0?'+':''}${pd}</div><div style="font-size:.62rem;color:var(--mu)">PTS DIFF</div></div>
       </div>
+      ${_warmNote}
     </div>`;
   }else if(p){
     sessHtml=`<div class="pv-hero">
@@ -10701,7 +10725,7 @@ function renderPlayerView(){
         return esc(p2.name||oid);
       }).join(' & ');
       const partnerName=partner?esc(partner.name):'?';
-      matchRows.push({won,tie,partner:partnerName,opps:oppsNames,s1:m.s1,s2:m.s2,dVal,sessName});
+      matchRows.push({won,tie,partner:partnerName,opps:oppsNames,s1:m.s1,s2:m.s2,dVal,sessName,warmup:m.phase===1});
     });
   };
 
@@ -10722,7 +10746,7 @@ function renderPlayerView(){
       ${matchRows.map(m=>`
         <div class="hm" style="flex-wrap:wrap;gap:4px">
           <span style="font-size:.7rem;font-weight:700;color:${m.won?'var(--gr)':m.tie?'var(--go)':'var(--re)'};min-width:38px">${m.won?'WIN':m.tie?'TIE':'LOSS'}</span>
-          <div style="flex:1;font-size:.77rem">${m.partner} <span style="color:var(--mu)">vs</span> ${m.opps}</div>
+          <div style="flex:1;font-size:.77rem">${m.partner} <span style="color:var(--mu)">vs</span> ${m.opps}${m.warmup?` <span style="font-size:.6rem;color:var(--ac)" title="Phase 1 warm-up — counts in your record here but not on the board">🎲</span>`:''}</div>
           <div class="hscore" style="${m.tie?'color:var(--go)':''}">${m.s1}–${m.s2}</div>
           ${m.dVal!=null?`<span style="font-size:.68rem;color:${m.dVal>0?'var(--gr)':m.dVal<0?'var(--re)':'var(--mu)'}">${m.dVal>0?'+':''}${m.dVal}</span>`:''}
         </div>`).join('')}

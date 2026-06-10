@@ -85,6 +85,7 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   exportBackup:typeof exportBackup!=='undefined'?exportBackup:null,
   importBackup:typeof importBackup!=='undefined'?importBackup:null,
   _updateSessionRank:typeof _updateSessionRank!=='undefined'?_updateSessionRank:null,
+  _pvRecord:typeof _pvRecord!=='undefined'?_pvRecord:null,
   _challengePool:function(){return (typeof _cfChallengePoolIds!=='undefined'&&_cfChallengePoolIds)?_cfChallengePoolIds:new Set();}};`;
 
 vm.createContext(ctx);
@@ -366,6 +367,31 @@ try {
   ok(moveBlowout <= 4, `margin-aware: movement clamped at 4 (got ${moveBlowout})`);
 } catch (e) {
   fail++; console.error('  ❌ endgame test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
+// ── Tests: _pvRecord — player's personal record INCLUDES warm-up ────────────
+// The board is ranked-only, but a player's own view should show their whole night.
+section('_pvRecord() — personal record counts every game, warm-up split out');
+try {
+  const log = [
+    { t1: ['P1', 'x'], t2: ['a', 'b'], s1: 11, s2: 5, phase: 1 },  // warm-up WIN
+    { t1: ['a', 'b'], t2: ['P1', 'y'], s1: 11, s2: 9, phase: 1 },  // warm-up LOSS
+    { t1: ['P1', 'z'], t2: ['a', 'b'], s1: 11, s2: 8, phase: 2 },  // ranked WIN
+    { t1: ['P1', 'z'], t2: ['a', 'b'], s1: 7, s2: 11, phase: 3 },  // ranked LOSS
+    { t1: ['P1', 'z'], t2: ['a', 'b'], s1: 9, s2: 9, phase: 3 },   // ranked TIE
+    { t1: ['a', 'b'], t2: ['c', 'd'], s1: 11, s2: 3, phase: 3 },   // not involving P1
+    { t1: ['P1', 'z'], t2: ['a', 'b'], s1: null, s2: null, phase: 3 } // unplayed → skip
+  ];
+  const r = APP._pvRecord(log, 'P1');
+  eq(r.g, 5, '_pvRecord: 5 games involving the player (unplayed/uninvolved excluded)');
+  eq(r.w, 2, '_pvRecord: 2 wins overall (warm-up included)');
+  eq(r.l, 2, '_pvRecord: 2 losses overall');
+  eq(r.t, 1, '_pvRecord: 1 tie overall');
+  eq(r.wg, 2, '_pvRecord: 2 warm-up games tracked separately');
+  eq(r.ww, 1, '_pvRecord: 1 warm-up win');
+  eq(r.wl, 1, '_pvRecord: 1 warm-up loss');
+} catch (e) {
+  fail++; console.error('  ❌ _pvRecord test threw: ' + (e && e.message));
 }
 
 // ── Tests: ranked-only board (Phase-1 warm-up doesn't count toward W/L) ──────
