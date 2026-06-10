@@ -307,16 +307,7 @@ const SIM = (() => {
     const active = S.session.players.filter(sp => sp.status !== 'left' && !paused.has(sp.id));
     if (active.length < 2) return true;
     const permPairIds = new Set((S.session.cfPermPairs || []).flat());
-    // [CHALLENGE COURT] the reserved top-K play more by design (dedicated court) — that's an
-    // accepted tradeoff, not a fairness bug. Exclude them so this check still verifies the OTHER
-    // players are balanced without flagging the expected top-tier tilt.
-    let _ccPool = new Set();
-    if (S.session.cfChallengeCourt === true && (S.session.courts || 1) >= 3 && typeof _sessionLbRows === 'function') {
-      const _ccK = Math.max(4, S.session.cfChallengeK || 6);
-      _ccPool = new Set(_sessionLbRows(S.session).filter(p => p.status !== 'left' && !paused.has(p.id)).slice(0, _ccK).map(p => p.id));
-    }
     const settled = active.filter(sp => {
-      if (_ccPool.has(sp.id)) return false; // Challenge Court top-K — excluded (play more by design)
       if ((sp.matchesPlayed || 0) < nc) return false;
       // Perm pair members structurally wait for each other and accumulate a game-count
       // deficit vs solo players — exclude them like mid-add players.
@@ -357,7 +348,6 @@ const SIM = (() => {
       rounds = 20,
       speed = 'instant',
       live = false,
-      challengeCourt = false, // [CHALLENGE COURT] reserve Court 1 for the session top-6 (3+ courts, Phase 2+)
     } = opts;
 
     _running = true;
@@ -390,13 +380,6 @@ const SIM = (() => {
 
       assert(S.session.status === 'active', 'Session should be active');
       assert(S.session.cfQueue.length > 0, 'Queue should have players');
-
-      // [CHALLENGE COURT] opt-in for this sim run. Engine gates it to 3+ courts and Phase 2+,
-      // so early rounds run normally and Court 1 becomes the top-6-only court once ranks settle.
-      if (challengeCourt) {
-        S.session.cfChallengeCourt = true;
-        log(`👑 Challenge Court ENABLED — Court 1 reserved for the session top-6 from Phase 2 (courts=${courts}${courts < 3 ? ', WARNING: needs 3+ to take effect' : ''})`);
-      }
 
       let totalMatches = 0;
       let midAddDone = false;
@@ -787,36 +770,6 @@ const SIM = (() => {
           log('--- Skill Quality by phase (rank gaps — diagnostic, not pass/fail) ---');
           log(`  Partner gap (teammate):  P1=${_avg(_pBuckets[0])}  P2=${_avg(_pBuckets[1])}  P3=${_avg(_pBuckets[2])}  (rises late as the pool thins — expected; wait is bounded ahead of skill)`);
           log(`  Team gap (vs opponents): P1=${_avg(_tBuckets[0])}  P2=${_avg(_tBuckets[1])}  P3=${_avg(_tBuckets[2])}  (this is the one to watch — low = balanced, competitive games)`);
-        }
-
-        // ── [CHALLENGE COURT] reservation check (accurate — uses the per-match flag) ─────────
-        // Each confirmed challenge match is tagged m.challenge=true (top-6 at formation time). We
-        // count those directly instead of guessing from final standings (which churn). If the
-        // feature worked: challenge matches > 0, all on the middle court, none leaked elsewhere.
-        {
-          const _mid = Math.ceil(courts/2);
-          const _qlog2 = arch.cfLog || [];
-          let chMid = 0, chOther = 0, midTot = 0;
-          _qlog2.forEach(m => {
-            if (m.courtNum === _mid) midTot++;
-            if (m.challenge === true) { if (m.courtNum === _mid) chMid++; else chOther++; }
-          });
-          if (!challengeCourt) {
-            log('--- [CHALLENGE COURT] not enabled for this run (pass challengeCourt:true to test it) ---');
-          } else if (courts < 3) {
-            // The engine intentionally disables the Challenge Court below 3 courts (needs _nCourts>=3):
-            // reserving 1 of 2 courts would strand everyone else on a single court. So 0 here is
-            // CORRECT — assert it's truly off rather than printing a misleading "courts>=3" diagnostic.
-            const leaked = chMid + chOther;
-            if (leaked === 0) log(`--- [CHALLENGE COURT] OFF at ${courts} courts (needs ≥3) — correctly disabled, 0 challenge matches tagged ✅ ---`);
-            else err(`[CHALLENGE COURT] must be OFF at ${courts} courts but ${leaked} challenge match(es) were tagged`);
-          } else {
-            log(`--- [CHALLENGE COURT] middle court = #${_mid} (top-6-only, tagged at formation) ---`);
-            log(`  Challenge matches played: ${chMid} on court #${_mid}  ← > 0 means the Challenge Court engaged`);
-            log(`  Challenge matches that leaked onto other courts: ${chOther}  ← MUST be 0`);
-            if (chMid > 0) log('  ✅ Challenge Court worked — top-6-only matches ran on the middle court (they play more by design; excluded from the play-count check)');
-            else log('  (no challenge matches — challengeCourt:true and courts≥3, so check the run reached Phase 2; short runs may not)');
-          }
         }
 
         log('--- Player Stats ---');
@@ -1914,17 +1867,13 @@ const SIM = (() => {
         <input type="checkbox" id="sim-step"/>
         <label for="sim-step">Step mode (pause after each action)</label>
       </div>
-      <div class="sim-chk">
-        <input type="checkbox" id="sim-challenge"/>
-        <label for="sim-challenge">👑 Challenge Court (middle court = top 6 · needs 3+ courts)</label>
-      </div>
       <button class="sim-go" id="sim-run-btn" onclick="SIM._uiRun()">▶ Run Custom — uses Players / Courts / Rounds above</button>
-      <button class="sim-go" style="background:#34d399;color:#052e16" onclick="SIM.run14({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,challengeCourt:document.getElementById('sim-challenge')?.checked??false})">14p / 2c</button>
-      <button class="sim-go" style="background:#2dd4bf;color:#04201c" onclick="SIM.run15({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,challengeCourt:document.getElementById('sim-challenge')?.checked??false})">15p / 2c</button>
-      <button class="sim-go" style="background:#14b8a6;color:#04201c" onclick="SIM.run16({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,challengeCourt:document.getElementById('sim-challenge')?.checked??false})">16p / 2c</button>
-      <button class="sim-go" style="background:#38bdf8;color:#0c1a2e" onclick="SIM.run20({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,challengeCourt:document.getElementById('sim-challenge')?.checked??false})">20p / 3c</button>
-      <button class="sim-go" style="background:#f59e0b;color:#1c0f00" onclick="SIM.run26({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,challengeCourt:document.getElementById('sim-challenge')?.checked??false})">26p / 4c</button>
-      <button class="sim-go" style="background:#a78bfa;color:#1a0540" onclick="SIM.runOrganizer12({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false,challengeCourt:document.getElementById('sim-challenge')?.checked??false})">⛓️ Organizer 14p/2c</button>
+      <button class="sim-go" style="background:#34d399;color:#052e16" onclick="SIM.run14({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">14p / 2c</button>
+      <button class="sim-go" style="background:#2dd4bf;color:#04201c" onclick="SIM.run15({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">15p / 2c</button>
+      <button class="sim-go" style="background:#14b8a6;color:#04201c" onclick="SIM.run16({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">16p / 2c</button>
+      <button class="sim-go" style="background:#38bdf8;color:#0c1a2e" onclick="SIM.run20({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">20p / 3c</button>
+      <button class="sim-go" style="background:#f59e0b;color:#1c0f00" onclick="SIM.run26({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">26p / 4c</button>
+      <button class="sim-go" style="background:#a78bfa;color:#1a0540" onclick="SIM.runOrganizer12({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">⛓️ Organizer 14p/2c</button>
       <button class="sim-bug" onclick="SIM.runPermPairCheck()">🔒 Perm Pair Stress Test</button>
       <button class="sim-continue" id="sim-continue-btn" onclick="SIM._continue()" style="display:none;background:#fb923c;color:#111">Continue</button>
       <button class="sim-stop" id="sim-stop-btn" onclick="SIM.stop()" disabled>Stop</button>
@@ -1958,9 +1907,8 @@ const SIM = (() => {
     const rounds = parseInt(document.getElementById('sim-rounds')?.value) || 40;
     const speed = document.getElementById('sim-speed')?.value || 'normal';
     const live = document.getElementById('sim-live')?.checked ?? false;
-    const challengeCourt = document.getElementById('sim-challenge')?.checked ?? false;
     try {
-      await run({ players, courts, rounds, speed, live, challengeCourt });
+      await run({ players, courts, rounds, speed, live });
     } finally {
       if (btn) btn.disabled = false;
       if (stopBtn) stopBtn.disabled = true;

@@ -532,7 +532,6 @@ body.observer-mode .qs-row{display:none!important}
         <div style="display:flex;gap:5px;flex-wrap:wrap">
           <button class="btn bs sm" onclick="openRosterModal()">👤 Players ±</button>
           <button id="cf-ac-toggle" class="btn bg2 sm adv-only" onclick="toggleCFAutoConfirm()" title="Auto-confirm suggestions after timer">⚡ Auto</button>
-          <button id="cf-challenge-toggle" class="btn bg2 sm adv-only" onclick="toggleChallengeCourt()" title="Challenge Court: from mid-session (Phase 2), Court 1 is reserved for the session's TOP 6 — the best players play each other, and climbing the standings earns a spot. Needs 3+ courts.">👑 Challenge</button>
           <select id="cf-ac-dur" class="inp adv-only" style="width:70px;font-size:.72rem;padding:4px 6px" onchange="S.session&&(S.session.cfAutoConfirmDur=+this.value)" title="Auto-confirm delay">
             <option value="30">30s</option>
             <option value="60">60s</option>
@@ -685,7 +684,6 @@ const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,
 let _pageFirstLoad=true; // true only once — blocks reconnection from forcing tab switch
 let HAS_REMOTE_HYDRATED=false; // true after first successful _applyRemote — guards DB writes
 let _otherWriterTs=0; // last time a WRITE arrived from another device — drives the multi-scorer warning
-let _cfChallengePoolIds=new Set(); // [CHALLENGE COURT] session top-K reserved for Court 1 — backstops must NOT seat these on normal courts. Recomputed each generation; empty when the feature is off.
 
 /* ── Room ID management ─────────────────────────────
    Each organiser device generates its own room code and stores it
@@ -6807,57 +6805,6 @@ const CF={
     });
     let queue=S.session.cfQueue.filter(q=>!reservedIds.has(q.id));
 
-    // ── [CHALLENGE COURT] ────────────────────────────────────────────────────
-    // Opt-in (cfChallengeCourt), Phase 2+. The MIDDLE court (default ⌈courts/2⌉, e.g. court 2 of 3 —
-    // overridable via cfChallengeCourtNum) is reserved for the session's TOP-K (default 6) by current
-    // standings — a closed top-tier court. Those K are pulled out of the normal pool AND stamped into
-    // _cfChallengePoolIds so the full-queue hard-wait backstop won't yank a waiting top-K player onto a
-    // normal court. When the challenge court is ready, seat the 4 longest-waiting AVAILABLE top-K (the
-    // rest wait); NEVER backfill with lower ranks. Pool recomputed every generation → climbing into /
-    // out of the top-K = automatic promotion / relegation.
-    // ADAPTIVE GATE: only engage when there are enough players to keep the OTHER courts fed —
-    // active ≥ K + (courts−1)×4. So it scales with turnout (won't reserve a court on a thin night)
-    // and self-disables on 2 courts unless the crowd is tiny. Recomputed live, so it turns on/off as
-    // players come and go. Step 1: reserved seating + balanced 2v2 (KOTC + hysteresis are later).
-    _cfChallengePoolIds=new Set();
-    {
-      const _nCourts=S.session.courts||1;
-      const _ccK=Math.max(4,S.session.cfChallengeK||6);
-      const _ccNum=Math.min(_nCourts,Math.max(1,S.session.cfChallengeCourtNum||Math.ceil(_nCourts/2))); // middle court
-      const _activeN=(S.session.players||[]).filter(sp=>sp.status!=='left'&&!(S.session.cfPaused||[]).some(q=>q.id===sp.id)).length;
-      const _ccOn=S.session.cfChallengeCourt===true
-        && _nCourts>=3
-        && this._sessPhaseNum()>=2
-        && Object.keys(S.session.cfRanks||{}).length>0
-        && _activeN >= _ccK + (_nCourts-1)*4; // adaptive: enough players to feed the other courts
-      if(_ccOn){
-        const _pool=(typeof _sessionLbRows==='function'?_sessionLbRows(S.session):[])
-          .filter(p=>p.status!=='left'&&!(S.session.cfPaused||[]).some(q=>q.id===p.id))
-          .slice(0,_ccK).map(p=>p.id);
-        if(_pool.length>=4){
-          _cfChallengePoolIds=new Set(_pool);
-          if(readyCourts.includes(_ccNum)){
-            const _availTop=_pool.filter(id=>(S.session.cfQueue||[]).some(q=>q.id===id));
-            if(_availTop.length>=4){
-              // Seat the FEWEST-games top-K first (balance total play within the pool), then
-              // longest-waiting as a tiebreak — so all K rotate evenly instead of the same faces.
-              const _four=_availTop.map(id=>({id,mg:this.matchGap(id),g:(gsp(id)?.matchesPlayed||0),sr:this._rankSr(id)}))
-                .sort((a,b)=>(a.g-b.g)||(b.mg-a.mg)).slice(0,4);
-              const _bp=MM.bestPair(_four.map(p=>({id:p.id,sr:p.sr})));
-              const _t1=_bp.t1.map(p=>p.id),_t2=_bp.t2.map(p=>p.id);
-              S.session.cfSuggestions[_ccNum]={t1:_t1,t2:_t2,allIds:[..._t1,..._t2],ts:Date.now(),
-                meta:{challenge:true,gap:Math.round(Math.abs((_bp.t1[0].sr+_bp.t1[1].sr)/2-(_bp.t2[0].sr+_bp.t2[1].sr)/2))}};
-            }else{
-              S.session.cfSuggestions[_ccNum]=null; // not enough top-K free — wait, do NOT backfill
-            }
-            readyCourts=readyCourts.filter(c=>c!==_ccNum);
-          }
-          queue=queue.filter(q=>!_cfChallengePoolIds.has(q.id)); // top-K never play the normal courts
-          if(!readyCourts.length)return; // only the challenge court was ready — match seated, done
-        }
-      }
-    }
-
     const nc=readyCourts.length;
     const need=nc*4;
 
@@ -7477,8 +7424,7 @@ const CF={
       const sugg=new Set(Object.values(S.session.cfSuggestions||{}).flatMap(s=>s?[...(s.t1||[]),...(s.t2||[])]:[]));
       return (S.session.cfQueue||[]).map(q=>q.id).filter(id=>{
         const sp=gsp(id);
-        // [CHALLENGE COURT] never force-seat a reserved top-K player onto a normal court.
-        return sp&&sp.status!=='left'&&!onCourt.has(id)&&!(S.session.cfPaused||[]).some(p=>p.id===id)&&!sugg.has(id)&&!_cfChallengePoolIds.has(id);
+        return sp&&sp.status!=='left'&&!onCourt.has(id)&&!(S.session.cfPaused||[]).some(p=>p.id===id)&&!sugg.has(id);
       });
     };
     // At most one pass per ready court — each pass seats up to a full court of overdue players.
@@ -8237,7 +8183,6 @@ const CF={
     const match={id:uid(),courtNum,t1:sug.t1,t2:sug.t2,
       s1:null,s2:null,status:'pending',eloDeltas:null,startTime:now,extended:false,
       queueSince:queueSinceMap,
-      ...(sug.meta?.challenge?{challenge:true}:{}), // [CHALLENGE COURT] tag for the log (data only, not rendered)
       confirmMc:S.session.cfMatchCount||0}; // cfMatchCount at game START — used for wait gap accuracy.
       // simulate.js records gap = cfMatchCount_at_confirm - _lastGameEndMc.
       // matchIdx is set at score SUBMIT time when cfMatchCount may be higher (other courts submitted).
@@ -9108,9 +9053,6 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     if(!isLobby){
       const acBtn=document.getElementById('cf-ac-toggle');
       if(acBtn){acBtn.classList.toggle('bc',!!S.session.cfAutoConfirm);acBtn.classList.toggle('bg2',!S.session.cfAutoConfirm);acBtn.style.display='';}
-      const ccBtn=document.getElementById('cf-challenge-toggle');
-      // Organizer-only control — hidden from observers so the feature stays invisible to players.
-      if(ccBtn){ccBtn.classList.toggle('bc',!!S.session.cfChallengeCourt);ccBtn.classList.toggle('bg2',!S.session.cfChallengeCourt);ccBtn.style.display=OBSERVER_MODE?'none':'';}
       const acDur=document.getElementById('cf-ac-dur');
       if(acDur){
         acDur.style.display=S.session.cfAutoConfirm?'':'none';
@@ -9430,7 +9372,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       <div style="font-size:.55rem;color:var(--m2);margin-top:2px">tap a name to swap</div></div>`;
     };
     return `<div class="cf-suggest" data-court="${courtNum}">
-      <div class="cf-suggest-hd">${(sug.meta?.challenge&&!OBSERVER_MODE&&!PLAYER_MODE)?'👑 CHALLENGE COURT':'🏓 COURT '+((S.session?.courtOffset||0)+courtNum)} — READY${_courtTierChip([...(sug.t1||[]),...(sug.t2||[])])}</div>
+      <div class="cf-suggest-hd">🏓 COURT ${(S.session?.courtOffset||0)+courtNum} — READY${_courtTierChip([...(sug.t1||[]),...(sug.t2||[])])}</div>
       <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:9px">
         ${pTeam(sug.t1,t1Avg,t1pgap,t1rk0,t1rk1)}<div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--m2)">VS</div>${pTeam(sug.t2,t2Avg,t2pgap,t2rk0,t2rk1)}
       </div>
@@ -9815,25 +9757,6 @@ function toggleCFAutoConfirm(){
   if(dur)dur.style.display=S.session.cfAutoConfirm?'':'none';
   toast(S.session.cfAutoConfirm?'Auto-confirm ON ⚡':'Auto-confirm OFF',S.session.cfAutoConfirm?'ok':'warn');
   STORE.save();
-}
-
-// [CHALLENGE COURT] toggle — reserves Court 1 for the session top-6 (3+ courts, Phase 2+).
-function toggleChallengeCourt(){
-  if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
-  if(!S.session)return;
-  S.session.cfChallengeCourt=!S.session.cfChallengeCourt;
-  const btn=document.getElementById('cf-challenge-toggle');
-  if(btn){btn.classList.toggle('bc',!!S.session.cfChallengeCourt);btn.classList.toggle('bg2',!S.session.cfChallengeCourt);}
-  if(S.session.cfChallengeCourt&&(S.session.courts||1)<3){
-    toast('👑 Challenge Court ON — but it needs 3+ courts to take effect','warn',4500);
-  }else if(S.session.cfChallengeCourt){
-    const _mid=Math.min(S.session.courts,Math.max(1,S.session.cfChallengeCourtNum||Math.ceil((S.session.courts||1)/2)));
-    toast(`👑 Challenge Court ON — Court ${(S.session.courtOffset||0)+_mid} reserved for the top 6 (kicks in from Phase 2, when enough players are in)`,'ok',4500);
-  }else{
-    toast('Challenge Court OFF','warn',3000);
-  }
-  STORE.save('session');
-  renderLive();
 }
 
 function cfMaybeAutoConfirm(courtNum){

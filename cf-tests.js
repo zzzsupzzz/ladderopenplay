@@ -85,8 +85,7 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   exportBackup:typeof exportBackup!=='undefined'?exportBackup:null,
   importBackup:typeof importBackup!=='undefined'?importBackup:null,
   _updateSessionRank:typeof _updateSessionRank!=='undefined'?_updateSessionRank:null,
-  _pvRecord:typeof _pvRecord!=='undefined'?_pvRecord:null,
-  _challengePool:function(){return (typeof _cfChallengePoolIds!=='undefined'&&_cfChallengePoolIds)?_cfChallengePoolIds:new Set();}};`;
+  _pvRecord:typeof _pvRecord!=='undefined'?_pvRecord:null};`;
 
 vm.createContext(ctx);
 try {
@@ -592,73 +591,23 @@ if (APP._multiWriterBannerHtml) {
   ok(APP._multiWriterBannerHtml() === '', 'multi-scorer banner stays empty with no recent other-device write');
 }
 
-// ── Tests: [CHALLENGE COURT] middle court reserved for the session top-6 ────
-section('Challenge Court — middle court holds only the session top-6');
-try {
-  const CCNUM = Math.ceil(3/2); // middle court of 3 = court 2
-  makeSession(20, 3);
-  if (APP._initSessionRanks) APP._initSessionRanks();
-  // Phase 2+ (np=20 → mc≥12), everyone recently played (not force-overdue), clear standings.
-  S.session.cfMatchCount = 15;
-  S.session.players.forEach((sp, i) => { sp.matchesPlayed=3; sp.lastPlayedAtMatch=15; sp.lastConfirmedAtMatch=15; sp.wins=20-i; sp.losses=i; sp.ptsFor=60; sp.ptsAgainst=40; });
-  S.session.cfChallengeCourt = true;
-  S.session.cfCourts = { 1:{status:'ready'}, 2:{status:'ready'}, 3:{status:'ready'} };
-  S.session.cfSuggestions = {};
-  CF.batchGenerateSuggestions([1,2,3], null);
-  const top6 = APP._sessionLbRows(S.session).slice(0,6).map(p=>p.id);
-  const cc = S.session.cfSuggestions[CCNUM];
-  ok(cc && Array.isArray(cc.allIds), `challenge court (middle = #${CCNUM}) got a suggestion`);
-  ok(cc && cc.allIds.every(id=>top6.includes(id)), 'challenge court contains ONLY the current top-6');
-  ok(cc && cc.meta && cc.meta.challenge === true, 'challenge court is flagged as a challenge match');
-  const others = [1,2,3].filter(c=>c!==CCNUM).flatMap(c => { const s = S.session.cfSuggestions[c]; return s ? s.allIds : []; });
-  ok(others.length > 0 && others.every(id => !top6.includes(id)), 'top-6 never appear on the non-challenge courts');
-  // Default OFF: same setup, no flag → middle court is a normal match
-  S.session.cfChallengeCourt = false;
-  S.session.cfSuggestions = {};
-  CF.batchGenerateSuggestions([1,2,3], null);
-  const ccoff = S.session.cfSuggestions[CCNUM];
-  ok(!(ccoff && ccoff.meta && ccoff.meta.challenge), 'Challenge OFF → middle court is a normal match');
-  // ADAPTIVE GATE: too few players (13 < K6 + (3-1)*4 = 14) → does NOT engage even when ON
-  makeSession(13, 3);
-  if (APP._initSessionRanks) APP._initSessionRanks();
-  S.session.cfMatchCount = 15;
-  S.session.players.forEach((sp,i)=>{ sp.matchesPlayed=3; sp.lastPlayedAtMatch=15; sp.lastConfirmedAtMatch=15; sp.wins=13-i; sp.losses=i; });
-  S.session.cfChallengeCourt = true;
-  S.session.cfCourts = { 1:{status:'ready'}, 2:{status:'ready'}, 3:{status:'ready'} };
-  S.session.cfSuggestions = {};
-  CF.batchGenerateSuggestions([1,2,3], null);
-  const ccThin = S.session.cfSuggestions[CCNUM];
-  ok(!(ccThin && ccThin.meta && ccThin.meta.challenge), 'adaptive gate: too few players → challenge court does NOT engage');
-} catch (e) {
-  fail++; console.error('  ❌ Challenge Court test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
-}
-
 // ── Tests: LIVE-PLAY stress — the real confirm → submit → regenerate loop ───
-// Drives the actual game loop headlessly (renders/toasts silenced) over many matches with the
-// Challenge Court ON, asserting the things that would BREAK A LIVE NIGHT: no exception, no court
-// stranded empty, wait stays bounded, and the challenge court never holds a non-top-6 player.
+// Drives the actual game loop headlessly (renders/toasts silenced) over many matches, asserting
+// the things that would BREAK A LIVE NIGHT: no exception, no court stranded empty, wait bounded.
 section('live-play stress — confirm → submit → regenerate (no crash / no stuck court)');
 ['renderLive','renderHistory','renderStandings','renderDB','renderRoster','renderArchive','updateHeader','updateProgress','startElapsed','startCFTick','toast','updatePvSelect','updatePvSessFilter'].forEach(fn=>{ try{ if(typeof ctx[fn]!=='undefined') ctx[fn]=()=>{}; }catch(e){} });
 try {
   makeSession(20, 3);
   if (APP._initSessionRanks) APP._initSessionRanks();
-  S.session.cfChallengeCourt = true; // exercise the Challenge Court under live play too
   S.session.cfCourts = { 1:{status:'ready'}, 2:{status:'ready'}, 3:{status:'ready'} };
   S.session.cfSuggestions = {};
-  let played = 0, maxGap = 0, stuck = false, ccBreach = 0, err = null;
-  const top6 = () => new Set(APP._sessionLbRows(S.session).slice(0,6).map(p=>p.id));
+  let played = 0, maxGap = 0, stuck = false, err = null;
   for (let step = 0; step < 60 && !err; step++) {
     try {
       // generate for any ready court without a suggestion
       const ready = [1,2,3].filter(c => { const ct=S.session.cfCourts[c]; return (!ct||ct.status!=='playing') && !S.session.cfSuggestions[c]; });
       if (ready.length) {
         CF.batchGenerateSuggestions(ready, null);
-        // Validate the challenge invariant AT FORMATION TIME (before submits shuffle the standings):
-        // a freshly-generated court-2 challenge suggestion must contain only the current top-6.
-        if (ready.includes(2) && CF._sessPhaseNum() >= 2) {
-          const cc = S.session.cfSuggestions[2];
-          if (cc && cc.meta && cc.meta.challenge) { const t = top6(); if (!cc.allIds.every(id => t.has(id))) ccBreach++; }
-        }
       }
       // confirm any court that has a suggestion and isn't already playing
       for (const c of [1,2,3]) if (S.session.cfSuggestions[c] && S.session.cfCourts[c]?.status!=='playing') CF.confirmSuggestion(c);
@@ -686,7 +635,6 @@ try {
   ok(played >= 30, `played a healthy number of matches headlessly (${played})`);
   ok(!stuck, 'no court got permanently stuck (ready + no suggestion while queue ≥ 4)');
   ok(maxGap <= 16, `no runaway wait — max matchGap stayed bounded (${maxGap})`);
-  ok(ccBreach === 0, `challenge court never held a non-top-6 player during live play (${ccBreach})`);
 } catch(e) {
   fail++; console.error('  ❌ live-play stress threw during setup: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
@@ -701,7 +649,6 @@ try {
   const G = ctx, gsp = APP.gsp;
   makeSession(24, 3);
   if (APP._initSessionRanks) APP._initSessionRanks();
-  S.session.cfChallengeCourt = true;
   S.session.cfCourts = { 1:{status:'ready'}, 2:{status:'ready'}, 3:{status:'ready'} };
   S.session.cfSuggestions = {};
   let seed = 987654321; const rnd = () => (seed = (seed*1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
@@ -718,7 +665,7 @@ try {
       else if (roll < 0.38 && queuedActive.length > 9) { G.midRemove(queuedActive[Math.floor(rnd()*queuedActive.length)]); v.leaves++; lastAct='leave'; }
       else if (roll < 0.46) { const left = S.session.players.filter(p=>p.status==='left'); if (left.length) { G.midRejoin(left[Math.floor(rnd()*left.length)].id); lastAct='rejoin'; } }
       else if (roll < 0.58) {
-        const sc = Object.keys(S.session.cfSuggestions).find(c => S.session.cfSuggestions[c] && !S.session.cfSuggestions[c].meta?.challenge);
+        const sc = Object.keys(S.session.cfSuggestions).find(c => S.session.cfSuggestions[c]);
         if (sc) { const sug = S.session.cfSuggestions[sc]; const out = sug.allIds[Math.floor(rnd()*sug.allIds.length)];
           const avail = (S.session.cfQueue||[]).map(q=>q.id).filter(id => !sug.allIds.includes(id) && gsp(id)?.status!=='left');
           if (avail.length) { G._sugPickerApply(sc, out, avail[Math.floor(rnd()*avail.length)]); v.swaps++; lastAct='swap'; } }
@@ -754,29 +701,24 @@ try {
           _diag.dup.push(`step${step} after '${lastAct}': ${dups.join(' ')}`);
         }
       }
-      // stuck: a NORMAL court ready with no suggestion while ≥4 SEATABLE players wait. The challenge
-      // court (middle) only ever seats the reserved top-K, and normal courts never seat the top-K —
-      // so subtract the challenge pool from the seatable count before calling a court stranded.
-      const _ccNum = Math.min(3, Math.max(1, S.session.cfChallengeCourtNum || Math.ceil((S.session.courts||3)/2)));
+      // stuck: a court ready with no suggestion while ≥4 SEATABLE players wait. GENUINELY idle =
+      // queued and NOT already committed to another court's pending suggestion. Only if ≥4 such
+      // players sit while a court is empty is it actually stranded. (Players in other courts'
+      // suggestions are about to play — not free for this court; the engine generates courts
+      // jointly, so a court left empty with <4 truly-free players is correct, not stuck.)
       [1,2,3].forEach(c => {
         const ct=S.session.cfCourts[c];
         if ((!ct||ct.status==='ready') && !S.session.cfSuggestions[c]) {
           try{CF.batchGenerateSuggestions([c],null);}catch(e){}
-          if (c!==_ccNum && !S.session.cfSuggestions[c]) {
-            // GENUINELY idle = queued, NOT in the challenge pool (reserved top-K), and NOT already
-            // committed to another court's pending suggestion. Only if ≥4 such players sit while a
-            // normal court is empty is the court actually stranded. (Players in other courts'
-            // suggestions are about to play — not free for this court; the engine generates courts
-            // jointly, so a court left empty with <4 truly-free players is correct, not stuck.)
-            const pool = APP._challengePool();
+          if (!S.session.cfSuggestions[c]) {
             const otherSug = new Set();
             [1,2,3].forEach(x=>{ if(x!==c && S.session.cfSuggestions[x]) S.session.cfSuggestions[x].allIds.forEach(id=>otherSug.add(id)); });
-            const idle = (S.session.cfQueue||[]).filter(q=>!pool.has(q.id) && !otherSug.has(q.id)).length;
+            const idle = (S.session.cfQueue||[]).filter(q=>!otherSug.has(q.id)).length;
             if (idle>=4) {
               v.stuck++;
               if (_diag.stuck.length < 8) {
-                const sugState = [1,2,3].map(x=>`c${x}:${S.session.cfCourts[x]?.status||'-'}/${S.session.cfSuggestions[x]?(S.session.cfSuggestions[x].meta?.challenge?'CHsug':'sug'):'nosug'}`).join(' ');
-                _diag.stuck.push(`step${step} after '${lastAct}' court${c}: queue${(S.session.cfQueue||[]).length} pool${pool.size} otherSug${otherSug.size} idle${idle} | ${sugState}`);
+                const sugState = [1,2,3].map(x=>`c${x}:${S.session.cfCourts[x]?.status||'-'}/${S.session.cfSuggestions[x]?'sug':'nosug'}`).join(' ');
+                _diag.stuck.push(`step${step} after '${lastAct}' court${c}: queue${(S.session.cfQueue||[]).length} otherSug${otherSug.size} idle${idle} | ${sugState}`);
               }
             }
           }
