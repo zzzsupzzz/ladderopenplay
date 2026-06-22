@@ -781,14 +781,14 @@ const SIM = (() => {
         });
 
         // ── Per-player phase breakdown (insight) ─────────────────────────────
-        // REAL phase boundaries: P1 = first 0.6*N matches (the random warm-up), P2 < 1.2*N, P3 = rest.
-        // Per phase, per player: W-L · rank trajectory (first→last session rank that phase) · pg = avg
-        // partner rank gap · og = avg opponent rank gap, all in RANKS. Reads each match's stamped
-        // sessionRanks. NOTE small samples (~2-4 games/phase) — read as a trend, not a verdict.
+        // REAL phase boundaries: P1 = first 0.5*N matches (the random warm-up, ~2 games each),
+        // P2 < 1.2*N, P3 = rest. Per phase, per player: W-L · rank trajectory · pg = avg partner
+        // rank gap · og = avg opponent rank gap, all in RANKS. Reads each match's stamped phase.
+        // (This _phOf is only a fallback for un-stamped matches; m.phase is the primary source.)
         {
           const _qp = arch.cfLog || [];
           const _npp = arch.players.length || 16;
-          const _pb1 = Math.ceil(_npp * 0.6), _pb2 = Math.ceil(_npp * 1.2);
+          const _pb1 = Math.ceil(_npp * 0.5), _pb2 = Math.ceil(_npp * 1.2);
           const _phOf = idx => idx < _pb1 ? 0 : idx < _pb2 ? 1 : 2;
           const _acc = {};
           arch.players.forEach(sp => { _acc[sp.id] = [0,1,2].map(() => ({ g:0, w:0, l:0, rf:null, rl:null, pg:0, og:0, gc:0 })); });
@@ -832,7 +832,7 @@ const SIM = (() => {
         {
           const _qb = arch.cfLog || [];
           const _nb = arch.players.length || 16;
-          const _bb1 = Math.ceil(_nb * 0.6);
+          const _bb1 = Math.ceil(_nb * 0.5);
           const st = {};
           arch.players.forEach(sp => { st[sp.id] = { w:0, l:0, pd:0, rw:0, rl:0, rpd:0 }; });
           _qb.forEach((m, i) => {

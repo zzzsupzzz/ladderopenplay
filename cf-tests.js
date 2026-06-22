@@ -148,13 +148,36 @@ makeSession(40, 3); // bench = 40-12 = 28, ceil(28/4)+1 = 8 > 7
 eq(CF.waitCap(), 8, 'crowded room raises cap to fairFloor+1');
 
 // ── Tests: _sessionPhase is games-based ─────────────────────────────────────
-section('_sessPhaseNum() — progress-based phase boundaries (np*0.6, np*1.2)');
-makeSession(20, 3); // np=20 → P1<12, P2<24, P3>=24
+section('_sessPhaseNum() — progress-based phase boundaries (np*0.5 warm-up, np*1.2)');
+makeSession(20, 3); // np=20 → warm-up P1<10 (~2 games each), P2<24, P3>=24
 S.session.cfMatchCount = 0;  eq(CF._sessPhaseNum(), 1, 'mc 0 → phase 1');
-S.session.cfMatchCount = 11; eq(CF._sessPhaseNum(), 1, 'mc 11 → phase 1');
-S.session.cfMatchCount = 12; eq(CF._sessPhaseNum(), 2, 'mc 12 → phase 2');
+S.session.cfMatchCount = 9;  eq(CF._sessPhaseNum(), 1, 'mc 9 → phase 1 (still warm-up)');
+S.session.cfMatchCount = 10; eq(CF._sessPhaseNum(), 2, 'mc 10 → phase 2 (warm-up = np*0.5 = 10 matches = ~2 games each)');
 S.session.cfMatchCount = 23; eq(CF._sessPhaseNum(), 2, 'mc 23 → phase 2');
 S.session.cfMatchCount = 24; eq(CF._sessPhaseNum(), 3, 'mc 24 → phase 3');
+
+// ── Tests: Phase-1 warm-up seating — fewest-games-first (0-game never starves) ─
+// The dedicated warm-up path must seat the players with the FEWEST games next, so nobody waits
+// 3 matches for their first game and the same foursome doesn't keep recycling. (Real-night bug:
+// hungerBoost is ~7 in early warm-up — below the >10 gate — so the engine wasn't prioritizing them.)
+section('Phase 1 warm-up — fewest-games-first seating (0-game players never starve)');
+try {
+  makeSession(14, 2);
+  if (APP._initSessionRanks) APP._initSessionRanks();
+  S.session.cfMatchCount = 1; // deep warm-up (np*0.5 = 7)
+  const played = S.session.players.slice(0, 4).map(p => p.id); // these 4 already have a game
+  S.session.players.forEach((p, i) => { p.matchesPlayed = i < 4 ? 1 : 0; });
+  S.session.cfQueue = S.session.players.map(p => ({ id: p.id, since: Date.now(), consec: 0 }));
+  S.session.cfCourts = { 1: { status: 'ready' }, 2: { status: 'ready' } };
+  S.session.cfSuggestions = {};
+  CF.batchGenerateSuggestions([1, 2], null);
+  const seated = [1, 2].flatMap(c => S.session.cfSuggestions[c] ? S.session.cfSuggestions[c].allIds : []);
+  ok(seated.length === 8, `warm-up seated both ready courts (${seated.length}/8)`);
+  const seatedAlreadyPlayed = seated.filter(id => played.includes(id)).length;
+  ok(seatedAlreadyPlayed === 0, `warm-up seats the zero-game players FIRST, never the 4 who already played (already-played seated: ${seatedAlreadyPlayed})`);
+} catch (e) {
+  fail++; console.error('  ❌ Phase-1 warm-up seating test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
 
 // ── Tests: matchGap basics ──────────────────────────────────────────────────
 section('matchGap() — gap counting + resume anchor');
@@ -231,7 +254,7 @@ try {
   const woTeamGap = Math.abs((wildOpen.t1[0].sr + wildOpen.t1[1].sr) / 2 - (wildOpen.t2[0].sr + wildOpen.t2[1].sr) / 2);
   ok(woTeamGap < 60, `Opening: wild foursome still split to balanced teams (team gap ${Math.round(woTeamGap)})`);
   // 6) Once players are past their first 2 games (still Phase 1), the spread limit returns.
-  S.session.cfMatchCount = 10; // np=20 → <12 ⇒ still Phase 1
+  S.session.cfMatchCount = 9; // np=20 → warm-up <10 ⇒ still Phase 1
   S.session.players.forEach(p => p.matchesPlayed = 2);
   const wildLater = CF._scoreGroup(mk([0, 1, 18, 19]), null);
   const tightLater = CF._scoreGroup(mk([0, 1, 2, 3]), null);
@@ -252,7 +275,7 @@ try {
   makeSession(14, 2);
   if (APP._initSessionRanks) APP._initSessionRanks();
   S.session.players.forEach(p => { p.matchesPlayed = 5; });
-  S.session.cfMatchCount = 9;  // just into Phase 2 (np*0.6 = 8.4)
+  S.session.cfMatchCount = 8;  // just into Phase 2 (np*0.5 = 7 for np=14)
   S.session.players.forEach(p => { p.lastPlayedAtMatch = S.session.cfMatchCount; });
   const earlyP2 = CF._scoreGroup(mk([0, 1, 7, 8]), null);
   S.session.cfMatchCount = 16; // late Phase 2 (P3 starts at 17)

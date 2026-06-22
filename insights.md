@@ -226,3 +226,17 @@ Goal: players leave saying "the matches were even" - the last games matter most 
 3. MARGIN-AWARE RANK MOVEMENT: in phases 1-2 (calibration) the pdMult table extends to 1.8x (PD>=8) / 2.2x (PD>=10) so 11-3 teaches the ladder more than 11-9; Phase 3 keeps the gentle table for stability. |move| clamped at 4 so one fluke can never teleport anyone.
 
 Design principle reaffirmed: closeness vs variety is the binding late-session tradeoff; pay variety, buy closeness at the end. All three features are session-pure (no persistent-rating influence) per the organizer's explicit requirement.
+
+## Phase-1 Warm-Up: Dedicated Seating Path (fewest-games-first + true random)
+
+Real-night bugs (14p/2c): newcomers waited ~3 matches for their first game while the same ~8 cycled; warm-up dragged (too many games per person); not truly mixing.
+
+Root cause: warm-up was run through the Phase 2/3 SKILL OPTIMIZER with randomization bolted onto the pool sort. But the pool sort prioritizes by hungerBoost>10, and a 0-game player's hungerBoost = avgGames*25, which is only ~7 when avgGames is ~0.3 (early warm-up) - BELOW the >10 gate. So 0-game players fell through to the random tiebreak and got shuffled in with players who'd already played, instead of being seated first. The optimizer's variety/no-groundhog penalties further clustered the same faces.
+
+Fix: a dedicated Phase-1 path in batchGenerateSuggestions (runs right after _stampPool, before _scheduleMandatory). For each ready court it sorts the benched pool by FEWEST games first (0-game always next - first-game guarantee + even rotation), RANDOM among equal game counts (true mixing), then _scoreGroup splits the four into balanced strong+weak teams. Returns early, bypassing the skill engine. Skipped when pinned/perm-pairs are set. The pool-sort _p1rand fallback was also changed to fewest-games-first for the pinned/perm-pair edge case.
+
+Also: warm-up boundary lowered np*0.6 -> np*0.5 (exactly ~2 games each: np*0.5 matches * 4 slots / np players = 2.0). Updated _sessPhaseNum, _sessionPhase, _sgPhase, _phase, the badge countdown, the P2 ramp denominator (now (mc - np*0.5)/(np*0.7)), cf-tests boundary asserts, sim breakdown.
+
+Sim-verified (3x 14p/2c): 7 P1 matches, 2-3 games each (avg 2.15), partner-variety ratio 1.0, session-start players' max first-game wait = 3 (the structural minimum for 14 players at 2 courts). cf-tests: a Phase-1 batchGenerateSuggestions call with 4 one-game + 10 zero-game players seats only zero-game players.
+
+Methodology note: when measuring warm-up fairness in the sim, EXCLUDE late arrivals (_joinedAtMatch>0) - they legitimately first-appear deep in the session and otherwise poison max-first-game-wait metrics.
