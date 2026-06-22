@@ -4425,10 +4425,16 @@ function _sugPickerToggle(evt,courtNum,outId){
   const onOtherCourts=new Set(Object.entries(S.session.cfCourts||{})
     .filter(([c,ct])=>+c!=courtNum&&ct?.status==='playing'&&ct.match)
     .flatMap(([,ct])=>[...ct.match.t1,...ct.match.t2]));
+  // Exclude players already placed in ANOTHER ready court's pending suggestion — they're spoken
+  // for there. Excluding them means a swap on this court can never disturb the other court (no
+  // double-booking to fix), so the other court's matchup stays put until it's confirmed/edited.
+  const inOtherSug=new Set(Object.entries(S.session.cfSuggestions||{})
+    .filter(([c,s])=>+c!==+courtNum&&s)
+    .flatMap(([,s])=>s.allIds||[]));
   const avail=[
     ...(S.session.cfQueue||[]).map(q=>q.id),
     ...(S.session.cfPaused||[]).map(q=>q.id)
-  ].filter(id=>!used.has(id)&&!onOtherCourts.has(id))
+  ].filter(id=>!used.has(id)&&!onOtherCourts.has(id)&&!inOtherSug.has(id))
    .map(id=>({id,name:gp(id)?.name||'?',rating:Math.round(CF.cfRating(id))}))
    .sort((a,b)=>a.name.localeCompare(b.name));
   const outName=gp(outId)?.name||'?';
@@ -4479,8 +4485,9 @@ function _sugPickerApply(courtNum,outId,inId){
   S.session.cfSuggestions[courtNum]={...sug,
     t1,t2,allIds:newIds,
     meta:{...sug.meta,gap:Math.round(gap),gapWarn:gap>80}};
-  // Refresh other ready courts, reserving this suggestion's players
-  CF._reserveAndRefreshOtherCourts(courtNum,newIds);
+  // A swap is SURGICAL to this court only — the other three keep their slots and other ready
+  // courts are NOT touched (candidate list already excludes their players, so there's nothing to
+  // de-conflict). The organizer finishes/confirms this court, then edits the other independently.
   STORE.save('session');renderLive();
   AUDIT.log('swap_suggestion',
     `Suggestion swap: ${gp(outId)?.name||'?'} out → ${gp(inId)?.name||'?'} in`,+courtNum);
