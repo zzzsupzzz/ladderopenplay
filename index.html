@@ -4422,19 +4422,17 @@ function _sugPickerToggle(evt,courtNum,outId){
   });
   const sug=S.session?.cfSuggestions[courtNum];if(!sug)return;
   const used=new Set(sug.allIds);
+  // Exclude only players currently IN PLAY (on a playing court) and this court's own four. Players
+  // sitting in ANOTHER ready court's pending suggestion ARE available — they're not in a live match,
+  // just tentatively suggested, so the organizer can pull them onto this court. When this court is
+  // confirmed, the other ready court re-forms against the reduced pool (see confirmSuggestion).
   const onOtherCourts=new Set(Object.entries(S.session.cfCourts||{})
     .filter(([c,ct])=>+c!=courtNum&&ct?.status==='playing'&&ct.match)
     .flatMap(([,ct])=>[...ct.match.t1,...ct.match.t2]));
-  // Exclude players already placed in ANOTHER ready court's pending suggestion — they're spoken
-  // for there. Excluding them means a swap on this court can never disturb the other court (no
-  // double-booking to fix), so the other court's matchup stays put until it's confirmed/edited.
-  const inOtherSug=new Set(Object.entries(S.session.cfSuggestions||{})
-    .filter(([c,s])=>+c!==+courtNum&&s)
-    .flatMap(([,s])=>s.allIds||[]));
   const avail=[
     ...(S.session.cfQueue||[]).map(q=>q.id),
     ...(S.session.cfPaused||[]).map(q=>q.id)
-  ].filter(id=>!used.has(id)&&!onOtherCourts.has(id)&&!inOtherSug.has(id))
+  ].filter(id=>!used.has(id)&&!onOtherCourts.has(id))
    .map(id=>({id,name:gp(id)?.name||'?',rating:Math.round(CF.cfRating(id))}))
    .sort((a,b)=>a.name.localeCompare(b.name));
   const outName=gp(outId)?.name||'?';
@@ -4485,9 +4483,11 @@ function _sugPickerApply(courtNum,outId,inId){
   S.session.cfSuggestions[courtNum]={...sug,
     t1,t2,allIds:newIds,
     meta:{...sug.meta,gap:Math.round(gap),gapWarn:gap>80}};
-  // A swap is SURGICAL to this court only — the other three keep their slots and other ready
-  // courts are NOT touched (candidate list already excludes their players, so there's nothing to
-  // de-conflict). The organizer finishes/confirms this court, then edits the other independently.
+  // A swap only edits THIS court's four — the other three keep their slots. Other ready courts are
+  // deliberately NOT reshuffled here, even if this swap pulled in a player they were also showing:
+  // the organizer keeps editing this court, and the other court re-forms only when THIS court is
+  // confirmed (see confirmSuggestion). So a transient overlap between two pending suggestions is
+  // fine — it resolves on confirm; nothing in a live match is ever touched.
   STORE.save('session');renderLive();
   AUDIT.log('swap_suggestion',
     `Suggestion swap: ${gp(outId)?.name||'?'} out → ${gp(inId)?.name||'?'} in`,+courtNum);
@@ -8333,6 +8333,20 @@ const CF={
         _paths[`session/cfPaused/${id}`]=(_sp.cfPaused||[]).find(p=>p.id===id)??null;
       });
       STORE.savePaths(_paths);
+    }
+    // Re-form any OTHER ready court's suggestion now that this court's four have left the pool.
+    // This is what makes a swap across courts work: the organizer can pull a player who was shown
+    // on another pending court into THIS one, confirm here, and that other court reshuffles against
+    // the reduced pool. PLAYING courts are never touched (only status==='ready' regenerate).
+    {
+      const _otherReady=Object.entries(S.session.cfCourts||{})
+        .filter(([c,ct])=>+c!==courtNum&&ct?.status==='ready').map(([c])=>+c);
+      if(_otherReady.length){
+        _otherReady.forEach(c=>{delete S.session.cfSuggestions[c];});
+        try{this.batchGenerateSuggestions(_otherReady,null);}catch(e){console.warn('[CF] post-confirm refresh failed',e);}
+        const _p2={};_otherReady.forEach(c=>{_p2[`session/cfSuggestions/${c}`]=S.session.cfSuggestions[c]??null;});
+        STORE.savePaths(_p2);
+      }
     }
     renderLive();renderStandings();
     toast(`Court ${courtNum} started 🏓`,'ok');

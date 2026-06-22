@@ -721,10 +721,10 @@ try {
       else if (roll < 0.58) {
         const sc = Object.keys(S.session.cfSuggestions).find(c => S.session.cfSuggestions[c]);
         if (sc) { const sug = S.session.cfSuggestions[sc]; const out = sug.allIds[Math.floor(rnd()*sug.allIds.length)];
-          // Mirror the UI: a swap candidate is NOT in this court's suggestion AND not in another
-          // court's pending suggestion (the picker excludes those, so a swap never double-books).
-          const otherSug = new Set(Object.entries(S.session.cfSuggestions).filter(([c,s])=>c!==sc&&s).flatMap(([,s])=>s.allIds||[]));
-          const avail = (S.session.cfQueue||[]).map(q=>q.id).filter(id => !sug.allIds.includes(id) && !otherSug.has(id) && gsp(id)?.status!=='left');
+          // Candidates = any queued, non-left player not already in THIS court's suggestion. Players in
+          // another court's pending suggestion ARE allowed (they're not in play) — confirming resolves
+          // the transient overlap. This exercises that path; the no-double-book-on-court invariant holds.
+          const avail = (S.session.cfQueue||[]).map(q=>q.id).filter(id => !sug.allIds.includes(id) && gsp(id)?.status!=='left');
           if (avail.length) { G._sugPickerApply(sc, out, avail[Math.floor(rnd()*avail.length)]); v.swaps++; lastAct='swap'; } }
       }
       // normal live step
