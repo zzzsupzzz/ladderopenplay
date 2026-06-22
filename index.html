@@ -1867,7 +1867,28 @@ function _rankBadge(id){
     :pct<=0.66
     ?['rgba(34,211,238,.13)','var(--cy)','rgba(34,211,238,.35)']
     :['rgba(148,163,184,.13)','var(--mu)','rgba(148,163,184,.30)'];
-  return `<span style="font-size:.72rem;font-weight:900;padding:2px 7px;border-radius:8px;background:${bg};color:${col};border:1px solid ${bdr};margin-left:4px">#${rank}</span>`;
+  return `<span title="Live skill rank — drives matchmaking" style="font-size:.72rem;font-weight:900;padding:2px 7px;border-radius:8px;background:${bg};color:${col};border:1px solid ${bdr};margin-left:4px">#${rank}</span>`;
+}
+
+// Leaderboard (board) position — wins → point-diff → rating. Cached per match/score change.
+// This is the COMPETITIVE standing players see on the Standings tab; the live skill rank (above)
+// is a separate matchmaking estimate. They diverge when results don't match estimated strength.
+let _lbRankCache=null,_lbRankKey=-1;
+function _lbRankOf(id){
+  if(!S.session)return 0;
+  const key=(S.session.cfMatchCount||0)*100000+((S.session.cfLog||[]).length);
+  if(!_lbRankCache||_lbRankKey!==key){
+    _lbRankCache={};(typeof _sessionLbRows==='function'?_sessionLbRows(S.session):[]).forEach((p,i)=>{_lbRankCache[p.id]=i+1;});
+    _lbRankKey=key;
+  }
+  return _lbRankCache[id]||0;
+}
+// Admin-only secondary "board" badge shown next to the live skill rank during live play.
+// Organizer sees BOTH: #N = live skill rank (matchmaking), B#N = leaderboard position (wins).
+function _lbBadge(id){
+  if((typeof OBSERVER_MODE!=='undefined'&&OBSERVER_MODE)||(typeof PLAYER_MODE!=='undefined'&&PLAYER_MODE))return '';
+  const b=_lbRankOf(id);
+  return b?`<span title="Leaderboard position (wins → point diff)" style="font-size:.58rem;font-weight:700;color:var(--mu);margin-left:3px">B#${b}</span>`:'';
 }
 
 // ── Matchmaking thresholds ────────────────────────────────────────────────────
@@ -9292,7 +9313,9 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     const t2CoolChip=cooldownChip(sug.t2,'P2');
 
     // ── Match quality indicator (primary) ──────────────────────────────
-    // Uses session rank positions — rank gap is the true measure of mismatch.
+    // Uses the LIVE skill rank positions (_sessionRank) — the SAME rank matchmaking balanced the
+    // teams on — NOT the leaderboard/board position. So "Close match" / "↔ Carry" reflects the real
+    // balance the engine produced (organizer decision). rank gap is the true measure of mismatch.
     // Thresholds are phase-aware: aligned with _maxPartnerGap() so the chip never
     // flags a pairing the matchmaker already approved as within normal tolerance.
     // Avoid:          partner gap > phase base cap  (matchmaker had to relax — genuinely bad)
@@ -9434,10 +9457,10 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     // Team tile: rank-first display. "avg ELO" demoted to tooltip; rank shown prominently.
     const pTeam=(ids,avg,pgap,rkA,rkB)=>{
       const _pgapBdr=pgap>=220?'rgba(248,113,113,.5)':pgap>=180?'rgba(251,147,60,.4)':pgap>=150?'rgba(251,191,36,.3)':'var(--bd)';
-      const avgRk=rkA>0&&rkB>0?`Ranks #${rkA} · #${rkB}`:`avg ${avg}`;
-      const _ttip=rkA>0&&rkB>0?`Ranks #${rkA} &amp; #${rkB} · avg ELO ${avg} · tap name to replace`:`avg ELO ${avg} · tap name to replace`;
+      const avgRk=rkA>0&&rkB>0?`Live #${rkA} · #${rkB}`:`avg ${avg}`;
+      const _ttip=rkA>0&&rkB>0?`Live skill ranks #${rkA} &amp; #${rkB} · avg ELO ${avg} · tap name to replace`:`avg ELO ${avg} · tap name to replace`;
       return`<div style="background:var(--s2);border:1px solid ${_pgapBdr};border-radius:var(--ra);padding:9px;text-align:center" title="${_ttip}">
-      ${ids.map(id=>`<span onclick="_sugPickerToggle(event,'${courtNum}','${id}')" style="font-weight:600;cursor:pointer;padding:2px 5px;border-radius:6px;border-bottom:1px dashed var(--ac);transition:background .12s" class="sug-player-btn" data-id="${id}" title="Tap to swap this player">${gn(id)}</span>${S.session?.cfRanks?_rankBadge(id):''}`).join(' <span style="color:var(--m2)"> &amp; </span> ')}
+      ${ids.map(id=>`<span onclick="_sugPickerToggle(event,'${courtNum}','${id}')" style="font-weight:600;cursor:pointer;padding:2px 5px;border-radius:6px;border-bottom:1px dashed var(--ac);transition:background .12s" class="sug-player-btn" data-id="${id}" title="Tap to swap this player">${gn(id)}</span>${S.session?.cfRanks?_rankBadge(id):''}${_lbBadge(id)}`).join(' <span style="color:var(--m2)"> &amp; </span> ')}
       <div style="font-size:.65rem;color:var(--cy);margin-top:4px;font-weight:700">${avgRk}</div>
       <div style="font-size:.55rem;color:var(--m2);margin-top:2px">tap a name to swap</div></div>`;
     };
@@ -9465,7 +9488,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     const m=court.match;
     const gr=id=>Math.round(this.cfRating(id));
     // Show rank badge prominently; ELO kept for avg calculation only
-    const grk=id=>{const r=_sessionRank(id);return r?`<span style="font-size:.72rem;font-weight:900;color:var(--cy)">#${r}</span>`:`<span style="font-size:.68rem;color:var(--mu)">${Math.round(this.cfRating(id))}</span>`;};
+    const grk=id=>{const r=_sessionRank(id);return r?`<span title="Live skill rank — drives matchmaking" style="font-size:.72rem;font-weight:900;color:var(--cy)">#${r}</span>`:`<span style="font-size:.68rem;color:var(--mu)">${Math.round(this.cfRating(id))}</span>`;};
     // Show tag in live court so Eric VN vs Eric TH are distinguishable
     // FIX: esc() applied to name only — not the span wrapper (otherwise tag shows as escaped text)
     const gn=id=>{const p=gp(id);return p?(esc(p.name)+(p.tag?` <span style="font-size:.68rem;background:rgba(251,147,60,.18);color:var(--or);border-radius:4px;padding:1px 4px;font-weight:700">${esc(p.tag)}</span>`:'')):esc('?');};
@@ -9494,9 +9517,9 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
       </div>
       <div class="cbody">
         <div class="teams">
-          <div class="team">${m.t1.map(id=>`<div style="display:flex;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:.82rem">${gn(id)} ${grk(id)}${pauseBtn(id)}</div>`).join('')}<div class="team-avg">${hasRk?`Ranks #${_sessionRank(m.t1[0])} · #${_sessionRank(m.t1[1])}`:`Avg ${t1Avg}`}</div></div>
+          <div class="team">${m.t1.map(id=>`<div style="display:flex;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:.82rem">${gn(id)} ${grk(id)}${_lbBadge(id)}${pauseBtn(id)}</div>`).join('')}<div class="team-avg">${hasRk?`Live #${_sessionRank(m.t1[0])} · #${_sessionRank(m.t1[1])}`:`Avg ${t1Avg}`}</div></div>
           <div class="vs-lbl">VS</div>
-          <div class="team">${m.t2.map(id=>`<div style="display:flex;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:.82rem">${gn(id)} ${grk(id)}${pauseBtn(id)}</div>`).join('')}<div class="team-avg">${hasRk?`Ranks #${_sessionRank(m.t2[0])} · #${_sessionRank(m.t2[1])}`:`Avg ${t2Avg}`}</div></div>
+          <div class="team">${m.t2.map(id=>`<div style="display:flex;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:.82rem">${gn(id)} ${grk(id)}${_lbBadge(id)}${pauseBtn(id)}</div>`).join('')}<div class="team-avg">${hasRk?`Live #${_sessionRank(m.t2[0])} · #${_sessionRank(m.t2[1])}`:`Avg ${t2Avg}`}</div></div>
         </div>
         <div class="srow" style="margin-top:10px">
           <input class="sinp inp" id="cf-s1-${courtNum}" type="number" inputmode="numeric" pattern="[0-9]*" min="0" max="99" placeholder="0"/>
@@ -9681,7 +9704,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
           return `<div class="cf-queue-item" style="flex-direction:column;align-items:stretch;gap:3px">
             <div style="display:flex;align-items:center;gap:7px">
               <div style="font-size:.72rem;color:var(--m2);min-width:18px">${idx+1}</div>
-              <div style="flex:1;font-weight:600;font-size:.82rem">${esc(p?.name||'?')}${tagHtml(p)}${S.session?.cfRanks?_rankBadge(q.id):''}</div>
+              <div style="flex:1;font-weight:600;font-size:.82rem">${esc(p?.name||'?')}${tagHtml(p)}${S.session?.cfRanks?_rankBadge(q.id):''}${_lbBadge(q.id)}</div>
               <div style="font-size:.7rem;color:var(--mu)" title="${_formTitle}">${_formLabel} ${_formVal} ${_pcVal}</div>
               <div style="font-size:.72rem;color:var(--mu)">${rDisp}</div>
               <span class="cf-wait ${wcls}" title="${waitMin>=20?'Long wait — high priority':waitMin>=12?'Moderate wait':'Recently played'}">${waitMin}m</span>
