@@ -1,8 +1,11 @@
-# Ladder Night — Timed Ladder Format Blueprint
+# Ladder Live — Timed Ladder Format Blueprint
 
 > A new session format alongside Continuous Flow. Everyone plays on the same clock, gets
 > mixed by live performance each game, and climbs (or slides) a ladder — with multi-step
 > jumps when you over-perform. Seeded by DUPR, driven by tonight's results.
+
+**Name candidates:** **Ladder Live** (recommended — 2 words, texts clean, "Live" = the
+differentiator) · Ladder Night Live · Ranked Night · Climb. Working title in this doc: *Ladder Live*.
 
 Status: **design locked** (2026-10-27). Not yet built. This doc is the spec.
 
@@ -30,7 +33,27 @@ down to where you're competitive again. A **rest rotation** gives everyone ~2–
 - **Come-and-go friendly.** Every game boundary is a natural re-balance; the bench absorbs late
   arrivals / early leavers; thin fields just re-band into fewer courts.
 
-## 3. Court sizing — the 5.5–6 rule (locked)
+## 3. Positioning vs Reclub — the moat and the bridge
+
+Reclub (the registration app the club uses) already does **RSVP + check-in, round-robin generation,
+sort-by-skill, court-by-skill, DUPR verification + score submission, and standings**. So we must be
+clear why anyone runs *this* on top of Reclub:
+
+- **Reclub's matching is STATIC** — it sorts once and runs a fixed round-robin schedule.
+- **Ladder Live is DYNAMIC** — it re-seeds everyone *every game*; you climb or leap courts in real
+  time; the rest rotation is built in. **That "live" re-laddering is the entire differentiator** —
+  and the marketing line: *"Not a fixed round robin. A live ladder that re-seeds you every game."*
+
+**The bridge (who does what):**
+- **Reclub:** discovery, RSVP, payment, the official DUPR record (verify + submit scores).
+- **Ladder Live (this app):** runs the live night — matchmaking, the climbing ladder, standings,
+  recap.
+- **Handoff:** the checked-in RSVP name list → into this app (manual add today; QR self-check-in
+  below removes the manual step but still checks in *against* an imported roster).
+- **Same names:** Reclub keeps accounts unique; this app tracks by unique internal ID with a **tag**
+  field for display (e.g., "Eric VN" vs "Eric TH"). Just tag duplicates when they're both present.
+
+## 4. Court sizing — the 5.5–6 rule (locked)
 
 Doubles = 4 play per court. **Waiting at any moment = courts × (players-per-court − 4).**
 
@@ -53,7 +76,7 @@ ceiling.**
 
 Low end of each range → "play 3, sit 1"; high end → "play 2, sit 1".
 
-## 4. The game-creation algorithm
+## 5. The game-creation algorithm
 
 Runs before **every** synchronized game.
 
@@ -92,7 +115,7 @@ Each player's rating moves on **win/loss × margin × opponent strength** (margi
 engine as Continuous Flow). Big win vs a strong court → big jump → higher court next game. Also bank
 each player's **point differential** for the night-total ranking. Loop to Step 1.
 
-## 5. Partner / opponent variety — honest expectations
+## 6. Partner / opponent variety — honest expectations
 
 - **Partners:** strongly varied (repeat penalty + split rotation). Expect **~5–7 different
   partners** over ~8 games.
@@ -104,20 +127,56 @@ each player's **point differential** for the night-total ranking. Loop to Step 1
   never *stuck* with anyone; it can't (and shouldn't) guarantee you never meet a peer twice.
 - **Lever:** jump aggressiveness + band width. More aggressive/wider → more fresh faces, looser
   ladder. Tighter → converges faster, more peer overlap, better level-matching. Default: **moderate
-  overlap** (ladder is clearly sorting).
+  overlap**.
 
-## 6. Scoring, movement, winner
+## 7. Scoring, movement, winner
 
 - **Court movement:** emerges from the Step-6 re-rank — multi-step jumps are automatic and
   conservation is automatic (we re-sort & re-band, we don't hand-move people). Narrate the jump
   ("🚀 Court 3 → Court 1").
 - **Night winner:** **cumulative point differential** (points won − conceded). Pace-fair across
-  courts (a timed format means faster courts play more points; differential neutralizes that).
-  Every game for the full 2 hours counts.
+  courts. Every game for the full 2 hours counts.
 - **Secondary drama:** final court reached; biggest climber (courts jumped); hot hand; etc. (reuse
   existing awards).
 
-## 7. Edge cases
+## 8. QR self-check-in + live arrival board
+
+The single entry point for players, and a friction-killer for the organizer.
+
+**Flow:** one QR (printed at the venue / on the flyer / in the Reclub listing) → player scans →
+opens their page → **taps their name → "I'm here"** → checked in → lands on their **live ranking /
+stats**. The organizer sees a **live arrival board** (who's here / who's still missing) and starts
+on time without tapping anyone in.
+
+**Three wins in one scan:**
+1. **Self check-in** — no organizer tapping 18 people in.
+2. **Live arrival board** — see who hasn't shown; chase stragglers.
+3. **Onboarding + hook** — no re-explaining the app each week; the scan drops them into *their* rank
+   ("you're #6, climb tonight"), which bootstraps the retention loop. Doubles as a marketing asset
+   (post the QR → "scan to see the live ladder" → FOMO).
+
+**Build (we're halfway there):**
+- The app **already generates a QR to the player-view URL**, and the **player stats page already
+  exists** (read-only today).
+- *New:* make the player page **writable for check-in** (tap name → "I'm here" → writes
+  `checkedIn` via Firebase sync).
+- *New:* a **live arrival board** for the organizer (checked-in vs not-yet-here).
+- *New (nice-to-have):* **walk-up self-add** (name + DUPR) so first-timers not on the roster can
+  add themselves.
+
+**Caveats:** players check in *against an imported roster*, so the Reclub RSVP name list is still
+loaded once up front. No auth (anyone could check in as anyone) — a non-issue for a club. Same-names
+disambiguated by tag.
+
+## 9. Monthly / season recap
+
+Build the ladder to **carry across sessions** (cumulative season standings). Then the recap writes
+itself — month's champion, biggest climbers, attendance streaks, top movers — auto-generated, one
+tap, shareable. This is the **retention engine** (come back weekly to defend/climb) *and* the recap
+content, from one build. Don't build a standalone recap feature; build the season ladder and the
+recap falls out of it.
+
+## 10. Edge cases
 
 - **Late arrival:** slot into the bottom band at the next game's re-seed; starts with their DUPR.
 - **Early leave:** bench just re-counts W next game; if a court would thin below 4, re-band into
@@ -125,7 +184,7 @@ each player's **point differential** for the night-total ranking. Loop to Step 1
 - **Odd headcount:** fine — waiting count flexes; rest rotation handles it.
 - **Thin field mid-session:** close a court; the re-band folds its players into the rest.
 
-## 8. Tunable knobs (set from the first real night)
+## 11. Tunable knobs (set from the first real night)
 
 1. **Game length** — fixed time/buzzer (keeps courts synced) vs race to 11. Default: **timed**.
 2. **Re-seed cadence** — re-band every game (responsive) vs every 2 games (calmer). Default: **every game**.
@@ -134,21 +193,24 @@ each player's **point differential** for the night-total ranking. Loop to Step 1
 5. **Variety weight** — variety vs tightest level-match. Default: **moderate**.
 6. **Night-winner metric** — point differential (default).
 
-## 9. Phased build plan
+## 12. Phased build plan
 
 - **Phase 1 — Engine:** the rest-rotation scheduler + the synchronized round loop (reuse
   rank/band/balanced-teams/margin-aware rating from CF). Headless-testable (cf-tests): rest rule
   invariants (play 2–3, sit 1, no back-to-back), band correctness, conservation, variety.
-- **Phase 2 — Live UI:** round timer/buzzer, per-court matchups, "who's resting", enter scores,
-  the climb/jump animation, live ladder.
-- **Phase 3 — Standings & recap:** cumulative point-diff board, final court, awards, come-and-go
-  handling polish.
-- **Phase 4 — Format toggle:** choose "Continuous Flow" vs "Ladder Night" at session setup; DUPR
-  entry field for seeding.
+- **Phase 2 — Live UI + QR check-in:** round timer/buzzer, per-court matchups, "who's resting",
+  score entry, the climb/jump animation, the live ladder — **plus QR self-check-in + live arrival
+  board** (§8).
+- **Phase 3 — Standings, recap & season:** cumulative point-diff board, final court, awards,
+  **season/monthly recap** (§9), come-and-go polish.
+- **Phase 4 — Format toggle:** choose "Continuous Flow" vs "Ladder Live" at session setup; DUPR
+  entry field for seeding; Reclub roster import.
 
-## 10. Open questions (decide before Phase 1)
+## 13. Open questions (decide before Phase 1)
 
+- Final name: Ladder Live vs Ladder Night Live vs Ranked Night vs Climb.
 - Game length in minutes (12? 15?) → sets rounds (~8–10).
 - Exact rating-move size per game (the jump feel) — tune in sim.
 - Does the night-winner board show live during play, or reveal at the end?
 - Score entry: per-court self-report on a device, or organizer-entered?
+- Reclub roster import: manual add, CSV/paste, or QR self-check-in as the primary path.
