@@ -206,9 +206,15 @@ recap falls out of it.
   steady state, even rest spread, banding by live rating, no double-booking, climb (bottom player
   winning big rises and moves up courts), standings by point differential. Partner-repeat avoidance
   in team selection. No UI yet.
-- **Phase 2 — Live UI + QR check-in:** round timer/buzzer, per-court matchups, "who's resting",
-  score entry, the climb/jump animation, the live ladder — **plus QR self-check-in + live arrival
-  board** (§8).
+- **Phase 2 — Live UI + QR check-in:**
+  - ✅ **Core live loop BUILT** — start a session via the lobby's "🏆 Ladder Live" button
+    (`beginPlay('ll')` → `format:'ll'`), live view routed on `S.session.format==='ll'` to
+    `LL.renderLive()` (per-court matchup cards with name·#·rating, who's resting, per-court score
+    inputs) + embedded live ladder (`LL.standingsHTML()`); `LL.submitAndAdvance()` records scores →
+    re-seeds → paints the next game. 133 cf-tests pass (incl. render-output). Continuous Flow
+    untouched (gated branch). **Needs browser verification** (interactive/visual — can't run here).
+  - ⏳ Remaining: round timer/buzzer, climb/jump animation, **QR self-check-in + live arrival
+    board** (§8), leap-feel tuning in sim.
 - **Phase 3 — Standings, recap & season:** cumulative point-diff board, final court, awards,
   **season/monthly recap** (§9), come-and-go polish.
 - **Phase 4 — Format toggle:** choose "Continuous Flow" vs "Ladder Live" at session setup; DUPR

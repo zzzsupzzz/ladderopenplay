@@ -522,6 +522,8 @@ body.observer-mode .qs-row{display:none!important}
 <!-- ══ LIVE ══ -->
 <div id="tab-live" class="tp">
   <div id="live-empty" class="empty" style="display:none"><div style="font-size:2rem;margin-bottom:8px">🏓</div><div>No session active — go to Setup.</div></div>
+  <!-- Ladder Live view (timed ladder) — rendered by LL._paint() -->
+  <div id="ll-live-wrap" style="display:none"></div>
   <!-- CF Live View -->
   <div id="cf-live-wrap">
     <div class="card">
@@ -2716,7 +2718,7 @@ function startSession(){
   toast(`Check-in open — ${arr.length} player${arr.length!==1?'s':''} in lobby 📋`,'ok');
 }
 
-function beginPlay(){
+function beginPlay(format){
   if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
   if(!S.session||S.session.status!=='lobby')return;
   if(!getAdminPin()){
@@ -2728,6 +2730,7 @@ function beginPlay(){
   }
   if(S.session.activePlayers.length<4){toast('Need at least 4 players to begin','err');return;}
   S.session.status='active';
+  S.session.format=(format==='ll')?'ll':'cf'; // 'll' = Ladder Live (timed), else Continuous Flow
   S.session.sessionStart=Date.now();
   // Recompute NR start ratings now that full roster is known
   const ratedRatings=S.session.activePlayers
@@ -2754,9 +2757,11 @@ function beginPlay(){
   // the Firebase write. If save fires first (queue still empty), other devices see cfQueue=[]
   // and the queue stays permanently empty for the whole session.
   CF.initQueue();
+  // Ladder Live: seed the timed-ladder engine from the roster and build the first game.
+  if(S.session.format==='ll'){ try{ LL.init(S.courts); LL.buildGame(); }catch(e){console.warn('[LL] init failed',e);} }
   STORE.save('session');
   renderLive();renderStandings();renderHistory();
-  toast('⚡ Play started!','ok');
+  toast(S.session.format==='ll'?'🏆 Ladder Live started!':'⚡ Play started!','ok');
 }
 
 
@@ -3491,6 +3496,14 @@ function _renderLiveInternal(){
 
   // Active session
   document.getElementById('live-empty').style.display='none';
+  const llw=document.getElementById('ll-live-wrap');
+  if(S.session.format==='ll'){
+    // Ladder Live (timed): render the synchronized-round view; hide the Continuous Flow view.
+    if(cfw)cfw.style.display='none';
+    if(llw){llw.style.display='block';LL._paint();}
+    return;
+  }
+  if(llw)llw.style.display='none';
   if(cfw)cfw.style.display='block';
   CF.renderLive();startCFTick();
 }
@@ -3530,6 +3543,9 @@ function _renderLobby(){
           <button class="btn bd2 sm" onclick="discardLobby()">✕ Discard</button>
           <button class="btn bp" style="${canBegin?'':'opacity:.5;pointer-events:none'}" onclick="beginPlay()" ${canBegin?'':'disabled'}>
             ▶ Begin Play${canBegin?' ('+players.length+')':'  — need 4+'}
+          </button>
+          <button class="btn bc" style="${canBegin?'':'opacity:.5;pointer-events:none'}" onclick="beginPlay('ll')" ${canBegin?'':'disabled'} title="Timed synchronized ladder: everyone on one clock, re-sorted by performance each game, climb the board">
+            🏆 Ladder Live${canBegin?' ('+players.length+')':''}
           </button>
         </div>
       </div>
@@ -11151,6 +11167,69 @@ const LL={
     return Object.values(P).map(p=>({id:p.id, diff:p.pf-p.pa, pf:p.pf, pa:p.pa,
       rating:Math.round(p.rating), games:p.games, rests:p.rests}))
       .sort((a,b)=>(b.diff-a.diff)||(b.rating-a.rating));
+  },
+
+  // ── Phase 2: live UI ──────────────────────────────────────────────────────
+  // renderLive()/standingsHTML() return HTML strings (so they're headless-testable);
+  // _paint() is the DOM side-effect. Handlers advance the synchronized round.
+  renderLive(){
+    const ll=this._ll(); if(!ll) return '<div class="empty" style="padding:20px">No Ladder Live session.</div>';
+    const st=this.standings(); const pos={}; st.forEach((p,i)=>pos[p.id]=i+1);
+    const nm=id=>esc(gp(id)?.name||gsp(id)?.name||'?');
+    const rtg=id=>Math.round(ll.players[id]?.rating||0);
+    const tag=id=>`<span style="color:var(--cy);font-size:.66rem">#${pos[id]||'–'}·${rtg(id)}</span>`;
+    let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:7px">
+      <div><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--go)">🏆 LADDER LIVE</div>
+      <div style="font-size:.71rem;color:var(--mu)">Game ${ll.gameNum} · ${this._ids().length} players · ${ll.courts} court${ll.courts>1?'s':''}</div></div>
+      <div style="display:flex;gap:5px;flex-wrap:wrap"><button class="btn bs sm" onclick="openRosterModal()">👤 Players ±</button>
+      <button class="btn bd2" onclick="doEndSession()" title="End this session and save">🏁 End</button></div></div></div>`;
+    const cur=ll.current;
+    if(!cur){ return h+`<div class="card"><button class="btn bp" style="width:100%" onclick="LL.advance()">▶ Start Game 1</button></div>`; }
+    cur.games.forEach(g=>{
+      const court=(S.session?.courtOffset||0)+g.court;
+      const band=g.court===1?'🏆 TOP':g.court===ll.courts?'🌱 RISING':'🥈 MID';
+      const team=ids=>`<div style="text-align:center">${ids.map(id=>`<div style="font-weight:600;font-size:.82rem">${nm(id)} ${tag(id)}</div>`).join('')}</div>`;
+      h+=`<div class="court-card"><div class="chead"><span class="clbl">COURT ${court} <span style="font-size:.6rem;color:var(--go)">${band}</span></span></div>
+        <div class="cbody"><div class="teams"><div class="team">${team(g.t1)}</div><div class="vs-lbl">VS</div><div class="team">${team(g.t2)}</div></div>
+        <div class="srow" style="margin-top:10px"><input class="sinp inp" id="ll-s1-${g.court}" type="number" inputmode="numeric" min="0" max="99" placeholder="0"/><span class="sdash">–</span><input class="sinp inp" id="ll-s2-${g.court}" type="number" inputmode="numeric" min="0" max="99" placeholder="0"/></div>
+        </div></div>`;
+    });
+    if(cur.resting&&cur.resting.length){
+      h+=`<div class="card"><div class="ct">😴 Resting this game (${cur.resting.length})</div>
+        <div style="font-size:.78rem;color:var(--mu);margin-top:5px">${cur.resting.map(nm).join(' · ')}</div></div>`;
+    }
+    h+=`<div class="card"><button class="btn bp" style="width:100%;font-size:.95rem" onclick="LL.submitAndAdvance()">✓ Submit scores → next game</button></div>`;
+    h+=this.standingsHTML();
+    return h;
+  },
+  standingsHTML(){
+    const s=this.standings(); if(!s.length) return '';
+    const nm=id=>esc(gp(id)?.name||gsp(id)?.name||'?');
+    return `<div class="card"><div class="ct">📊 Live Ladder <span style="font-size:.6rem;color:var(--mu)">by point differential</span></div>
+      <table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Cumulative point differential">+/−</th><th title="Live rating">RTG</th><th title="Games played">G</th></tr></thead><tbody>
+      ${s.map((p,i)=>`<tr><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.79rem">${nm(p.id)}</td><td><span class="dl ${p.diff>0?'du':p.diff<0?'dd':'dz'}">${p.diff>=0?'+':''}${p.diff}</span></td><td><span class="rv">${p.rating}</span></td><td style="font-size:.71rem;color:var(--mu)">${p.games}</td></tr>`).join('')}
+      </tbody></table></div>`;
+  },
+  _paint(){ const el=document.getElementById('ll-live-wrap'); if(el) el.innerHTML=this.renderLive(); },
+  // Build + paint the next synchronized game (also used to seat game 1).
+  advance(){ this.buildGame(); this._paint(); try{STORE.save('session');}catch(e){} },
+  // Read the per-court score inputs, record the result, re-seed, and paint the next game.
+  submitAndAdvance(){
+    const ll=this._ll(); if(!ll){return;}
+    if(!ll.current){ this.advance(); return; }
+    const scores={}; let bad=false;
+    ll.current.games.forEach(g=>{
+      const s1=parseInt(document.getElementById(`ll-s1-${g.court}`)?.value);
+      const s2=parseInt(document.getElementById(`ll-s2-${g.court}`)?.value);
+      if(isNaN(s1)||isNaN(s2)||s1<0||s2<0){bad=true;return;}
+      scores[g.court]=[s1,s2];
+    });
+    if(bad){ try{toast('Enter every court’s score first','err');}catch(e){} return; }
+    this.recordGame(scores);
+    this.buildGame();
+    this._paint();
+    try{STORE.save('session');}catch(e){}
+    try{renderStandings();}catch(e){}
   },
 };
 

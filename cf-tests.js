@@ -882,5 +882,27 @@ try {
   fail++; console.error('  ❌ Ladder Live engine test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
 
+// ── Tests: Ladder Live UI render output (Phase 2) ───────────────────────────
+// Can't run the browser here, so assert the render FUNCTIONS produce the right HTML given state
+// (matchups, per-court score inputs, resting list, embedded live ladder). Visual/interactive
+// verification still needs the browser.
+section('Ladder Live UI — live render output (Phase 2)');
+try {
+  makeSession(16, 2);
+  S.session.players.forEach((sp, i) => { sp.sRating = 1200 - i * 20; sp.status = 'active'; });
+  APP.LL.init(2);
+  APP.LL.buildGame();
+  const html = APP.LL.renderLive();
+  ok(/LADDER LIVE/.test(html), 'live view shows the Ladder Live header');
+  ok((html.match(/COURT /g) || []).length >= 2, 'a court card per court (2)');
+  ok(/ll-s1-1/.test(html) && /ll-s2-1/.test(html) && /ll-s1-2/.test(html), 'per-court score inputs present');
+  ok(/VS/.test(html), 'matchups shown');
+  ok(/Resting this game \(8\)/.test(html), '8 of 16 resting shown (W = 16 − 4×2)');
+  ok(/Submit scores/.test(html), 'submit-and-advance button present');
+  ok(/Live Ladder/.test(html) && /point differential/.test(html), 'live ladder standings embedded');
+} catch (e) {
+  fail++; console.error('  ❌ Ladder Live UI render test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
