@@ -86,7 +86,8 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   importBackup:typeof importBackup!=='undefined'?importBackup:null,
   _updateSessionRank:typeof _updateSessionRank!=='undefined'?_updateSessionRank:null,
   _pvRecord:typeof _pvRecord!=='undefined'?_pvRecord:null,
-  _waitGapStats:typeof _waitGapStats!=='undefined'?_waitGapStats:null};`;
+  _waitGapStats:typeof _waitGapStats!=='undefined'?_waitGapStats:null,
+  LL:typeof LL!=='undefined'?LL:null};`;
 
 vm.createContext(ctx);
 try {
@@ -807,6 +808,79 @@ S.session.cfSuggestions = { 1: { t1: ['p4', 'p5'], t2: ['p6', 'p7'], allIds: ['p
 try { CF.undoLast(); } catch (e) {/* restore happens before render side-effects */}
 eq(JSON.stringify(S.session.cfSuggestions[1].allIds), JSON.stringify(['p0', 'p1', 'p2', 'p3']), 'undo restored the pre-reshuffle four');
 eq(CF._undo, null, 'undo cleared after use');
+
+// ── Tests: Ladder Live engine (Phase 1) ─────────────────────────────────────
+// The timed-ladder engine (LL). Asserts the rest rotation (no back-to-back sits, rest after
+// 3, even spread), correct banding (courts ordered by live rating), no double-booking, and the
+// climb (a bottom player winning big rises and reaches the top court). Spec: ladder-night-blueprint.md
+section('Ladder Live — rest rotation, banding, climb (Phase-1 engine)');
+try {
+  makeSession(18, 3); // 18 players / 3 courts → 6 per court → play 2, sit 1 (W=6)
+  S.session.players.forEach((sp, i) => { sp.sRating = 1200 - i * 20; sp.status = 'active'; });
+  APP.LL.init(3);
+  const ids = Object.keys(S.session.ll.players);
+  const P = () => S.session.ll.players;
+  const sat = {}; ids.forEach(id => sat[id] = []); // per-game: did they sit?
+  let doubleBook = 0, bandBad = 0, wrongCount = 0;
+  const GAMES = 30;
+  for (let g = 0; g < GAMES; g++) {
+    const game = APP.LL.buildGame();
+    const seatedArr = game.games.flatMap(x => [...x.t1, ...x.t2]);
+    const seated = new Set(seatedArr);
+    if (seatedArr.length !== new Set(seatedArr).size) doubleBook++;
+    if (seatedArr.length !== 12) wrongCount++;
+    const avg = gm => (P()[gm.t1[0]].rating + P()[gm.t1[1]].rating + P()[gm.t2[0]].rating + P()[gm.t2[1]].rating) / 4;
+    for (let c = 0; c < game.games.length - 1; c++) if (avg(game.games[c]) < avg(game.games[c + 1]) - 1e-6) bandBad++;
+    ids.forEach(id => sat[id].push(!seated.has(id)));
+    const scores = {};
+    game.games.forEach(gm => { scores[gm.court] = (P()[gm.t1[0]].rating + P()[gm.t1[1]].rating) >= (P()[gm.t2[0]].rating + P()[gm.t2[1]].rating) ? [11, 6] : [6, 11]; });
+    APP.LL.recordGame(scores);
+  }
+  // no back-to-back sits
+  let backToBack = 0; ids.forEach(id => { const s = sat[id]; for (let i = 1; i < s.length; i++) if (s[i] && s[i - 1]) backToBack++; });
+  ok(backToBack === 0, `rest rotation: nobody sits two games in a row (${backToBack})`);
+  ok(doubleBook === 0, `no player on two courts in one game (${doubleBook})`);
+  ok(wrongCount === 0, `exactly 12 play each game (4×3 courts) (${wrongCount} off)`);
+  ok(bandBad === 0, `courts banded by live rating — top court is strongest (${bandBad} violations)`);
+  // nobody plays MORE than 3 games before a rest (the "rest after 3" rule)
+  let over3 = 0; ids.forEach(id => { const s = sat[id]; let run = 0; for (let i = 0; i < s.length; i++) { if (s[i]) { if (run > 3) over3++; run = 0; } else run++; } });
+  ok(over3 === 0, `rest after 3: nobody plays >3 games before sitting (${over3})`);
+  // steady state (game 6+): nobody rests before playing at least 2 (startup transient excepted)
+  let earlyRest = 0;
+  ids.forEach(id => { const s = sat[id]; let run = 0; for (let i = 0; i < s.length; i++) { if (s[i]) { if (i >= 6 && run < 2) earlyRest++; run = 0; } else run++; } });
+  ok(earlyRest === 0, `steady state: nobody rests before playing ≥2 games (${earlyRest})`);
+  // rests spread evenly
+  const rests = ids.map(id => P()[id].rests);
+  ok(Math.max(...rests) - Math.min(...rests) <= 2, `rests spread evenly (spread ${Math.max(...rests) - Math.min(...rests)})`);
+
+  // Climb: the lowest-seeded player, winning big every game they play, rises and reaches Court 1.
+  makeSession(18, 3);
+  S.session.players.forEach((sp, i) => { sp.sRating = 1200 - i * 20; sp.status = 'active'; });
+  APP.LL.init(3);
+  const Pc = () => S.session.ll.players;
+  const target = Object.keys(Pc()).sort((a, b) => Pc()[a].rating - Pc()[b].rating)[0];
+  const startRating = Pc()[target].rating;
+  let startCourt = null, bestCourt = 99;
+  for (let g = 0; g < 20; g++) {
+    const game = APP.LL.buildGame();
+    const scores = {};
+    game.games.forEach(gm => {
+      const onT1 = gm.t1.includes(target), onT2 = gm.t2.includes(target);
+      if (onT1 || onT2) { if (startCourt === null) startCourt = gm.court; bestCourt = Math.min(bestCourt, gm.court); }
+      if (onT1) scores[gm.court] = [11, 0];
+      else if (onT2) scores[gm.court] = [0, 11];
+      else scores[gm.court] = (Pc()[gm.t1[0]].rating + Pc()[gm.t1[1]].rating) >= (Pc()[gm.t2[0]].rating + Pc()[gm.t2[1]].rating) ? [11, 6] : [6, 11];
+    });
+    APP.LL.recordGame(scores);
+  }
+  ok(Pc()[target].rating > startRating + 50, `climb: a bottom player winning big rises (${startRating}→${Math.round(Pc()[target].rating)})`);
+  ok(bestCourt < startCourt, `climb: that player moves UP courts — started court ${startCourt}, reached court ${bestCourt} (re-band isn't capped at ±1)`);
+  // standings sorted by point differential
+  const st = APP.LL.standings();
+  ok(st.length === 18 && st[0].diff >= st[st.length - 1].diff, 'standings ranked by cumulative point differential');
+} catch (e) {
+  fail++; console.error('  ❌ Ladder Live engine test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
 
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -188,16 +188,24 @@ recap falls out of it.
 
 1. **Game length** — fixed time/buzzer (keeps courts synced) vs race to 11. Default: **timed**.
 2. **Re-seed cadence** — re-band every game (responsive) vs every 2 games (calmer). Default: **every game**.
-3. **Jump aggressiveness** — how much one game moves your rating. Default: **generous** (real leaps).
+3. **Jump aggressiveness** — how much one game moves your rating. Default: `LL.K = 64` (high vs a
+   normal ELO 20–40, so a short night sorts fast). **Finding from Phase 1:** smooth ELO drift climbs
+   ~⅓ court/game — you surge up over a *few* dominant games, but a single result won't vault you 2+
+   courts. For true single-game *leaps*, use a **provisional high-early-K** (first ~3 games move you
+   hard, then settle — like "find your level tonight") or a **margin-direct jump**. Decide the feel
+   in sim (Phase 2).
 4. **Rest rule** — 2–3 play / sit 1 (locked); ratio 5.33–6.0/court.
 5. **Variety weight** — variety vs tightest level-match. Default: **moderate**.
 6. **Night-winner metric** — point differential (default).
 
 ## 12. Phased build plan
 
-- **Phase 1 — Engine:** the rest-rotation scheduler + the synchronized round loop (reuse
-  rank/band/balanced-teams/margin-aware rating from CF). Headless-testable (cf-tests): rest rule
-  invariants (play 2–3, sit 1, no back-to-back), band correctness, conservation, variety.
+- **Phase 1 — Engine:** ✅ **BUILT** — the `LL` module in index.html (rest-rotation scheduler +
+  synchronized round loop: `init` / `buildGame` / `recordGame` / `standings`; reuses `ELO.exp`/`mov`
+  for margin-aware rating). 126 cf-tests pass: no back-to-back sits, rest-after-3, ≥2-before-rest in
+  steady state, even rest spread, banding by live rating, no double-booking, climb (bottom player
+  winning big rises and moves up courts), standings by point differential. Partner-repeat avoidance
+  in team selection. No UI yet.
 - **Phase 2 — Live UI + QR check-in:** round timer/buzzer, per-court matchups, "who's resting",
   score entry, the climb/jump animation, the live ladder — **plus QR self-check-in + live arrival
   board** (§8).

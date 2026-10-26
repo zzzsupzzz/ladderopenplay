@@ -11019,6 +11019,141 @@ function init(){
   SYNC.autoConnect();
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// LL — LADDER LIVE (timed synchronized ladder format). Phase 1: ENGINE ONLY.
+// Spec: ladder-night-blueprint.md. Everyone plays on one clock; before each
+// synchronized game the engine (1) picks who rests, (2) ranks by live rating,
+// (3) bands into courts of 4, (4) makes balanced/varied teams; after scores it
+// moves ratings (margin-aware) so winners leap courts. No UI yet (Phase 2).
+// Reuses ELO.exp / ELO.mov for the rating math; MM-style balanced split inline.
+// ══════════════════════════════════════════════════════════════════════════
+const LL={
+  // Tunables (blueprint §11). Defaults chosen for "real leaps" + the 2–3/sit-1 rhythm.
+  // K is high vs a normal ELO (20–40) ON PURPOSE: a ~8–10 game night must sort fast and let an
+  // under-seeded player surge up courts within a few games. Final feel is sim-tuned (Phase 2);
+  // bigger single-game *leaps* (jump 2+ courts in one result) would need a provisional high-early-K
+  // or a margin-direct jump — a deliberate tuning decision, noted in the blueprint.
+  K:64,            // jump aggressiveness — how hard one game moves a rating
+  REST_AFTER:3,    // forced rest once streak hits this
+  MIN_BEFORE_REST:2, // soft: try not to rest anyone below this streak
+  REPEAT_PEN:120,  // rating-points penalty for repeating last game's partner (team choice)
+
+  // Build LL state from the current checked-in roster. rating seeds from the player's
+  // session rating (their entered DUPR maps in at Phase-2 seeding); counters start clean.
+  init(courts){
+    if(!S.session)return null;
+    const active=(S.session.players||[]).filter(p=>p&&p.status!=='left');
+    const players={};
+    active.forEach(sp=>{
+      players[sp.id]={id:sp.id, rating:(sp.sRating??gp(sp.id)?.rating??1000),
+        streak:0, satLast:false, rests:0, games:0, pf:0, pa:0, lastPartner:null};
+    });
+    S.session.ll={courts:Math.max(1,courts||1), gameNum:0, players, current:null, log:[]};
+    return S.session.ll;
+  },
+
+  _ll(){return S.session?.ll;},
+  _ids(){return Object.keys(this._ll().players);},
+
+  // ── Step 1: rest rotation ────────────────────────────────────────────────
+  // Pick W sitters. HARD rule: never sit someone who sat last game (no back-to-back).
+  // Among the rest, most-overdue first (highest streak → enforces "rest after 3" and
+  // "play 2–3 then sit"), ties broken by fewest total rests (even spread), then id
+  // (deterministic). "≥2 before a rest" emerges: low-streak players only sit when the
+  // higher-streak pool can't fill W (i.e. the first game) — a start transient, by design.
+  _pickSitters(W){
+    const P=this._ll().players;
+    if(W<=0)return [];
+    const cands=Object.values(P).filter(p=>!p.satLast);
+    cands.sort((a,b)=>(b.streak-a.streak)||(a.rests-b.rests)||(a.id<b.id?-1:1));
+    return cands.slice(0,W).map(p=>p.id);
+  },
+
+  // ── Steps 2–3: rank the players by live rating, slice into courts of 4 (top = court 1) ──
+  _band(playingIds){
+    const P=this._ll().players;
+    const ranked=[...playingIds].sort((a,b)=>(P[b].rating-P[a].rating)||(a<b?-1:1));
+    const courts=[];
+    for(let c=0;c<this._ll().courts;c++){
+      const four=ranked.slice(c*4,c*4+4);
+      if(four.length===4)courts.push(four);
+    }
+    return courts;
+  },
+
+  // ── Step 4: balanced teams on a court of 4, avoiding last game's partner ──
+  _teams(four){
+    const P=this._ll().players;
+    const [a,b,c,d]=[...four].sort((x,y)=>(P[y].rating-P[x].rating)||(x<y?-1:1));
+    const splits=[{t1:[a,b],t2:[c,d]},{t1:[a,c],t2:[b,d]},{t1:[a,d],t2:[b,c]}];
+    const gap=s=>Math.abs((P[s.t1[0]].rating+P[s.t1[1]].rating)-(P[s.t2[0]].rating+P[s.t2[1]].rating));
+    const rep=s=>((P[s.t1[0]].lastPartner===s.t1[1])?1:0)+((P[s.t2[0]].lastPartner===s.t2[1])?1:0);
+    splits.sort((x,y)=>(gap(x)+rep(x)*this.REPEAT_PEN)-(gap(y)+rep(y)*this.REPEAT_PEN));
+    return splits[0];
+  },
+
+  // Build the next synchronized game: {games:[{court,t1,t2}], resting:[ids]}.
+  // COMMITS the rest/streak bookkeeping (the assignment is the decision). Scores come
+  // later via recordGame(). Returns null if the field can't fill a single court.
+  buildGame(){
+    const ll=this._ll();if(!ll)return null;
+    const N=this._ids().length, C=ll.courts, W=N-4*C;
+    if(N<4)return null;
+    const sitters=new Set(this._pickSitters(Math.max(0,W)));
+    const playing=this._ids().filter(id=>!sitters.has(id));
+    // If W<0 (more courts than needed) some courts just go unused — band what we have.
+    const bands=this._band(playing);
+    const seated=new Set();
+    const games=bands.map((four,i)=>{
+      const{t1,t2}=this._teams(four);
+      [...t1,...t2].forEach(id=>seated.add(id));
+      // record partners for next game's variety check
+      ll.players[t1[0]].lastPartner=t1[1]; ll.players[t1[1]].lastPartner=t1[0];
+      ll.players[t2[0]].lastPartner=t2[1]; ll.players[t2[1]].lastPartner=t2[0];
+      return {court:i+1, t1, t2};
+    });
+    // Anyone not seated (overflow when N not a clean multiple) rests this game too.
+    const reallyResting=this._ids().filter(id=>!seated.has(id));
+    // Commit bookkeeping: seated play (streak++, games++), resters sit (streak 0, rest++).
+    this._ids().forEach(id=>{
+      const p=ll.players[id];
+      if(seated.has(id)){p.streak++;p.satLast=false;p.games++;}
+      else{p.streak=0;p.satLast=true;p.rests++;}
+    });
+    ll.gameNum++;
+    ll.current={games, resting:reallyResting};
+    return ll.current;
+  },
+
+  // ── Step 6: apply scores → move ratings (margin-aware) + bank points ─────────
+  // scoresByCourt: {courtNum: [s1, s2]}. Winners rise, losers fall; margin scales the move.
+  recordGame(scoresByCourt){
+    const ll=this._ll();if(!ll?.current)return;
+    ll.current.games.forEach(g=>{
+      const sc=scoresByCourt[g.court]; if(!sc)return;
+      const [s1,s2]=sc;
+      const P=ll.players;
+      const avg=ids=>ids.reduce((s,id)=>s+P[id].rating,0)/ids.length;
+      const a1=avg(g.t1), a2=avg(g.t2);
+      const e1=ELO.exp(a1,a2);
+      const act1=s1>s2?1:s1<s2?0:0.5;
+      const mov=ELO.mov(Math.max(s1,s2),Math.min(s1,s2));
+      const delta=Math.round(this.K*mov*(act1-e1)); // + if t1 over-performed
+      g.t1.forEach(id=>{P[id].rating+=delta; P[id].pf+=s1; P[id].pa+=s2;});
+      g.t2.forEach(id=>{P[id].rating-=delta; P[id].pf+=s2; P[id].pa+=s1;});
+    });
+    ll.log.push({game:ll.gameNum, scores:scoresByCourt});
+  },
+
+  // Night standings — cumulative point differential (pace-fair), then rating.
+  standings(){
+    const P=this._ll().players;
+    return Object.values(P).map(p=>({id:p.id, diff:p.pf-p.pa, pf:p.pf, pa:p.pa,
+      rating:Math.round(p.rating), games:p.games, rests:p.rests}))
+      .sort((a,b)=>(b.diff-a.diff)||(b.rating-a.rating));
+  },
+};
+
 document.addEventListener('DOMContentLoaded',init);
 </script>
 <script>if(location.search.includes('simulate'))document.addEventListener('DOMContentLoaded',()=>{const s=document.createElement('script');s.src='simulate.js';document.body.appendChild(s);});</script>
