@@ -795,7 +795,7 @@ const SYNC={
     if(!this.ready||!this.ref){toast('Not connected — cannot wipe data','err');return;}
     this.ref.set(null).then(()=>{
       localStorage.removeItem('pb_local_backup');
-      S.db=[];S.session=null;S.archive=[];S.checkedIn.clear();
+      S.db=[];S.session=null;S.archive=[];S.checkedIn.clear();S.registered.clear();
       S.adminPin='';S._sessionEndedId='';
       ADMIN_UNLOCKED=false;
       if(_cfTick){clearInterval(_cfTick);_cfTick=null;}
@@ -964,8 +964,10 @@ const SYNC={
     // checkedIn is its own synced node so self check-ins reach the organiser even with no
     // session open (setup window) and for latecomers during an active session. Written on
     // 'session' too so lobby add/remove keeps the node consistent with activePlayers.
-    if(segment==='all'||segment==='session'||segment==='checkin')
+    if(segment==='all'||segment==='session'||segment==='checkin'){
       updates.checkedIn=[...S.checkedIn];
+      updates.registered=[...S.registered]; // per-event registered list — synced like checkedIn
+    }
     _pushWithRetry(updates, 0, onComplete);
   },
 
@@ -1193,11 +1195,15 @@ const SYNC={
         S.checkedIn.clear();
         if(Array.isArray(remote.checkedIn))remote.checkedIn.forEach(id=>S.checkedIn.add(id));
         if(S.session.activePlayers)S.session.activePlayers.forEach(id=>S.checkedIn.add(id));
+        S.registered.clear();
+        if(Array.isArray(remote.registered))remote.registered.forEach(id=>S.registered.add(id));
         if(S.session.status==='active'&&S.session.cfMode)startCFTick();
       }else{
         // No session: checkedIn is purely the synced node (setup check-in window), not wiped.
         S.checkedIn.clear();
         if(Array.isArray(remote.checkedIn))remote.checkedIn.forEach(id=>S.checkedIn.add(id));
+        S.registered.clear();
+        if(Array.isArray(remote.registered))remote.registered.forEach(id=>S.registered.add(id));
       }
 
       _invalidateMatchmakingCaches();
@@ -3844,7 +3850,7 @@ function discardLobby(){
   if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
   if(!S.session||S.session.status!=='lobby')return;
   showCfm(`Discard check-in for <strong>${esc(S.session.name)}</strong>?<br/><span style="font-size:.74rem;color:var(--mu)">No matches have been played — nothing will be saved.</span>`,'Discard','bd2',()=>{
-    S.checkedIn.clear();S.session=null;
+    S.checkedIn.clear();S.registered.clear();S.session=null;
     CF._confirmAllBusy=false;CF._confirmAllLastTs=0;
     // Reset session name field to day-based placeholder for next session
     const nameEl=document.getElementById('sess-name-flow');
@@ -5411,6 +5417,7 @@ function adminNewDayReset(){
       S._sessionEndedId=S.session?.id||('reset_'+Date.now());
       S.session=null;
       S.checkedIn.clear();
+      S.registered.clear();
       CF._confirmAllBusy=false;CF._confirmAllLastTs=0;
       if(_cfTick){clearInterval(_cfTick);_cfTick=null;}
       stopTimer();stopElapsed();
@@ -5454,7 +5461,7 @@ function doEndSession(){
       cfRanks:JSON.parse(JSON.stringify(S.session.cfRanks||{})),
       cfLog:JSON.parse(JSON.stringify(S.session.cfLog||[]))};
     S.archive.unshift(arch);
-    const n=S.session.name;S._sessionEndedId=arch.id;S.checkedIn.clear();S.session=null;
+    const n=S.session.name;S._sessionEndedId=arch.id;S.checkedIn.clear();S.registered.clear();S.session=null;
     CF._confirmAllBusy=false;CF._confirmAllLastTs=0;
     if(_cfTick){clearInterval(_cfTick);_cfTick=null;}
     // Reset session name field for next session
@@ -10177,6 +10184,7 @@ function _backupToLocal(){
       session:S.session?JSON.parse(JSON.stringify(S.session)):null,
       archive:JSON.parse(JSON.stringify(S.archive||[])),
       checkedIn:[...S.checkedIn],
+      registered:[...S.registered],
       adminPin:S.adminPin||'', // include hash so UI is correct before Firebase responds
       savedAt:Date.now(),
       roomId:'main'
@@ -10207,6 +10215,7 @@ function _restoreFromLocal(){
   S.session=b.session;S.db=b.db;S.archive=b.archive||[];
   S.checkedIn.clear();
   (b.checkedIn||[]).forEach(id=>S.checkedIn.add(id));
+  S.registered.clear();(b.registered||[]).forEach(id=>S.registered.add(id));
   S.session?.activePlayers?.forEach(id=>S.checkedIn.add(id));
   const fl=document.getElementById('fb-loading');if(fl)fl.classList.add('hidden');
   renderDB();renderRoster();renderHistory();renderArchive();renderLive();renderStandings();
@@ -10303,6 +10312,7 @@ function _autoRestoreFromLocal(){
           if(S.session&&Array.isArray(S.session.players))S.session.players=S.session.players.filter(Boolean);
           S.checkedIn.clear();
           (d.checkedIn||[]).forEach(id=>S.checkedIn.add(id));
+          S.registered.clear();(d.registered||[]).forEach(id=>S.registered.add(id));
           if(d.adminPin&&!S.adminPin)S.adminPin=d.adminPin;
           _backupToLocal();
           // Save all segments to Firebase
@@ -10330,6 +10340,7 @@ function _autoRestoreFromLocal(){
   S.archive=b.archive||[];
   S.checkedIn.clear();
   (b.checkedIn||[]).forEach(id=>S.checkedIn.add(id));
+  S.registered.clear();(b.registered||[]).forEach(id=>S.registered.add(id));
   if(S.session?.activePlayers)S.session.activePlayers.forEach(id=>S.checkedIn.add(id));
   // Restore adminPin from backup so the first render shows the correct state.
   // Firebase is still authoritative — _applyRemote will overwrite with remote value
@@ -10351,7 +10362,7 @@ function _autoRestoreFromLocal(){
     // Corrupt backup — clear it and fall through to normal Firebase load
     console.error('[backup] Corrupt local snapshot, clearing:',e);
     localStorage.removeItem('pb_local_backup');
-    S.db=[];S.session=null;S.archive=[];S.checkedIn.clear();
+    S.db=[];S.session=null;S.archive=[];S.checkedIn.clear();S.registered.clear();
     return false;
   }
 
