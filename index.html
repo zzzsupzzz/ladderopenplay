@@ -387,6 +387,49 @@ body.observer-mode .qs-row{display:none!important}
   👁 OBSERVER VIEW — All actions disabled &nbsp;·&nbsp; <span style="color:var(--mu)">Watching live · Cannot modify session</span>
 </div>
 
+<!-- SELF CHECK-IN SCREEN (?view=checkin) — full-screen overlay shown by initCheckinMode() -->
+<style>
+  #checkin-screen{position:fixed;inset:0;z-index:5000;overflow-y:auto;background:var(--bg);-webkit-tap-highlight-color:transparent}
+  .ci-wrap{max-width:440px;margin:0 auto;padding:22px 16px 40px}
+  .ci-head{text-align:center;margin-bottom:16px}
+  .ci-title{font-family:'Bebas Neue',sans-serif;font-size:2rem;letter-spacing:1px;color:var(--gr);line-height:1}
+  .ci-sub{font-size:.78rem;color:var(--mu);margin-top:2px}
+  .ci-search{width:100%;box-sizing:border-box;background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);
+    padding:13px 14px;color:var(--tx);font-size:1rem;font-family:'DM Sans',sans-serif;margin-bottom:14px}
+  .ci-search:focus{outline:none;border-color:var(--cy)}
+  .ci-list{display:flex;flex-direction:column;gap:8px}
+  .ci-row{background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:14px 15px;
+    display:flex;justify-content:space-between;align-items:center;font-size:1rem;font-weight:600;color:var(--tx);
+    cursor:pointer;user-select:none;transition:background .12s,border-color .12s}
+  .ci-row:active{background:var(--s3)}
+  .ci-row .ci-plus{color:var(--mu);font-size:1.4rem;line-height:1}
+  .ci-row.here{background:rgba(52,217,116,.12);border-color:var(--gd);color:var(--gr);cursor:default}
+  .ci-row.here .ci-tag{color:var(--gr);font-weight:700;font-size:.82rem}
+  .ci-tag{font-size:.82rem}
+  .ci-empty{color:var(--mu);font-size:.85rem;text-align:center;padding:24px 10px}
+  .ci-foot{font-size:.72rem;color:var(--mu);text-align:center;margin-top:18px}
+  .ci-confirm{position:fixed;inset:0;z-index:5100;background:var(--bg);display:flex;flex-direction:column;
+    align-items:center;justify-content:center;padding:24px 18px;text-align:center}
+  .ci-confirm .ci-card{background:rgba(52,217,116,.14);border:1px solid var(--gd);border-radius:var(--rl);
+    padding:30px 22px;max-width:360px;width:100%}
+  .ci-confirm .ci-check{font-size:3rem;line-height:1}
+  .ci-confirm .ci-done{font-family:'Bebas Neue',sans-serif;font-size:1.7rem;color:var(--gr);margin-top:8px}
+  .ci-confirm .ci-name{font-size:1.05rem;font-weight:700;color:var(--tx);margin-top:2px}
+  .ci-confirm .ci-actions{display:flex;flex-direction:column;gap:10px;margin-top:22px;width:100%;max-width:360px}
+</style>
+<div id="checkin-screen" style="display:none">
+  <div class="ci-wrap">
+    <div class="ci-head">
+      <div class="ci-title">CHECK IN</div>
+      <div class="ci-sub">Tap your name to say "I'm here"</div>
+    </div>
+    <input id="checkin-search" class="ci-search" type="text" placeholder="&#128269;  Search your name…" autocomplete="off" aria-label="Search your name"/>
+    <div id="checkin-list" class="ci-list"></div>
+    <div class="ci-foot">Can't find your name? Ask the organiser to add you.</div>
+  </div>
+  <div id="checkin-confirm" class="ci-confirm" style="display:none"></div>
+</div>
+
 <nav id="tabnav">
   <button class="tb on" data-tab="setup" onclick="switchTab('setup')">⚙️ Setup</button>
   <button class="tb" data-tab="live" onclick="switchTab('live')">🎮 Live</button>
