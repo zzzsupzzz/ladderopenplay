@@ -416,6 +416,24 @@ body.observer-mode .qs-row{display:none!important}
   .ci-confirm .ci-done{font-family:'Bebas Neue',sans-serif;font-size:1.7rem;color:var(--gr);margin-top:8px}
   .ci-confirm .ci-name{font-size:1.05rem;font-weight:700;color:var(--tx);margin-top:2px}
   .ci-confirm .ci-actions{display:flex;flex-direction:column;gap:10px;margin-top:22px;width:100%;max-width:360px}
+  /* Organiser check-in board (Layout B — absent first) */
+  .ci-board{margin-bottom:12px}
+  .cib-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
+  .cib-counts{font-size:.9rem;color:var(--mu)}
+  .cib-here{font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--gr);vertical-align:-2px}
+  .cib-not{font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--or);vertical-align:-2px}
+  .cib-label{font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+  .cib-wait{color:var(--or)}
+  .cib-herelbl{color:var(--gr);margin-top:12px}
+  .cib-abs{display:flex;flex-direction:column;gap:5px}
+  .cib-arow{background:var(--s2);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;
+    display:flex;justify-content:space-between;align-items:center;font-size:.85rem;color:var(--tx)}
+  .cib-plus{background:rgba(52,217,116,.12);border:1px solid var(--gd);color:var(--gr);border-radius:7px;
+    padding:4px 10px;font-size:.74rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap}
+  .cib-alldone{background:rgba(52,217,116,.1);border:1px solid var(--gd);border-radius:8px;padding:9px 11px;
+    color:var(--gr);font-size:.82rem;font-weight:600}
+  .cib-herelist{font-size:.78rem;color:var(--mu);line-height:1.6}
+  .cib-herelist a{color:var(--cy);text-decoration:none}
 </style>
 <div id="checkin-screen" style="display:none">
   <div class="ci-wrap">
@@ -532,6 +550,7 @@ body.observer-mode .qs-row{display:none!important}
     <div class="ct">✅ Today's Roster
       <span style="font-size:.66rem;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(52,217,116,.1);color:var(--gr)" id="roster-badge">0</span>
     </div>
+    <div id="checkin-board"></div>
     <div id="roster-list" style="margin-bottom:9px"></div>
     <div id="roster-stats" style="margin-bottom:10px"></div>
     <button class="btn bp xl" id="start-btn" onclick="startSession()" disabled>📋 Open Check-in</button>
@@ -2768,6 +2787,41 @@ function undoCheckin(id){
   checkinAnother(); // hide overlay + clear search + refresh list
 }
 
+/* ── ORGANISER CHECK-IN BOARD (Setup tab, Layout B — absent first) ────────── */
+// Shows "N here · M not yet", the people still missing (each with a ＋Here manual check-in),
+// and the here-crowd collapsed to one line. Re-rendered live from renderRoster() on every sync.
+let _ciBoardShowAll=false;
+function toggleCheckinBoardAll(){_ciBoardShowAll=!_ciBoardShowAll;renderCheckinBoard();}
+function renderCheckinBoard(){
+  const el=document.getElementById('checkin-board');
+  if(!el)return;
+  if(!(S.db&&S.db.length)){el.innerHTML='';return;}
+  const present=_presentPlayers(), absent=_absentPlayers();
+  let html=`<div class="ci-board">
+    <div class="cib-top">
+      <div class="cib-counts"><span class="cib-here">${present.length}</span> here · <span class="cib-not">${absent.length}</span> not yet</div>
+      <button class="btn bg2 sm" onclick="openCheckinQrModal()">⬛ Show QR</button>
+    </div>`;
+  if(absent.length){
+    html+=`<div class="cib-label cib-wait">Still waiting on</div><div class="cib-abs">`+
+      absent.map(p=>`<div class="cib-arow"><span>${esc(p.name)}${tagHtml(p)}</span><button class="cib-plus" onclick="toggleCheckIn('${p.id}')">＋ Here</button></div>`).join('')+
+      `</div>`;
+  }else{
+    html+=`<div class="cib-alldone">✓ Everyone's here (${present.length})</div>`;
+  }
+  if(present.length){
+    const names=present.map(p=>esc(p.name));
+    const shown=_ciBoardShowAll?names:names.slice(0,8);
+    let tail='';
+    if(names.length>shown.length)tail=` … <a href="#" onclick="toggleCheckinBoardAll();return false">show all</a>`;
+    else if(_ciBoardShowAll&&names.length>8)tail=` <a href="#" onclick="toggleCheckinBoardAll();return false">show fewer</a>`;
+    html+=`<div class="cib-label cib-herelbl">✓ Here (${present.length})</div>`+
+      `<div class="cib-herelist">${shown.join(' · ')}${tail}</div>`;
+  }
+  html+=`</div>`;
+  el.innerHTML=html;
+}
+
 function selectAll(){
   if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
   S.db.forEach(p=>{
@@ -3529,6 +3583,7 @@ function renderRoster(){
   if(CHECKIN_MODE){renderCheckin();return;}
   const arr=[...S.checkedIn];
   document.getElementById('roster-badge').textContent=arr.length;
+  renderCheckinBoard(); // organiser "who's not here" board — updates live with the roster
   const sessStatus=S.session?.status;
   const isActive=sessStatus==='active', isLobby=sessStatus==='lobby';
   if(!arr.length){
