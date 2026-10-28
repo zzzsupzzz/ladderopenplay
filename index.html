@@ -4773,6 +4773,7 @@ function openShareModal(){
   const base=window.location.href.split('#')[0].split('?')[0];
   const playerUrl=base+'?view=player';
   const observerUrl=base+'?view=observer';
+  const checkinUrl=base+'?view=checkin';
   const noPinWarning=!S.adminPin?`
     <div style="background:rgba(251,147,60,.08);border:1px solid rgba(251,147,60,.35);border-radius:var(--ra);padding:9px 12px;margin-bottom:10px;font-size:.73rem;color:var(--or);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span style="flex:1">⚠️ <strong>No admin code set</strong> — anyone can access organiser controls by removing the URL suffix.</span>
@@ -4792,6 +4793,13 @@ function openShareModal(){
       <input id="pl-url-inp" class="inp" value="${playerUrl}" readonly style="font-size:.65rem;width:100%;cursor:pointer" onclick="this.select()"/>
       <button class="btn bg2" style="width:100%;margin-top:4px" onclick="copyUrl('pl-url-inp',this)">📋 Copy Player Link</button>
     </div>
+    <div style="margin-bottom:12px">
+      <div style="font-size:.68rem;font-weight:700;color:var(--gr);margin-bottom:4px">📋 SELF CHECK-IN LINK</div>
+      <div style="font-size:.7rem;color:var(--mu);margin-bottom:5px">Players scan, find their name, tap "I'm here" — no code needed.</div>
+      <input id="ci-url-inp" class="inp" value="${checkinUrl}" readonly style="font-size:.65rem;width:100%;cursor:pointer" onclick="this.select()"/>
+      <button class="btn bg2" style="width:100%;margin-top:4px" onclick="copyUrl('ci-url-inp',this)">📋 Copy Check-In Link</button>
+      <button class="btn bg2 sm" style="width:100%;margin-top:4px" onclick="closeModal();openCheckinQrModal()">⬛ Show Check-In QR (print)</button>
+    </div>
     <div style="text-align:center;margin-top:4px">
       <div id="qr-div" style="display:inline-block;background:#fff;padding:8px;border-radius:8px;margin-bottom:4px"></div>
       <p style="font-size:.66rem;color:var(--mu)">QR → Player view</p>
@@ -4800,6 +4808,24 @@ function openShareModal(){
   setTimeout(()=>{
     const qd=document.getElementById('qr-div');
     if(qd&&window.QRCode)new QRCode(qd,{text:playerUrl,width:128,height:128,colorDark:'#000',colorLight:'#fff'});
+  },50);
+}
+
+// Big printable QR for the self check-in page. One shared code; show or print whenever check-in is open.
+function openCheckinQrModal(){
+  const base=window.location.href.split('#')[0].split('?')[0];
+  const checkinUrl=base+'?view=checkin';
+  openModal(`<div class="modal-title">📋 Self Check-In QR</div>
+    <p style="font-size:.73rem;color:var(--mu);margin-bottom:10px">Print it or show your phone. Players scan, find their name, and tap "I'm here" — no code needed. Latecomers can scan any time.</p>
+    <div style="text-align:center;margin-bottom:10px">
+      <div id="checkin-qr-div" style="display:inline-block;background:#fff;padding:12px;border-radius:10px"></div>
+    </div>
+    <input id="checkin-url-inp" class="inp" value="${checkinUrl}" readonly style="font-size:.65rem;width:100%;cursor:pointer" onclick="this.select()"/>
+    <button class="btn bg2" style="width:100%;margin-top:6px" onclick="copyUrl('checkin-url-inp',this)">📋 Copy Check-In Link</button>
+    <button class="btn bg2 sm" style="width:100%;margin-top:6px" onclick="closeModal()">Close</button>`);
+  setTimeout(()=>{
+    const qd=document.getElementById('checkin-qr-div');
+    if(qd&&window.QRCode)new QRCode(qd,{text:checkinUrl,width:220,height:220,colorDark:'#000',colorLight:'#fff'});
   },50);
 }
 
