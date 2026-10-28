@@ -543,6 +543,7 @@ body.observer-mode .qs-row{display:none!important}
       <button class="btn bg2 sm" onclick="selectAll()">☑ All</button>
       <button class="btn bg2 sm" onclick="selectNone()">☐ None</button>
     </div>
+    <div id="registered-status"></div>
     <div id="db-list"></div>
   </div>
 
@@ -2737,6 +2738,18 @@ function _unregisterPlayer(id){
   if(S.checkedIn.has(id)){S.checkedIn.delete(id);_unenrollFromLobby(id);changed=true;} // drop-out leaves the event
   if(changed)_persistCheckin();
 }
+function toggleRegister(id){
+  if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
+  isRegistered(id)?_unregisterPlayer(id):_registerPlayer(id);
+  renderDB();renderRoster();
+}
+function clearRegistered(){
+  if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
+  if(!S.registered.size)return;
+  S.registered.clear();_persistCheckin();
+  renderDB();renderRoster();
+  toast('Registered list cleared','warn');
+}
 function _persistCheckin(){
   // Lobby self check-in also touched the session roster, so save that; otherwise just the checkedIn node.
   if(S.session?.status==='lobby')STORE.save('session');
@@ -3549,10 +3562,18 @@ function renderDB(){
   if(q)players=players.filter(p=>plainName(p).toLowerCase().includes(q));
   if(_dbAbsentOnly)players=players.filter(p=>!S.checkedIn.has(p.id));
   document.getElementById('db-badge').textContent=_dbAbsentOnly?`${players.length}/${S.db.length}`:S.db.length;
+  const _regStatus=document.getElementById('registered-status');
+  if(_regStatus)_regStatus.innerHTML=S.registered.size
+    ? `<div style="display:flex;align-items:center;gap:8px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:var(--ra);padding:7px 11px;margin-bottom:8px;font-size:.73rem;flex-wrap:wrap">
+         <span style="color:var(--go);font-weight:700">★ ${S.registered.size} registered</span>
+         <span style="color:var(--mu);flex:1;min-width:120px">Check-in shows only these players</span>
+         <button class="btn bg2 sm" style="font-size:.66rem;white-space:nowrap" onclick="clearRegistered()">Clear registered</button>
+       </div>`
+    : '';
   const _loadingBanner=!HAS_REMOTE_HYDRATED?`<div style="background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);border-radius:var(--ra);padding:8px 12px;margin-bottom:8px;font-size:.72rem;color:var(--go);display:flex;align-items:center;gap:8px"><span style="font-size:1rem">⏳</span><span>Loading player database from server… wait for <strong style="color:var(--gr)">🟢 Live</strong> in the header before adding players.</span></div>`:'';
   if(!players.length){document.getElementById('db-list').innerHTML=_loadingBanner+`<div class="empty">No players yet.</div>`;return;}
   document.getElementById('db-list').innerHTML=_loadingBanner+players.map(p=>{
-    const chk=S.checkedIn.has(p.id),ed=S.editId===p.id;
+    const chk=S.checkedIn.has(p.id),ed=S.editId===p.id,reg=S.registered.has(p.id);
     const wr=p.gamesPlayed>0?Math.round((p.wins/p.gamesPlayed)*100)+'%':'—';
     const pd=p.gamesPlayed>0?(p.wins-p.losses>=0?'+':'')+(p.wins-p.losses):'';
     const nrLvl=(()=>{
@@ -3578,6 +3599,7 @@ function renderDB(){
         <div class="pnc"><div class="pn">${p.name}${tagHtml(p)}${staleBadge}${ringerBadge}${boostBadge}</div><div class="pst">${p.gamesPlayed}G · ${wr} WR${pd?' · '+pd+' PD':''}</div></div>
         <div class="pr" style="color:${chk?'var(--gr)':'var(--mu)'}">${rtgDisplay}</div>
         <div style="color:${chk?'var(--gr)':'var(--m2)'};width:15px;text-align:center;font-size:.88rem;pointer-events:none">${chk?'✓':'+'}</div>
+        <button class="btn ${reg?'bp':'bg2'} ibtn" onclick="event.stopPropagation();toggleRegister('${p.id}')" title="${reg?'Registered for this event — tap to remove':'Mark registered for this event'}">${reg?'★':'☆'}</button>
         <button class="btn bg2 ibtn" onclick="event.stopPropagation();toggleEdit('${p.id}')" title="Edit">✏️</button>
       </div>
       <div class="epanel ${ed?'open':''}">
