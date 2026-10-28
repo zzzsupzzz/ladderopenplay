@@ -94,6 +94,7 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   _awardsHtml:typeof _awardsHtml!=='undefined'?_awardsHtml:null,
   _ratingSparkHtml:typeof _ratingSparkHtml!=='undefined'?_ratingSparkHtml:null,
   _pvLeaderboardHtml:typeof _pvLeaderboardHtml!=='undefined'?_pvLeaderboardHtml:null,
+  _monthlyLadderHtml:typeof _monthlyLadderHtml!=='undefined'?_monthlyLadderHtml:null,
   _sessionLbRows:typeof _sessionLbRows!=='undefined'?_sessionLbRows:null,
   _multiWriterBannerHtml:typeof _multiWriterBannerHtml!=='undefined'?_multiWriterBannerHtml:null,
   exportBackup:typeof exportBackup!=='undefined'?exportBackup:null,
@@ -1158,6 +1159,29 @@ try {
   eq(sp(ids[0]).ptsFor, 11, 'idempotent — points not doubled');
 } catch (e) {
   fail++; console.error('  ❌ LL sync test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
+// ── Tests: monthly ladder — current-month rating climbed only ───────────────
+section('monthly ladder — current-month deltas only');
+try {
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+  const thisMonth = new Date(y, m, 10).toISOString();
+  const lastMonth = new Date(y, m - 1, 15).toISOString();
+  S.session = null;
+  S.db = [{ id: 'A', name: 'Ann', rating: 1140, isNR: false, gamesPlayed: 5 }, { id: 'B', name: 'Bob', rating: 1010, isNR: false, gamesPlayed: 5 }];
+  S.archive = [
+    { id: 's2', date: thisMonth, players: [{ id: 'A', startRating: 1000, sRating: 1040 }, { id: 'B', startRating: 1000, sRating: 1010 }] },
+    { id: 's1', date: lastMonth, players: [{ id: 'A', startRating: 900, sRating: 1000 }] } // +100 last month, must be excluded
+  ];
+  const h = APP._monthlyLadderHtml();
+  ok(/THIS MONTH/i.test(h), 'renders a monthly board');
+  ok(h.indexOf('Ann') < h.indexOf('Bob'), 'Ann (+40) ranks above Bob (+10)');
+  ok(/\+40/.test(h), 'Ann monthly gain is +40 (last month +100 excluded)');
+  ok(!/\+140/.test(h), 'does not include last-month gain (+140)');
+  S.archive = [{ id: 's1', date: lastMonth, players: [{ id: 'A', startRating: 900, sRating: 1000 }] }];
+  ok(APP._monthlyLadderHtml() === '', 'no current-month session → empty');
+} catch (e) {
+  fail++; console.error('  ❌ monthly ladder test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
 
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);

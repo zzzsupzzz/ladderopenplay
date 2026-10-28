@@ -4454,6 +4454,30 @@ function _updateLiveSavedBadge(){
 // Ranks the all-time DB by rating; movement (▲/▼) comes from the two most recent
 // end-of-session rank snapshots (see doEndSession). The truest progression signal —
 // it's why people come back. Read-only, derived from existing data.
+// Monthly leaderboard: "who climbed the most this month" — ranks by net rating gained
+// (sRating − startRating) summed over this calendar month's sessions (+ the active one if in-month).
+function _monthlyLadderHtml(){
+  const now=new Date(), y=now.getFullYear(), m=now.getMonth();
+  const inMonth=d=>{const dt=new Date(d);return dt.getFullYear()===y&&dt.getMonth()===m;};
+  const sess=S.archive.filter(s=>inMonth(s.date));
+  if(S.session&&inMonth(S.session.date))sess.push(S.session);
+  const gained={};
+  sess.forEach(s=>(s.players||[]).forEach(sp=>{
+    const p=gp(sp.id); if(!p||p.isNR)return;
+    gained[sp.id]=(gained[sp.id]||0)+((sp.sRating||0)-(sp.startRating||0));
+  }));
+  const ranked=Object.keys(gained).map(id=>{const p=gp(id);return{id,name:p?.name||'?',tag:p?.tag||'',gained:Math.round(gained[id]),rating:Math.round(p?.rating||0)};})
+    .sort((a,b)=>(b.gained-a.gained)||(b.rating-a.rating));
+  if(ranked.length<2)return '';
+  const monthName=now.toLocaleDateString('en',{month:'long',year:'numeric'});
+  const rows=ranked.map((p,i)=>`<tr><td><span class="rnk">${i+1}</span></td>`+
+    `<td style="font-weight:600;font-size:.79rem">${esc(p.name)}${p.tag?`<span class="ptag">${esc(p.tag)}</span>`:''}</td>`+
+    `<td style="font-size:.72rem"><span class="dl ${p.gained>0?'du':p.gained<0?'dd':'dz'}">${p.gained>=0?'+':''}${p.gained}</span></td>`+
+    `<td><span class="rv">${p.rating}</span></td></tr>`).join('');
+  return `<div style="font-family:'Bebas Neue',sans-serif;font-size:1.25rem;letter-spacing:.5px;margin:4px 0 6px;color:var(--cy)">📅 THIS MONTH</div>`+
+    `<div style="font-size:.63rem;color:var(--mu);margin-bottom:8px">Rating <strong style="color:var(--mu)">climbed</strong> this month (${esc(monthName)})</div>`+
+    `<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Rating gained this month">▲ GAINED</th><th title="Current all-time rating">RTG</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
 function _seasonLadderHtml(){
   const ranked=[...S.db].filter(p=>(p.gamesPlayed||0)>0&&!p.isNR).sort((a,b)=>(b.rating||0)-(a.rating||0));
   if(ranked.length<2)return '';
@@ -4496,7 +4520,9 @@ function renderArchive(){
   const el=document.getElementById('archive-wrap');if(!el)return;
   if(!S.archive.length){el.innerHTML='';return;}
   const _ladder=_seasonLadderHtml();
-  el.innerHTML=(_ladder?_ladder+`<div style="height:1px;background:var(--bd);margin:14px 0"></div>`:'')+`<div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:.5px;margin:16px 0 10px;color:var(--mu)">PREVIOUS SESSIONS</div>`+
+  const _monthly=_monthlyLadderHtml();
+  const _div=`<div style="height:1px;background:var(--bd);margin:14px 0"></div>`;
+  el.innerHTML=(_ladder?_ladder+_div:'')+(_monthly?_monthly+_div:'')+`<div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:.5px;margin:16px 0 10px;color:var(--mu)">PREVIOUS SESSIONS</div>`+
   S.archive.map(sess=>{
     const d=new Date(sess.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
     const top=[...sess.players].sort((a,b)=>b.sRating-a.sRating).slice(0,3);

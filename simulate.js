@@ -1982,6 +1982,7 @@ const SIM = (() => {
         const scores = {};
         ll.current.games.forEach(g => { scores[g.court] = _llScore(g, ll); });
         LL.recordGame(scores);
+        LL._syncToSession();   // mirror submitAndAdvance — fold results into session.players
         _verifyLadder(r + 1);
         LL.buildGame();
         try { renderLive(); } catch (e) {}
