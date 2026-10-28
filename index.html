@@ -11482,7 +11482,11 @@ const LL={
       const e1=ELO.exp(a1,a2);
       const act1=s1>s2?1:s1<s2?0:0.5;
       const mov=ELO.mov(Math.max(s1,s2),Math.min(s1,s2));
-      const delta=Math.round(this.K*mov*(act1-e1)); // + if t1 over-performed
+      // Timed rounds: a game cut off before the target counts as weaker evidence. A finished game
+      // (winner = target) has evidence 1 (unchanged); a barely-played 2-0 moves almost nothing.
+      const target=(S.session?.targetScore)||11;
+      const evidence=Math.max(0,Math.min(1,Math.max(s1,s2)/target));
+      const delta=Math.round(this.K*mov*evidence*(act1-e1)); // + if t1 over-performed
       g.t1.forEach(id=>{P[id].rating+=delta; P[id].pf+=s1; P[id].pa+=s2;});
       g.t2.forEach(id=>{P[id].rating-=delta; P[id].pf+=s2; P[id].pa+=s1;});
     });

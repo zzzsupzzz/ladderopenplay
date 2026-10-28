@@ -1046,5 +1046,33 @@ try {
   fail++; console.error('  ❌ registered scoping test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
 
+// ── Tests: Ladder Live timed — evidence-dampened rating movement ────────────
+// Unfinished games (winner < target) move the ladder LESS than finished ones; finished games
+// (winner = target) are unchanged; a 0-0 buzzer moves nothing. Opponent/partner term untouched.
+section('Ladder Live — timed: evidence-dampened movement');
+try {
+  const setupGame = (s1, s2) => {
+    makeSession(8, 2); APP.LL.init(2);
+    const P = S.session.ll.players; const ids = Object.keys(P);
+    P[ids[0]].rating = 1000; P[ids[1]].rating = 1000; P[ids[2]].rating = 1100; P[ids[3]].rating = 1100;
+    const r0 = P[ids[0]].rating;
+    S.session.ll.current = { games: [{ court: 1, t1: [ids[0], ids[1]], t2: [ids[2], ids[3]] }], resting: [] };
+    S.session.ll.gameNum = 1;
+    APP.LL.recordGame({ 1: [s1, s2] });
+    return P[ids[0]].rating - r0; // team1 (the 1000s) delta — they beat/lose to the stronger 1100s
+  };
+  const e1 = APP.ELO.exp(1000, 1100), K = APP.LL.K;
+  const expFinished = Math.round(K * 1 * (1 - e1)); // mov(11,0)=1, evidence=1
+  eq(setupGame(11, 0), expFinished, 'finished 11-0 == pre-fix delta (evidence=1, unchanged)');
+  const d86 = setupGame(8, 6), d116 = setupGame(11, 6);
+  ok(Math.abs(d86) < Math.abs(d116), `unfinished 8-6 moves less than finished 11-6 (${d86} vs ${d116})`);
+  const d20 = setupGame(2, 0), d110 = setupGame(11, 0);
+  ok(Math.abs(d20) < Math.abs(d110) * 0.35, `2-0 moves far less than 11-0 (${d20} vs ${d110})`);
+  ok(Math.abs(Math.abs(d20) - Math.abs(d110) * 2 / 11) <= 1, `2-0 ≈ (2/11)×(11-0) within rounding (${d20} vs ${(d110 * 2 / 11).toFixed(1)})`);
+  eq(setupGame(0, 0), 0, '0-0 buzzer moves no rating (no throw)');
+} catch (e) {
+  fail++; console.error('  ❌ LL evidence test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
