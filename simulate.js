@@ -1915,11 +1915,100 @@ const SIM = (() => {
     }
   }
 
+  // ── Ladder Live (timed) simulation ──────────────────────────────────────────
+  // Plays out a full timed session so you can WATCH the ladder evolve and judge the results.
+  // Realistic scores: stronger teams win more (ELO win prob), finished games go to 11 with a margin
+  // that reflects the skill gap, ~25% are "unfinished" (buzzer) with lower totals, a few ties.
+  // ALWAYS offline — stubs STORE.save so it never touches Firebase — but keeps rendering so it's
+  // watchable. Prints the final ladder with each player's climb from their seed.
+  function _llScore(g, ll) {
+    const P = ll.players;
+    const a1 = (P[g.t1[0]].rating + P[g.t1[1]].rating) / 2;
+    const a2 = (P[g.t2[0]].rating + P[g.t2[1]].rating) / 2;
+    const p1 = ELO.exp(a1, a2);                 // t1 win probability
+    const t1wins = Math.random() < p1;
+    const gap = Math.abs(p1 - 0.5);             // 0 (even) .. 0.5 (lopsided)
+    const unfinished = Math.random() < 0.25;    // caught by the buzzer
+    let win, lose;
+    if (unfinished) {
+      win = 4 + Math.floor(Math.random() * 7);  // 4..10
+      const maxM = Math.min(win, 2 + Math.floor(gap * 12));
+      lose = Math.max(0, win - (1 + Math.floor(Math.random() * maxM)));
+      if (Math.random() < 0.08) lose = win;     // occasional tie on the buzzer
+    } else {
+      win = 11;
+      const base = Math.round(9 * (0.5 - gap)); // even → ~4-5, lopsided → ~0-2
+      lose = Math.max(0, Math.min(9, base + Math.floor(Math.random() * 4) - 1));
+    }
+    return t1wins ? [win, lose] : [lose, win];
+  }
+  function _verifyLadder(round) {
+    const ll = S.session.ll, P = ll.players;
+    Object.values(P).forEach(p => { if (!Number.isFinite(p.rating)) err(`round ${round}: ${gp(p.id)?.name} rating not finite (${p.rating})`); });
+    const st = LL.standings();
+    if (st.length !== Object.keys(P).length) err(`round ${round}: standings ${st.length} != players ${Object.keys(P).length}`);
+    if (ll.current) {
+      const seated = ll.current.games.flatMap(g => [...g.t1, ...g.t2]);
+      if (new Set(seated).size !== seated.length) err(`round ${round}: a player is double-booked across courts`);
+      const restSet = new Set(ll.current.resting || []);
+      seated.forEach(id => { if (restSet.has(id)) err(`round ${round}: ${gp(id)?.name} is both seated and resting`); });
+    }
+  }
+  async function runLadder(opts = {}) {
+    if (_running) { console.warn('[SIM] Already running. SIM.stop() first.'); return; }
+    const { players: nPlayers = 18, courts = 3, rounds = 12, roundMin = 10, speed = 'normal' } = opts;
+    _running = true; _aborted = false; _log = []; _errs = [];
+    const ms = resolveSpeed(speed);
+    log(`=== LADDER LIVE SIM === ${nPlayers}p / ${courts}c / ${rounds} rounds (~${rounds * roundMin} min of play) speed=${speed} — OFFLINE (no Firebase writes)`);
+    saveRealState();
+    const realSave = STORE.save; STORE.save = () => Promise.resolve();   // never write to Firebase
+    const realToast = window.toast; window.toast = () => {};
+    try {
+      resetState();
+      const players = createPlayers(nPlayers);
+      checkInAll(players);
+      startSim(courts);
+      S.session.format = 'll'; S.session.llRoundMin = roundMin;
+      S.session.status = 'active'; S.session.sessionStart = Date.now();
+      _initSessionRanks();
+      LL.init(courts); LL.buildGame();
+      try { switchTab('live'); } catch (e) {}
+      try { renderLive(); } catch (e) {}
+      const seedRank = {}; LL.standings().forEach((p, i) => seedRank[p.id] = i + 1);
+      await delay(ms);
+      for (let r = 0; r < rounds && !_aborted; r++) {
+        const ll = S.session.ll;
+        if (!ll.current) { err(`round ${r + 1}: no current game (field too small for the courts?)`); break; }
+        const scores = {};
+        ll.current.games.forEach(g => { scores[g.court] = _llScore(g, ll); });
+        LL.recordGame(scores);
+        _verifyLadder(r + 1);
+        LL.buildGame();
+        try { renderLive(); } catch (e) {}
+        await delay(ms);
+      }
+      const st = LL.standings();
+      log(`=== FINAL LADDER (after ${S.session.ll.gameNum} games) ===`);
+      st.forEach((p, i) => {
+        const nm = gp(p.id)?.name || '?'; const seed = seedRank[p.id];
+        const mv = typeof seed === 'number' ? seed - (i + 1) : 0;
+        log(`#${i + 1} ${nm} — diff ${p.diff >= 0 ? '+' : ''}${p.diff} · rtg ${p.rating} · ${p.games}g${mv !== 0 ? ` (${mv > 0 ? '▲' + mv : '▼' + (-mv)} from #${seed})` : ''}`);
+      });
+      log(_errs.length ? `❌ ${_errs.length} issue(s) — see above` : `✅ ran clean — no crashes, invariants held across ${rounds} rounds`);
+    } catch (e) {
+      err('LADDER SIM THREW: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+    } finally {
+      STORE.save = realSave; window.toast = realToast;
+      _running = false;
+    }
+    return { log: _log, errors: _errs, passed: _errs.length === 0 };
+  }
+
   if (location.search.includes('simulate')) {
     if (document.readyState === 'complete') buildPanel();
     else window.addEventListener('load', buildPanel);
   }
 
-  return { run, run14, run15, run16, run20, run26, runBugChecks, runOrganizer12, runPermPairCheck, stop, _uiRun, _continue, log: () => _log, errors: () => _errs };
+  return { run, run14, run15, run16, run20, run26, runBugChecks, runOrganizer12, runPermPairCheck, runLadder, stop, _uiRun, _continue, log: () => _log, errors: () => _errs };
 
 })();

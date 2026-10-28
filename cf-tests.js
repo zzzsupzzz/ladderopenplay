@@ -83,6 +83,7 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   _absentPlayers:typeof _absentPlayers!=='undefined'?_absentPlayers:null,
   _presentPlayers:typeof _presentPlayers!=='undefined'?_presentPlayers:null,
   isRegistered:typeof isRegistered!=='undefined'?isRegistered:null,
+  _normalizeLl:typeof _normalizeLl!=='undefined'?_normalizeLl:null,
   _registerPlayer:typeof _registerPlayer!=='undefined'?_registerPlayer:null,
   _unregisterPlayer:typeof _unregisterPlayer!=='undefined'?_unregisterPlayer:null,
   selfCheckIn:typeof selfCheckIn!=='undefined'?selfCheckIn:null,
@@ -1092,6 +1093,26 @@ try {
   eq(APP.LL.roundRemaining(S.session.ll.roundStart), 600, 'new round resets the clock to full');
 } catch (e) {
   fail++; console.error('  ❌ LL round-clock test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
+// ── Tests: Ladder Live timed — sync normalization (Firebase array→object) ───
+// Firebase RTDB can return arrays as numeric-keyed objects; LL's current.games/resting/log and the
+// per-game t1/t2 must be coerced back to arrays on _applyRemote or renderLive/recordGame's .forEach
+// would crash on a multi-device session.
+section('Ladder Live — timed: sync normalization');
+try {
+  const ll = APP._normalizeLl({ players: { a: {} }, current: { games: { 0: { court: 1, t1: { 0: 'a', 1: 'b' }, t2: ['c', 'd'] }, 1: { court: 2, t1: ['e', 'f'], t2: ['g', 'h'] } }, resting: { 0: 'x', 1: 'y' } }, log: { 0: { game: 1 } } });
+  ok(Array.isArray(ll.current.games), 'games coerced to array');
+  eq(ll.current.games.length, 2, 'two games');
+  ok(Array.isArray(ll.current.games[0].t1) && ll.current.games[0].t1.length === 2, 'per-game t1 coerced to array');
+  ok(Array.isArray(ll.current.resting) && ll.current.resting.length === 2, 'resting coerced to array');
+  ok(Array.isArray(ll.log) && ll.log.length === 1, 'log coerced to array');
+  const ll2 = APP._normalizeLl({ current: { games: [{ court: 1, t1: ['a', 'b'], t2: ['c', 'd'] }], resting: [] }, log: [] });
+  ok(Array.isArray(ll2.current.games) && ll2.current.games.length === 1, 'already-array games preserved');
+  ok(APP._normalizeLl({ current: null, log: null }).log.length === 0, 'null current/log → empty, no throw');
+  ok(APP._normalizeLl(null) === null, 'null ll passes through');
+} catch (e) {
+  fail++; console.error('  ❌ LL normalize test threw: ' + (e && e.message));
 }
 
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);

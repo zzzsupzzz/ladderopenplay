@@ -1072,6 +1072,7 @@ const SYNC={
         remote.session.cfLog=_normalizeCfLog(remote.session.cfLog);
         remote.session.cfQueue=_normalizeQueueMap(remote.session.cfQueue);
         remote.session.cfPaused=_normalizeQueueMap(remote.session.cfPaused);
+        if(remote.session.ll)remote.session.ll=_normalizeLl(remote.session.ll);
         // players may arrive as a Firebase object (numeric-keyed) if written per-index, OR as a
         // real array WITH NULL HOLES when a middle element was deleted (RTDB returns [a,b,null,d]).
         // Strip nullish entries in BOTH cases — a hole later throws in gsp/render (and was misread
@@ -1459,6 +1460,20 @@ function _normalizeQueueMap(raw){
   if(!raw)return[];
   if(Array.isArray(raw))return raw.filter(Boolean);
   return Object.values(raw).filter(Boolean);
+}
+// Ladder Live: Firebase RTDB can return arrays as numeric-keyed objects. Coerce ll.current.games/
+// resting/log (and each game's t1/t2) back to arrays so renderLive/recordGame's .forEach don't crash
+// on a multi-device session. ll.players stays a {id:…} map.
+function _normalizeLl(ll){
+  if(!ll||typeof ll!=='object')return ll;
+  const _arr=x=>Array.isArray(x)?x.filter(v=>v!=null):(x&&typeof x==='object'?Object.values(x).filter(v=>v!=null):[]);
+  if(ll.current&&typeof ll.current==='object'){
+    ll.current.games=_arr(ll.current.games);
+    ll.current.resting=_arr(ll.current.resting);
+    ll.current.games.forEach(g=>{ if(g){g.t1=_arr(g.t1);g.t2=_arr(g.t2);} });
+  }
+  ll.log=_arr(ll.log);
+  return ll;
 }
 /* § UTILS
 /* ── UTILS ───────────────────────────────────────── */
