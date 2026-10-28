@@ -5801,7 +5801,7 @@ async function _hashPin(code){
   const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(code));
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
-function getAdminPin(){return 'thang246';}
+function getAdminPin(){return '1111';}
 // Shared helper: write adminPin='' to Firebase — used by remove and reset flows.
 // Queues a pending clear if offline so reconnect can flush it.
 // Pending state is persisted to localStorage so it survives reload/app close.
@@ -5858,7 +5858,7 @@ async function _submitAdminCode(){
   const inp=document.getElementById('admin-code-input');
   const entered=(inp?.value||'').trim();
   if(!entered){inp?.focus();return;}
-  if(entered==='thang246'){_doUnlock();}
+  if(entered==='1111'){_doUnlock();}
   else{if(inp)inp.value='';inp?.focus();_codeFail('Wrong code. Try again.');}
 }
 
