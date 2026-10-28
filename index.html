@@ -4527,11 +4527,14 @@ function renderArchive(){
     const d=new Date(sess.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
     const top=[...sess.players].sort((a,b)=>b.sRating-a.sRating).slice(0,3);
     // CF is the only active mode. Legacy round-mode sessions in archive get a simplified read-only view.
-    const isCF=!!sess.cfMode;
+    const isLL=sess.format==='ll';
+    const isCF=!isLL && !!sess.cfMode; // LL archives carry cfMode:true (legacy) — treat LL on its own
     const cfMatches=sess.cfLog||[];
     const legacyMatches=(sess.rounds||[]).flatMap(r=>r.matches.filter(m=>m.status==='done'));
     const mCount=isCF?cfMatches.length:legacyMatches.length;
-    const metaLabel=isCF
+    const metaLabel=isLL
+      ?`${d} · 🏆 Ladder Live · ${sess.llRounds||0} round${(sess.llRounds||0)===1?'':'s'} · ${sess.players.length} players`
+      :isCF
       ?`${d} · ⚡ CF · ${mCount} matches · ${sess.players.length} players`
       :`${d} · Legacy · ${mCount} matches · ${sess.players.length} players`;
 
@@ -4555,7 +4558,9 @@ function renderArchive(){
           const tie=m.s1===m.s2,t1w=m.s1>m.s2;
           return `<div class="hm"><div style="flex:1;font-weight:${t1w?700:400};color:${t1w?'var(--gr)':'var(--tx)'}">${t1n}</div><div class="hscore"style="${tie?'color:var(--go)':''}">${m.s1}–${m.s2}</div><div style="flex:1;text-align:right;font-weight:${!t1w&&!tie?700:400};color:${!t1w&&!tie?'var(--gr)':'var(--tx)'}">${t2n}</div></div>`;
         }).join('');
-    const matchHistory=matchRows
+    const matchHistory=isLL
+      ?`<div class="empty" style="font-size:.72rem">🏆 Timed Ladder Live — ${sess.llRounds||0} round${(sess.llRounds||0)===1?'':'s'}. Per-game log isn't kept for this format.</div>`
+      :matchRows
       ?`<div class="hr"><div class="hrhd" onclick="this.nextElementSibling.classList.toggle('open')"><span>${isCF?`ALL MATCHES (${mCount})`:'LEGACY MATCHES (read-only)'} ▸</span><span style="font-size:.69rem">${isCF?'⚡ CF':'📦 Legacy'}</span></div><div class="hr-body open">${matchRows}</div></div>`
       :'<div class="empty">No matches recorded</div>';
 
@@ -5552,6 +5557,7 @@ function doEndSession(){
   showCfm(`End <strong>${esc(S.session.name)}</strong>?<br/><span style="font-size:.74rem;color:var(--mu)">Ratings saved to database.</span>`,'🏁 End Session','bp',()=>{
     if(S.session.format==='ll'){try{LL._syncToSession();}catch(e){}} // fold LL results into session.players before archiving
     const arch={id:S.session.id,name:S.session.name,date:S.session.date,cfMode:true,
+      format:S.session.format||'cf', llRounds:(S.session.ll?.gameNum)||0, // Ladder Live tag for History
       players:S.session.players.map(sp=>{const p=gp(sp.id)||{};return{id:sp.id,name:sp.name||p.name||'?',tag:sp.tag||p.tag||'',sRating:sp.sRating,startRating:sp.startRating,wins:sp.wins,losses:sp.losses,ties:sp.ties,matchesPlayed:sp.matchesPlayed,ptsFor:sp.ptsFor,ptsAgainst:sp.ptsAgainst,_joinedAtMatch:sp._joinedAtMatch??null,_resumedAtMatch:sp._resumedAtMatch??null,_absences:Array.isArray(sp._absences)?sp._absences:null};}),
       cfRanks:JSON.parse(JSON.stringify(S.session.cfRanks||{})),
       cfLog:JSON.parse(JSON.stringify(S.session.cfLog||[]))};
