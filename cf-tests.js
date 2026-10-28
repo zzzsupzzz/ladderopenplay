@@ -84,6 +84,7 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   _presentPlayers:typeof _presentPlayers!=='undefined'?_presentPlayers:null,
   isRegistered:typeof isRegistered!=='undefined'?isRegistered:null,
   _normalizeLl:typeof _normalizeLl!=='undefined'?_normalizeLl:null,
+  _preserveArchiveOnShrink:typeof _preserveArchiveOnShrink!=='undefined'?_preserveArchiveOnShrink:null,
   _registerPlayer:typeof _registerPlayer!=='undefined'?_registerPlayer:null,
   _unregisterPlayer:typeof _unregisterPlayer!=='undefined'?_unregisterPlayer:null,
   selfCheckIn:typeof selfCheckIn!=='undefined'?selfCheckIn:null,
@@ -1182,6 +1183,22 @@ try {
   ok(APP._monthlyLadderHtml() === '', 'no current-month session → empty');
 } catch (e) {
   fail++; console.error('  ❌ monthly ladder test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
+// ── Tests: archive delete — shrink guard must accept a newer-version delete ──
+// The length-only shrink guard resurrected deleted sessions (a device holding the old archive
+// preserved it and re-pushed). A shrink from a STRICTLY NEWER remote is an intentional delete.
+section('archive delete — shrink guard version gating');
+try {
+  const P = APP._preserveArchiveOnShrink;
+  eq(P(0, 1, 5, 4, false), false, 'newer remote (v5>v4) shrink → accept the delete (do not preserve)');
+  eq(P(0, 1, 4, 4, false), true, 'same version shrink → preserve (stale/ambiguous)');
+  eq(P(0, 1, 3, 4, false), true, 'older remote (v3<v4) shrink → preserve (stale)');
+  eq(P(2, 1, 5, 4, false), false, 'archive grew → never preserve (not a shrink)');
+  eq(P(0, 1, 5, 4, true), false, 'first load → accept remote');
+  eq(P(0, 1, 0, 4, false), true, 'invalid remote version → preserve (can\'t trust it)');
+} catch (e) {
+  fail++; console.error('  ❌ archive shrink-guard test threw: ' + (e && e.message));
 }
 
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);

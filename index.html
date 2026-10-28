@@ -1106,9 +1106,9 @@ const SYNC={
       const localArchiveLen=S.archive?.length||0;
       const remoteArchiveLen=(remote.archive||[]).length;
       let preservedArchive=null;
-      if(!isFirstLoad&&remoteArchiveLen<localArchiveLen){
+      if(_preserveArchiveOnShrink(remoteArchiveLen,localArchiveLen,remoteV,localV,isFirstLoad)){
         preservedArchive=[...S.archive];
-        console.warn(`[sync] Archive shrink blocked (${remoteArchiveLen}<${localArchiveLen})`);
+        console.warn(`[sync] Archive shrink blocked — stale remote (${remoteArchiveLen}<${localArchiveLen}, v${remoteV}<=v${localV})`);
       }
 
       // db shrink guard: never overwrite a populated local db with an empty remote.
@@ -1474,6 +1474,16 @@ function _normalizeLl(ll){
   }
   ll.log=_arr(ll.log);
   return ll;
+}
+// Archive shrink guard: block a shrink only when the remote is stale/ambiguous. A shrink from a
+// STRICTLY NEWER remote is an intentional delete (deleteArchiveSess) and must be accepted — the old
+// length-only guard resurrected deleted sessions by preserving (and re-pushing) the local copy.
+function _preserveArchiveOnShrink(remoteLen, localLen, remoteV, localV, isFirstLoad){
+  if(isFirstLoad) return false;
+  if(remoteLen>=localLen) return false;                              // not a shrink
+  const valid=v=>Number.isInteger(v)&&v>0;
+  if(valid(remoteV)&&valid(localV)&&remoteV>localV) return false;    // newer remote = intentional delete
+  return true;                                                       // stale/ambiguous shrink → keep local
 }
 /* § UTILS
 /* ── UTILS ───────────────────────────────────────── */
