@@ -1074,5 +1074,25 @@ try {
   fail++; console.error('  ❌ LL evidence test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
 
+// ── Tests: Ladder Live timed — synced round clock ───────────────────────────
+// The countdown is derived from a synced roundStart stamped each buildGame, so all devices agree;
+// it clamps at 0 and resets to full each new round.
+section('Ladder Live — timed: round clock');
+try {
+  makeSession(8, 2); S.session.llRoundMin = 10; APP.LL.init(2);
+  ok(APP.LL.roundRemaining(Date.now()) === null, 'no roundStart before buildGame → null');
+  APP.LL.buildGame();
+  const ll = S.session.ll;
+  eq(ll.roundMin, 10, 'init stores roundMin from S.session.llRoundMin');
+  ok(typeof ll.roundStart === 'number', 'buildGame stamps roundStart');
+  eq(APP.LL.roundRemaining(ll.roundStart), 600, 'full round = 600s at start');
+  eq(APP.LL.roundRemaining(ll.roundStart + 60000), 540, '60s elapsed → 540s left');
+  eq(APP.LL.roundRemaining(ll.roundStart + 999000), 0, 'past the clock → 0 (clamped, never negative)');
+  APP.LL.recordGame({}); APP.LL.buildGame();
+  eq(APP.LL.roundRemaining(S.session.ll.roundStart), 600, 'new round resets the clock to full');
+} catch (e) {
+  fail++; console.error('  ❌ LL round-clock test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

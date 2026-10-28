@@ -11392,12 +11392,20 @@ const LL={
       players[sp.id]={id:sp.id, rating:(sp.sRating??gp(sp.id)?.rating??1000),
         streak:0, satLast:false, rests:0, games:0, pf:0, pa:0, lastPartner:null};
     });
-    S.session.ll={courts:Math.max(1,courts||1), gameNum:0, players, current:null, log:[]};
+    S.session.ll={courts:Math.max(1,courts||1), roundMin:(S.session.llRoundMin)||10, gameNum:0, players, current:null, log:[]};
     return S.session.ll;
   },
 
   _ll(){return S.session?.ll;},
   _ids(){return Object.keys(this._ll().players);},
+
+  // Synced round clock: seconds left in the current round, derived from the shared roundStart
+  // (stamped each buildGame) so every device agrees. Clamped at 0; null before a round is built.
+  roundRemaining(now){
+    const ll=this._ll(); if(!ll||!ll.roundStart)return null;
+    const total=(ll.roundMin||10)*60;
+    return Math.max(0, total-Math.floor((now-ll.roundStart)/1000));
+  },
 
   // ── Step 1: rest rotation ────────────────────────────────────────────────
   // Pick W sitters. HARD rule: never sit someone who sat last game (no back-to-back).
@@ -11465,6 +11473,7 @@ const LL={
       else{p.streak=0;p.satLast=true;p.rests++;}
     });
     ll.gameNum++;
+    ll.roundStart=Date.now(); // start this round's clock (synced with the session write)
     ll.current={games, resting:reallyResting};
     return ll.current;
   },
