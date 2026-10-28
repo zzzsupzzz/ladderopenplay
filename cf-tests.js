@@ -74,6 +74,7 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   _ranksCompatible:typeof _ranksCompatible!=='undefined'?_ranksCompatible:null,
   _initSessionRanks:typeof _initSessionRanks!=='undefined'?_initSessionRanks:null,
   gp:typeof gp!=='undefined'?gp:null, gsp:typeof gsp!=='undefined'?gsp:null,
+  STORE:typeof STORE!=='undefined'?STORE:null,
   isCheckinModeUrl:typeof isCheckinModeUrl!=='undefined'?isCheckinModeUrl:null,
   checkAdminAccess:typeof checkAdminAccess!=='undefined'?checkAdminAccess:null,
   _setCheckinMode:(v)=>{try{CHECKIN_MODE=v}catch(e){}},
@@ -968,6 +969,49 @@ try {
   fail++; console.error('  ❌ checkin admin-lock test threw: ' + (e && e.message));
 } finally {
   try { APP._setCheckinMode(false); APP._setAdminUnlocked(false); } catch (e) {}
+}
+
+// ── Tests: CHECK-IN — select-all/none persist the synced node (no session) ──
+// checkedIn is now synced, so a remote apply rebuilds it from remote; a local-only ☑All / Clear
+// during the setup window would be reverted on the next sync. They must persist (segment 'checkin').
+section('checkin — select-all/none persist checkedIn when no session is open');
+['renderDB', 'renderRoster', 'renderLive'].forEach(fn => { try { ctx[fn] = () => {}; } catch (e) {} });
+try {
+  S.session = null;
+  S.db = [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }];
+  S.checkedIn = new Set(['a', 'b']);
+  let captured = null;
+  const realSave = APP.STORE.save;
+  APP.STORE.save = (seg) => { captured = seg; return Promise.resolve(); };
+  try {
+    ctx.selectNone();
+    eq(captured, 'checkin', 'selectNone with no session persists checkedIn (segment checkin)');
+    ok(S.checkedIn.size === 0, 'selectNone clears checkedIn');
+    captured = null;
+    ctx.selectAll();
+    eq(captured, 'checkin', 'selectAll with no session persists checkedIn (segment checkin)');
+    ok(S.checkedIn.size === 2, 'selectAll checks everyone in');
+  } finally { APP.STORE.save = realSave; }
+} catch (e) {
+  fail++; console.error('  ❌ select-all/none persist test threw: ' + (e && e.message));
+}
+
+// ── Tests: CHECK-IN — board ＋Here works during an active session ────────────
+// toggleCheckIn blocks during an active session; the board's manual check-in must still work so
+// the organiser can mark a latecomer "here" (via selfCheckIn, which doesn't inject them into play).
+section('checkin — board +Here checks in a latecomer during an active session');
+['renderDB', 'renderRoster', 'renderLive'].forEach(fn => { try { ctx[fn] = () => {}; } catch (e) {} });
+try {
+  S.db = [{ id: 'x', name: 'X' }];
+  S.checkedIn = new Set();
+  S.session = { status: 'active', activePlayers: [], players: [] };
+  const realSave = APP.STORE.save;
+  APP.STORE.save = () => Promise.resolve();
+  try { ctx.boardCheckIn('x'); } finally { APP.STORE.save = realSave; }
+  ok(S.checkedIn.has('x'), 'board +Here marks a player here even during an active session');
+  S.session = null;
+} catch (e) {
+  fail++; console.error('  ❌ board +Here test threw: ' + (e && e.message));
 }
 
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);

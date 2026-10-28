@@ -2792,6 +2792,9 @@ function undoCheckin(id){
 // and the here-crowd collapsed to one line. Re-rendered live from renderRoster() on every sync.
 let _ciBoardShowAll=false;
 function toggleCheckinBoardAll(){_ciBoardShowAll=!_ciBoardShowAll;renderCheckinBoard();}
+// Organiser manual check-in from the board. Uses selfCheckIn (add-only, not blocked during an
+// active session) so a latecomer can be marked "here" any time; toggleCheckIn would reject it.
+function boardCheckIn(id){selfCheckIn(id);renderRoster();}
 function renderCheckinBoard(){
   const el=document.getElementById('checkin-board');
   if(!el)return;
@@ -2804,7 +2807,7 @@ function renderCheckinBoard(){
     </div>`;
   if(absent.length){
     html+=`<div class="cib-label cib-wait">Still waiting on</div><div class="cib-abs">`+
-      absent.map(p=>`<div class="cib-arow"><span>${esc(p.name)}${tagHtml(p)}</span><button class="cib-plus" onclick="toggleCheckIn('${p.id}')">＋ Here</button></div>`).join('')+
+      absent.map(p=>`<div class="cib-arow"><span>${esc(p.name)}${tagHtml(p)}</span><button class="cib-plus" onclick="boardCheckIn('${p.id}')">＋ Here</button></div>`).join('')+
       `</div>`;
   }else{
     html+=`<div class="cib-alldone">✓ Everyone's here (${present.length})</div>`;
@@ -2837,17 +2840,23 @@ function selectAll(){
       }
     }
   });
+  // Persist the synced checkedIn node (lobby carries it via 'session'; otherwise save 'checkin'),
+  // else a remote apply would revert this local ☑All once players start checking in.
   if(S.session?.status==='lobby'){STORE.save('session');renderLive();}
+  else STORE.save('checkin');
   renderDB();renderRoster();
 }
 function selectNone(){
   if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
+  S.checkedIn.clear(); // clear BEFORE saving so the persisted node reflects the empty roster
   if(S.session?.status==='lobby'){
     // In lobby: also remove all from session roster
     S.session.activePlayers=[];S.session.players=[];
     STORE.save('session');renderLive();
+  }else{
+    STORE.save('checkin');
   }
-  S.checkedIn.clear();renderDB();renderRoster();
+  renderDB();renderRoster();
 }
 
 /* ── SESSION ─────────────────────────────────────── */
