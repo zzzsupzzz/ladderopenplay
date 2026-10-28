@@ -3825,6 +3825,11 @@ function _renderLobby(){
         <span id="lobby-summary" style="font-size:.7rem;color:${summaryColor};margin-left:4px">${summaryText}</span>
       </div>
       ${courtHint}
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <span style="font-size:.67rem;font-weight:700;color:var(--mu);letter-spacing:.06em">🏆 LADDER LIVE ROUND</span>
+        <input type="number" min="1" max="60" value="${S.session.llRoundMin||10}" onchange="S.session&&(S.session.llRoundMin=Math.max(1,Math.min(60,parseInt(this.value)||10)))" style="width:58px;font-size:.78rem;padding:4px 6px;text-align:center" class="inp" title="Minutes per timed round (Ladder Live only)"/>
+        <span style="font-size:.7rem;color:var(--mu)">min per round — all courts stop together, enter all scores</span>
+      </div>
 
       ${players.length?`
       <div style="font-size:.67rem;font-weight:700;color:var(--mu);letter-spacing:.06em;margin-bottom:6px">CHECKED IN (${players.length})</div>
@@ -11522,7 +11527,9 @@ const LL={
     let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:7px">
       <div><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--go)">🏆 LADDER LIVE</div>
       <div style="font-size:.71rem;color:var(--mu)">Game ${ll.gameNum} · ${this._ids().length} players · ${ll.courts} court${ll.courts>1?'s':''}</div></div>
-      <div style="display:flex;gap:5px;flex-wrap:wrap"><button class="btn bs sm" onclick="openRosterModal()">👤 Players ±</button>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="text-align:center"><div id="ll-timer" class="ct-timer" style="font-size:1.5rem;min-width:62px">${this._fmtClock(this.roundRemaining(Date.now()))}</div><div style="font-size:.55rem;color:var(--mu);letter-spacing:1px">ROUND</div></div>
+      <button class="btn bs sm" onclick="openRosterModal()">👤 Players ±</button>
       <button class="btn bd2" onclick="doEndSession()" title="End this session and save">🏁 End</button></div></div></div>`;
     const cur=ll.current;
     if(!cur){ return h+`<div class="card"><button class="btn bp" style="width:100%" onclick="LL.advance()">▶ Start Game 1</button></div>`; }
@@ -11539,9 +11546,25 @@ const LL={
       h+=`<div class="card"><div class="ct">😴 Resting this game (${cur.resting.length})</div>
         <div style="font-size:.78rem;color:var(--mu);margin-top:5px">${cur.resting.map(nm).join(' · ')}</div></div>`;
     }
-    h+=`<div class="card"><button class="btn bp" style="width:100%;font-size:.95rem" onclick="LL.submitAndAdvance()">✓ Submit scores → next game</button></div>`;
+    h+=`<div id="ll-round-over" style="display:${this.roundRemaining(Date.now())===0?'block':'none'};background:rgba(248,113,113,.12);border:1px solid var(--re);border-radius:var(--ra);padding:9px 12px;margin-bottom:10px;text-align:center;color:var(--re);font-weight:700;font-size:.82rem">⏰ TIME — enter every court's score, then submit</div>`;
+    h+=`<div class="card"><button class="btn bp" style="width:100%;font-size:.95rem" onclick="LL.submitAndAdvance()">✓ Submit scores → next round</button></div>`;
     h+=this.standingsHTML();
     return h;
+  },
+  _fmtClock(s){ if(s==null)return '--:--'; const m=Math.floor(s/60),ss=s%60; return `${m}:${String(ss).padStart(2,'0')}`; },
+  // Per-second repaint of ONLY the timer node (never the whole view — that would wipe typed scores).
+  _ensureTick(){
+    if(this._tickInt)return;
+    this._tickInt=setInterval(()=>{
+      const ll=this._ll(), el=document.getElementById('ll-timer');
+      if(!ll||!ll.current||!el){ clearInterval(this._tickInt); this._tickInt=null; return; }
+      const rem=this.roundRemaining(Date.now());
+      el.textContent=this._fmtClock(rem);
+      el.classList.toggle('warn', rem!=null&&rem>0&&rem<=60);
+      el.classList.toggle('ovr', rem===0);
+      const over=document.getElementById('ll-round-over');
+      if(over)over.style.display=rem===0?'block':'none';
+    },1000);
   },
   standingsHTML(){
     const s=this.standings(); if(!s.length) return '';
@@ -11551,7 +11574,7 @@ const LL={
       ${s.map((p,i)=>`<tr><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.79rem">${nm(p.id)}</td><td><span class="dl ${p.diff>0?'du':p.diff<0?'dd':'dz'}">${p.diff>=0?'+':''}${p.diff}</span></td><td><span class="rv">${p.rating}</span></td><td style="font-size:.71rem;color:var(--mu)">${p.games}</td></tr>`).join('')}
       </tbody></table></div>`;
   },
-  _paint(){ const el=document.getElementById('ll-live-wrap'); if(el) el.innerHTML=this.renderLive(); },
+  _paint(){ const el=document.getElementById('ll-live-wrap'); if(el) el.innerHTML=this.renderLive(); this._ensureTick(); },
   // Build + paint the next synchronized game (also used to seat game 1).
   advance(){ this.buildGame(); this._paint(); try{STORE.save('session');}catch(e){} },
   // Read the per-court score inputs, record the result, re-seed, and paint the next game.
