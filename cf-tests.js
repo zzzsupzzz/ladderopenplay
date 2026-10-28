@@ -75,6 +75,10 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   _initSessionRanks:typeof _initSessionRanks!=='undefined'?_initSessionRanks:null,
   gp:typeof gp!=='undefined'?gp:null, gsp:typeof gsp!=='undefined'?gsp:null,
   isCheckinModeUrl:typeof isCheckinModeUrl!=='undefined'?isCheckinModeUrl:null,
+  checkAdminAccess:typeof checkAdminAccess!=='undefined'?checkAdminAccess:null,
+  _setCheckinMode:(v)=>{try{CHECKIN_MODE=v}catch(e){}},
+  _setAdminUnlocked:(v)=>{try{ADMIN_UNLOCKED=v}catch(e){}},
+  _getAdminUnlocked:()=>{try{return ADMIN_UNLOCKED}catch(e){return undefined}},
   _absentPlayers:typeof _absentPlayers!=='undefined'?_absentPlayers:null,
   _presentPlayers:typeof _presentPlayers!=='undefined'?_presentPlayers:null,
   selfCheckIn:typeof selfCheckIn!=='undefined'?selfCheckIn:null,
@@ -947,6 +951,23 @@ try {
   eq(JSON.stringify(APP._absentPlayers()), JSON.stringify([]), 'empty roster → empty absent list (no crash)');
 } catch (e) {
   fail++; console.error('  ❌ checkin helpers test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
+// ── Tests: CHECK-IN — no admin-lock prompt (players need no code) ────────────
+// getAdminPin() returns a fixed code, so without a bypass the lock overlay blocks the page.
+// checkAdminAccess must grant access in CHECKIN_MODE just like PLAYER_MODE/OBSERVER_MODE.
+section('checkin — no admin-lock on the self check-in page');
+['_showAdminLockOverlay', '_hideAdminLockOverlay', 'switchTab', 'updatePinStatus'].forEach(fn => { try { ctx[fn] = () => {}; } catch (e) {} });
+try {
+  S.session = null;
+  APP._setAdminUnlocked(false);
+  APP._setCheckinMode(true);
+  APP.checkAdminAccess();
+  ok(APP._getAdminUnlocked() === true, 'CHECKIN_MODE grants access without showing the admin lock (like player/observer)');
+} catch (e) {
+  fail++; console.error('  ❌ checkin admin-lock test threw: ' + (e && e.message));
+} finally {
+  try { APP._setCheckinMode(false); APP._setAdminUnlocked(false); } catch (e) {}
 }
 
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);

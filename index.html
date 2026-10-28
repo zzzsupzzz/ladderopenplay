@@ -423,7 +423,7 @@ body.observer-mode .qs-row{display:none!important}
       <div class="ci-title">CHECK IN</div>
       <div class="ci-sub">Tap your name to say "I'm here"</div>
     </div>
-    <input id="checkin-search" class="ci-search" type="text" placeholder="&#128269;  Search your name…" autocomplete="off" aria-label="Search your name"/>
+    <input id="checkin-search" class="ci-search" type="text" placeholder="&#128269;  Search your name…" autocomplete="off" aria-label="Search your name" oninput="renderCheckin()"/>
     <div id="checkin-list" class="ci-list"></div>
     <div class="ci-foot">Can't find your name? Ask the organiser to add you.</div>
   </div>
@@ -2719,6 +2719,55 @@ function selfCheckOut(id){
   }
 }
 
+/* ── SELF CHECK-IN PAGE RENDER (?view=checkin) ────────────────────────────── */
+// Combined alphabetical roster: absent names are tappable (+), already-here names show green and
+// are NOT tappable to un-check (Undo lives on the confirmation only). Re-rendered live on every
+// sync via renderRoster().
+function renderCheckin(){
+  const listEl=document.getElementById('checkin-list');
+  if(!listEl)return;
+  const q=(document.getElementById('checkin-search')?.value||'').trim().toLowerCase();
+  // Loading gate: data hasn't arrived and nothing was restored → never show a false-empty roster.
+  if(!(S.db&&S.db.length)&&!HAS_REMOTE_HYDRATED){
+    listEl.innerHTML='<div class="ci-empty">Loading…</div>';return;
+  }
+  const rows=(S.db||[]).filter(p=>!q||(p.name||'').toLowerCase().includes(q))
+    .sort((a,b)=>(a.name||'').toLowerCase().localeCompare((b.name||'').toLowerCase()));
+  if(!rows.length){
+    listEl.innerHTML='<div class="ci-empty">'+(q?'No one matches "'+esc(q)+'".':'No players yet — ask the organiser to add you.')+'</div>';return;
+  }
+  listEl.innerHTML=rows.map(p=>S.checkedIn.has(p.id)
+    ? `<div class="ci-row here"><span>${esc(p.name)}</span><span class="ci-tag">✓ Here</span></div>`
+    : `<div class="ci-row" onclick="onCheckinTap('${p.id}')"><span>${esc(p.name)}</span><span class="ci-plus">+</span></div>`
+  ).join('');
+}
+function onCheckinTap(id){
+  const name=selfCheckIn(id);
+  if(!name)return;
+  renderCheckin(); // list now shows them green
+  const c=document.getElementById('checkin-confirm');
+  if(!c)return;
+  c.innerHTML=`<div class="ci-card">
+      <div class="ci-check">✅</div>
+      <div class="ci-done">YOU'RE CHECKED IN</div>
+      <div class="ci-name">${esc(name)}</div>
+    </div>
+    <div class="ci-actions">
+      <button class="btn bp" onclick="checkinAnother()">Check in someone else</button>
+      <button class="btn bg2" onclick="undoCheckin('${id}')">Undo — that's not me</button>
+    </div>`;
+  c.style.display='flex';
+}
+function checkinAnother(){
+  const c=document.getElementById('checkin-confirm');if(c)c.style.display='none';
+  const s=document.getElementById('checkin-search');if(s)s.value='';
+  renderCheckin();
+}
+function undoCheckin(id){
+  selfCheckOut(id);
+  checkinAnother(); // hide overlay + clear search + refresh list
+}
+
 function selectAll(){
   if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
   S.db.forEach(p=>{
@@ -3476,6 +3525,8 @@ function renderDB(){
 
 /* ── RENDER: ROSTER ──────────────────────────────── */
 function renderRoster(){
+  // Self check-in page piggybacks on the roster re-render so it updates live on every sync.
+  if(CHECKIN_MODE){renderCheckin();return;}
   const arr=[...S.checkedIn];
   document.getElementById('roster-badge').textContent=arr.length;
   const sessStatus=S.session?.status;
@@ -5813,7 +5864,8 @@ function _isDeviceLocked(){
 
 // ── Called after state is restored (init, _applyRemote first load) ──
 function checkAdminAccess(){
-  if(PLAYER_MODE||OBSERVER_MODE){if(!ADMIN_UNLOCKED)_doUnlock();return;}
+  // Player, observer and self check-in views are code-free — players never see the admin lock.
+  if(PLAYER_MODE||OBSERVER_MODE||CHECKIN_MODE){if(!ADMIN_UNLOCKED)_doUnlock();return;}
   const pin=getAdminPin();
 
   if(!pin){
