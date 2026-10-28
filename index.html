@@ -430,6 +430,9 @@ body.observer-mode .qs-row{display:none!important}
     display:flex;justify-content:space-between;align-items:center;font-size:.85rem;color:var(--tx)}
   .cib-plus{background:rgba(52,217,116,.12);border:1px solid var(--gd);color:var(--gr);border-radius:7px;
     padding:4px 10px;font-size:.74rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap}
+  .cib-x{background:transparent;border:1px solid var(--bd);color:var(--mu);border-radius:7px;
+    padding:4px 9px;font-size:.74rem;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap}
+  .cib-x:hover{border-color:var(--re);color:var(--re)}
   .cib-alldone{background:rgba(52,217,116,.1);border:1px solid var(--gd);border-radius:8px;padding:9px 11px;
     color:var(--gr);font-size:.82rem;font-weight:600}
   .cib-herelist{font-size:.78rem;color:var(--mu);line-height:1.6}
@@ -2784,12 +2787,17 @@ function renderCheckin(){
   if(!(S.db&&S.db.length)&&!HAS_REMOTE_HYDRATED){
     listEl.innerHTML='<div class="ci-empty">Loading…</div>';return;
   }
-  const rows=(S.db||[]).filter(p=>!q||(p.name||'').toLowerCase().includes(q))
-    .sort((a,b)=>(a.name||'').toLowerCase().localeCompare((b.name||'').toLowerCase()));
+  const match=p=>!q||(p.name||'').toLowerCase().includes(q);
+  // Scope to the registered waiting list (_absentPlayers, tappable) + everyone already here
+  // (_presentPlayers, green) — so when a registration is active the QR page shows only those people.
+  const rows=[
+    ..._absentPlayers().filter(match).map(p=>({p,here:false})),
+    ..._presentPlayers().filter(match).map(p=>({p,here:true}))
+  ].sort((a,b)=>(a.p.name||'').toLowerCase().localeCompare((b.p.name||'').toLowerCase()));
   if(!rows.length){
     listEl.innerHTML='<div class="ci-empty">'+(q?'No one matches "'+esc(q)+'".':'No players yet — ask the organiser to add you.')+'</div>';return;
   }
-  listEl.innerHTML=rows.map(p=>S.checkedIn.has(p.id)
+  listEl.innerHTML=rows.map(({p,here})=>here
     ? `<div class="ci-row here"><span>${esc(p.name)}</span><span class="ci-tag">✓ Here</span></div>`
     : `<div class="ci-row" onclick="onCheckinTap('${p.id}')"><span>${esc(p.name)}</span><span class="ci-plus">+</span></div>`
   ).join('');
@@ -2829,11 +2837,17 @@ function toggleCheckinBoardAll(){_ciBoardShowAll=!_ciBoardShowAll;renderCheckinB
 // Organiser manual check-in from the board. Uses selfCheckIn (add-only, not blocked during an
 // active session) so a latecomer can be marked "here" any time; toggleCheckIn would reject it.
 function boardCheckIn(id){selfCheckIn(id);renderRoster();}
+// Remove a registered no-show (drop-out / replacement) from the event — off the registered list.
+function boardRemove(id){
+  if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
+  _unregisterPlayer(id);renderRoster();
+}
 function renderCheckinBoard(){
   const el=document.getElementById('checkin-board');
   if(!el)return;
   if(!(S.db&&S.db.length)){el.innerHTML='';return;}
   const present=_presentPlayers(), absent=_absentPlayers();
+  const scoped=S.registered.size>0; // waiting list is the registered no-shows → offer Remove
   let html=`<div class="ci-board">
     <div class="cib-top">
       <div class="cib-counts"><span class="cib-here">${present.length}</span> here · <span class="cib-not">${absent.length}</span> not yet</div>
@@ -2841,7 +2855,7 @@ function renderCheckinBoard(){
     </div>`;
   if(absent.length){
     html+=`<div class="cib-label cib-wait">Still waiting on</div><div class="cib-abs">`+
-      absent.map(p=>`<div class="cib-arow"><span>${esc(p.name)}${tagHtml(p)}</span><button class="cib-plus" onclick="boardCheckIn('${p.id}')">＋ Here</button></div>`).join('')+
+      absent.map(p=>`<div class="cib-arow"><span>${esc(p.name)}${tagHtml(p)}</span><span style="display:flex;gap:5px">${scoped?`<button class="cib-x" onclick="boardRemove('${p.id}')" title="Remove from registered (drop-out)">✕</button>`:''}<button class="cib-plus" onclick="boardCheckIn('${p.id}')">＋ Here</button></span></div>`).join('')+
       `</div>`;
   }else{
     html+=`<div class="cib-alldone">✓ Everyone's here (${present.length})</div>`;
