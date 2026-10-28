@@ -54,7 +54,7 @@ const firebaseStub = (() => {
 
 const ctx = {
   console, Math, JSON, Date, Object, Array, Set, Map, Number, String, Boolean,
-  parseInt, parseFloat, isNaN, isFinite, RegExp, Promise, Symbol, Proxy,
+  parseInt, parseFloat, isNaN, isFinite, RegExp, Promise, Symbol, Proxy, URLSearchParams,
   setTimeout: () => 0, clearTimeout: noop, setInterval: () => 0, clearInterval: noop,
   requestAnimationFrame: () => 0, cancelAnimationFrame: noop,
   document: documentStub, localStorage: localStorageStub, sessionStorage: localStorageStub,
@@ -74,6 +74,11 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   _ranksCompatible:typeof _ranksCompatible!=='undefined'?_ranksCompatible:null,
   _initSessionRanks:typeof _initSessionRanks!=='undefined'?_initSessionRanks:null,
   gp:typeof gp!=='undefined'?gp:null, gsp:typeof gsp!=='undefined'?gsp:null,
+  isCheckinModeUrl:typeof isCheckinModeUrl!=='undefined'?isCheckinModeUrl:null,
+  _absentPlayers:typeof _absentPlayers!=='undefined'?_absentPlayers:null,
+  _presentPlayers:typeof _presentPlayers!=='undefined'?_presentPlayers:null,
+  selfCheckIn:typeof selfCheckIn!=='undefined'?selfCheckIn:null,
+  selfCheckOut:typeof selfCheckOut!=='undefined'?selfCheckOut:null,
   _seasonLadderHtml:typeof _seasonLadderHtml!=='undefined'?_seasonLadderHtml:null,
   _streakOf:typeof _streakOf!=='undefined'?_streakOf:null,
   _tierOf:typeof _tierOf!=='undefined'?_tierOf:null,
@@ -902,6 +907,24 @@ try {
   ok(/Live Ladder/.test(html) && /point differential/.test(html), 'live ladder standings embedded');
 } catch (e) {
   fail++; console.error('  ❌ Ladder Live UI render test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
+// ── Tests: CHECK-IN — ?view=checkin mode detection ──────────────────────────
+section('checkin — ?view=checkin mode detection');
+try {
+  if (typeof APP.isCheckinModeUrl !== 'function') throw new Error('isCheckinModeUrl not exported');
+  ctx.location.search = '?view=checkin'; ctx.location.hash = '';
+  ok(APP.isCheckinModeUrl() === true, '?view=checkin → true');
+  ctx.location.search = ''; ctx.location.hash = '#checkin';
+  ok(APP.isCheckinModeUrl() === true, '#checkin → true');
+  ctx.location.search = '?view=player'; ctx.location.hash = '';
+  ok(APP.isCheckinModeUrl() === false, '?view=player → false');
+  ctx.location.search = ''; ctx.location.hash = '';
+  ok(APP.isCheckinModeUrl() === false, 'no suffix → false');
+} catch (e) {
+  fail++; console.error('  ❌ checkin view-mode test threw: ' + (e && e.message));
+} finally {
+  ctx.location.search = ''; ctx.location.hash = '';
 }
 
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);

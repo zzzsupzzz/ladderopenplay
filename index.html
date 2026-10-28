@@ -10912,10 +10912,16 @@ function renderPlayerView(){
 /* § BOOT */
 let PLAYER_MODE=false;   // true when URL has ?view=player or #player
 let OBSERVER_MODE=false; // true when URL has ?view=observer — full admin view, no write actions
+let CHECKIN_MODE=false;  // true when URL has ?view=checkin — self check-in page, writes S.checkedIn only
 
 function isObserverModeUrl(){
   const params=new URLSearchParams(window.location.search);
   return params.get('view')==='observer'||window.location.hash==='#observer';
+}
+
+function isCheckinModeUrl(){
+  const params=new URLSearchParams(window.location.search);
+  return params.get('view')==='checkin'||window.location.hash==='#checkin';
 }
 
 function initObserverMode(){
@@ -10986,6 +10992,27 @@ function initObserverMode(){
   switchTab('player');
 }
 
+function initCheckinMode(){
+  CHECKIN_MODE=isCheckinModeUrl();
+  if(!CHECKIN_MODE)return;
+  // Obfuscate URL — replace ?view=checkin with #checkin in the address bar (same UX nicety
+  // as player/observer; the admin PIN remains the real gate).
+  try{
+    const cleanUrl=window.location.href.split('?')[0].split('#')[0]+'#checkin';
+    window.history.replaceState(null,'',cleanUrl);
+  }catch(e){/* replaceState blocked in some embedded contexts — non-fatal */}
+  // Dedicated self check-in screen: hide all admin chrome and every tab, show #checkin-screen.
+  ['share-btn','observer-btn','lock-btn','adv-mode-btn','admin-mode-badge','hbadge','sync-badge'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.style.display='none';
+  });
+  document.querySelectorAll('.tb').forEach(b=>b.style.display='none');
+  const screen=document.getElementById('checkin-screen');
+  if(screen)screen.style.display='block';
+  // renderCheckin() builds the roster list (added in a later task); until then the static
+  // screen container stands in without error.
+  if(typeof renderCheckin==='function')renderCheckin();
+}
+
 function init(){
   console.log('[pb] Build: PIN-HYDRATION-FIX-v2');
   // NOTE: pb_local_backup is no longer cleared eagerly on startup.
@@ -11026,6 +11053,7 @@ function init(){
   document.getElementById('cfm-bg').addEventListener('click',function(e){if(e.target===this)document.getElementById('cfm-no').click();});
   initPlayerMode();
   initObserverMode();
+  initCheckinMode();
 
   // Auto-restore local snapshot immediately — app is usable before Firebase responds
   const _didRestore=_autoRestoreFromLocal();
