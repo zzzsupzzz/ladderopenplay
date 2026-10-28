@@ -11416,7 +11416,7 @@ const LL={
     const players={};
     active.forEach(sp=>{
       players[sp.id]={id:sp.id, rating:(sp.sRating??gp(sp.id)?.rating??1000),
-        streak:0, satLast:false, rests:0, games:0, pf:0, pa:0, lastPartner:null};
+        streak:0, satLast:false, rests:0, games:0, pf:0, pa:0, wins:0, losses:0, ties:0, lastPartner:null};
     });
     S.session.ll={courts:Math.max(1,courts||1), roundMin:(S.session.llRoundMin)||10, gameNum:0, players, current:null, log:[]};
     return S.session.ll;
@@ -11524,6 +11524,11 @@ const LL={
       const delta=Math.round(this.K*mov*evidence*(act1-e1)); // + if t1 over-performed
       g.t1.forEach(id=>{P[id].rating+=delta; P[id].pf+=s1; P[id].pa+=s2;});
       g.t2.forEach(id=>{P[id].rating-=delta; P[id].pf+=s2; P[id].pa+=s1;});
+      // Tally W/L/ties now — the log stores no teams, so it can't be reconstructed later.
+      const bump=(id,k)=>{P[id][k]=(P[id][k]||0)+1;};
+      if(s1>s2){ g.t1.forEach(id=>bump(id,'wins')); g.t2.forEach(id=>bump(id,'losses')); }
+      else if(s1<s2){ g.t2.forEach(id=>bump(id,'wins')); g.t1.forEach(id=>bump(id,'losses')); }
+      else { [...g.t1,...g.t2].forEach(id=>bump(id,'ties')); }
     });
     ll.log.push({game:ll.gameNum, scores:scoresByCourt});
   },

@@ -1115,5 +1115,26 @@ try {
   fail++; console.error('  ❌ LL normalize test threw: ' + (e && e.message));
 }
 
+// ── Tests: Ladder Live timed — W/L/ties tally ───────────────────────────────
+// recordGame must tally wins/losses/ties per player (the log doesn't store teams, so it can't be
+// reconstructed later). Winner team → win each, loser → loss each, equal → tie for all four.
+section('Ladder Live — timed: W/L tally');
+try {
+  makeSession(8, 2); APP.LL.init(2);
+  const P = S.session.ll.players; const ids = Object.keys(P);
+  S.session.ll.current = { games: [{ court: 1, t1: [ids[0], ids[1]], t2: [ids[2], ids[3]] }], resting: [] };
+  S.session.ll.gameNum = 1;
+  APP.LL.recordGame({ 1: [11, 5] });
+  eq(P[ids[0]].wins, 1, 'winner gets a win'); eq(P[ids[0]].losses, 0, 'winner no loss');
+  eq(P[ids[2]].losses, 1, 'loser gets a loss'); eq(P[ids[2]].wins, 0, 'loser no win');
+  S.session.ll.current = { games: [{ court: 1, t1: [ids[0], ids[1]], t2: [ids[2], ids[3]] }], resting: [] };
+  APP.LL.recordGame({ 1: [6, 6] });
+  eq(P[ids[0]].ties, 1, 'tie counts for all four (t1)');
+  eq(P[ids[2]].ties, 1, 'tie counts for all four (t2)');
+  eq(P[ids[0]].wins + P[ids[0]].losses + P[ids[0]].ties, 2, 'two recorded games tallied (1 win + 1 tie)');
+} catch (e) {
+  fail++; console.error('  ❌ LL W/L tally test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
