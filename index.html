@@ -5524,6 +5524,7 @@ function doEndSession(){
     toast('Session already archived — cleared','ok');return;
   }
   showCfm(`End <strong>${esc(S.session.name)}</strong>?<br/><span style="font-size:.74rem;color:var(--mu)">Ratings saved to database.</span>`,'🏁 End Session','bp',()=>{
+    if(S.session.format==='ll'){try{LL._syncToSession();}catch(e){}} // fold LL results into session.players before archiving
     const arch={id:S.session.id,name:S.session.name,date:S.session.date,cfMode:true,
       players:S.session.players.map(sp=>{const p=gp(sp.id)||{};return{id:sp.id,name:sp.name||p.name||'?',tag:sp.tag||p.tag||'',sRating:sp.sRating,startRating:sp.startRating,wins:sp.wins,losses:sp.losses,ties:sp.ties,matchesPlayed:sp.matchesPlayed,ptsFor:sp.ptsFor,ptsAgainst:sp.ptsAgainst,_joinedAtMatch:sp._joinedAtMatch??null,_resumedAtMatch:sp._resumedAtMatch??null,_absences:Array.isArray(sp._absences)?sp._absences:null};}),
       cfRanks:JSON.parse(JSON.stringify(S.session.cfRanks||{})),
@@ -11603,6 +11604,18 @@ const LL={
   _paint(){ const el=document.getElementById('ll-live-wrap'); if(el) el.innerHTML=this.renderLive(); this._ensureTick(); },
   // Build + paint the next synchronized game (also used to seat game 1).
   advance(){ this.buildGame(); this._paint(); try{STORE.save('session');}catch(e){} },
+  // Write LL results into session.players so the archive / all-time recalc / Season Ladder pick up
+  // the night. Overwrite (idempotent), startRating untouched. Called each round + at End Session.
+  _syncToSession(){
+    const ll=this._ll(); if(!ll||!S.session?.players)return;
+    S.session.players.forEach(sp=>{
+      const p=ll.players[sp.id]; if(!p)return;
+      sp.sRating=p.rating;
+      sp.ptsFor=p.pf; sp.ptsAgainst=p.pa;
+      sp.matchesPlayed=p.games;
+      sp.wins=p.wins||0; sp.losses=p.losses||0; sp.ties=p.ties||0;
+    });
+  },
   // Read the per-court score inputs, record the result, re-seed, and paint the next game.
   submitAndAdvance(){
     const ll=this._ll(); if(!ll){return;}
@@ -11616,6 +11629,7 @@ const LL={
     });
     if(bad){ try{toast('Enter every court’s score first','err');}catch(e){} return; }
     this.recordGame(scores);
+    this._syncToSession(); // keep session.players current (archive/all-time/History + robust to abnormal end)
     this.buildGame();
     this._paint();
     try{STORE.save('session');}catch(e){}

@@ -1136,5 +1136,29 @@ try {
   fail++; console.error('  ❌ LL W/L tally test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
 
+// ── Tests: Ladder Live timed — sync results into session.players ────────────
+// So the existing archive / recalcAllTimeRatings / Season Ladder pick up LL nights. Overwrite,
+// not additive (idempotent); startRating untouched so the net delta is the night's movement.
+section('Ladder Live — timed: sync to session.players');
+try {
+  makeSession(8, 2); APP.LL.init(2); APP.LL.buildGame();
+  const ll = S.session.ll; const ids = Object.keys(ll.players);
+  ll.current = { games: [{ court: 1, t1: [ids[0], ids[1]], t2: [ids[2], ids[3]] }], resting: [] };
+  APP.LL.recordGame({ 1: [11, 5] });
+  const sp = id => S.session.players.find(p => p.id === id);
+  const start0 = sp(ids[0]).startRating;
+  APP.LL._syncToSession();
+  eq(sp(ids[0]).sRating, ll.players[ids[0]].rating, 'sRating synced from ll rating');
+  eq(sp(ids[0]).ptsFor, 11, 'ptsFor synced'); eq(sp(ids[0]).ptsAgainst, 5, 'ptsAgainst synced');
+  eq(sp(ids[0]).wins, 1, 'wins synced'); eq(sp(ids[2]).losses, 1, 'losses synced');
+  eq(sp(ids[0]).matchesPlayed, ll.players[ids[0]].games, 'matchesPlayed synced');
+  eq(sp(ids[0]).startRating, start0, 'startRating untouched (net delta = night movement)');
+  APP.LL._syncToSession(); // idempotent
+  eq(sp(ids[0]).wins, 1, 'idempotent — wins not doubled');
+  eq(sp(ids[0]).ptsFor, 11, 'idempotent — points not doubled');
+} catch (e) {
+  fail++; console.error('  ❌ LL sync test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
