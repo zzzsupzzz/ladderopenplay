@@ -3793,6 +3793,11 @@ function _renderLobby(){
     const summaryText=canBegin
       ?`${courts} court${courts!==1?'s':''} · ${starting} starting · ${queuing>0?queuing+' queuing first':'everyone plays first!'} · avg ${avg}`
       :`Need at least 4 players to begin`;
+    // Hint when the checked-in count can't fill every chosen court (4 players per court).
+    const fillable=Math.floor(total/4);
+    const courtHint=(canBegin&&fillable<courts)
+      ?`<div style="font-size:.7rem;color:var(--or);margin:-4px 0 12px;display:flex;align-items:center;gap:6px;background:rgba(251,147,60,.08);border:1px solid rgba(251,147,60,.3);border-radius:var(--ra);padding:7px 10px"><span>⚠</span><span>${total} player${total!==1?'s':''} fill <strong>${fillable} of ${courts}</strong> court${courts!==1?'s':''} — ${courts*4} needed for all ${courts} (4 per court). First games & Ladder Live use ${fillable}.</span></div>`
+      :'';
 
     sw.innerHTML=`
     <div style="background:rgba(52,217,116,.07);border:1px solid rgba(52,217,116,.25);border-radius:var(--rl);padding:16px;margin-bottom:11px">
@@ -3819,6 +3824,7 @@ function _renderLobby(){
         </div>
         <span id="lobby-summary" style="font-size:.7rem;color:${summaryColor};margin-left:4px">${summaryText}</span>
       </div>
+      ${courtHint}
 
       ${players.length?`
       <div style="font-size:.67rem;font-weight:700;color:var(--mu);letter-spacing:.06em;margin-bottom:6px">CHECKED IN (${players.length})</div>
