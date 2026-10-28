@@ -927,5 +927,27 @@ try {
   ctx.location.search = ''; ctx.location.hash = '';
 }
 
+// ── Tests: CHECK-IN — present/absent split + self check-in/out ───────────────
+section('checkin — present/absent split + self check-in/out');
+try {
+  S.session = null;
+  S.db = [{ id: 'a', name: 'Bea' }, { id: 'b', name: 'Al' }];
+  S.checkedIn = new Set();
+  eq(JSON.stringify(APP._absentPlayers().map(p => p.name)), JSON.stringify(['Al', 'Bea']), '_absentPlayers sorted by name');
+  eq(APP.selfCheckIn('a'), 'Bea', 'selfCheckIn returns the checked-in player name');
+  ok(S.checkedIn.has('a'), 'selfCheckIn adds the id to checkedIn');
+  eq(JSON.stringify(APP._absentPlayers().map(p => p.id)), JSON.stringify(['b']), 'checked-in player drops out of the absent list');
+  eq(JSON.stringify(APP._presentPlayers().map(p => p.id)), JSON.stringify(['a']), '_presentPlayers lists the checked-in player');
+  APP.selfCheckIn('a');
+  eq(S.checkedIn.size, 1, 'selfCheckIn is idempotent — a second tap adds no duplicate');
+  ok(APP.selfCheckIn('zzz') === null, 'selfCheckIn on an unknown id → null');
+  APP.selfCheckOut('a');
+  ok(!S.checkedIn.has('a'), 'selfCheckOut removes the id (Undo)');
+  S.db = []; S.checkedIn = new Set();
+  eq(JSON.stringify(APP._absentPlayers()), JSON.stringify([]), 'empty roster → empty absent list (no crash)');
+} catch (e) {
+  fail++; console.error('  ❌ checkin helpers test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -899,6 +899,11 @@ const SYNC={
       updates.db=S.db;
     if(segment==='all'||segment==='archive')
       updates.archive=S.archive;
+    // checkedIn is its own synced node so self check-ins reach the organiser even with no
+    // session open (setup window) and for latecomers during an active session. Written on
+    // 'session' too so lobby add/remove keeps the node consistent with activePlayers.
+    if(segment==='all'||segment==='session'||segment==='checkin')
+      updates.checkedIn=[...S.checkedIn];
     _pushWithRetry(updates, 0, onComplete);
   },
 
@@ -1122,12 +1127,16 @@ const SYNC={
           _a('cfLog');_a('cfQueue');_a('cfPaused');
           _d('cfCourts');
         }
-        if(S.session.activePlayers?.length){
-          S.checkedIn.clear();
-          S.session.activePlayers.forEach(id=>S.checkedIn.add(id));
-        }
+        // checkedIn = the synced node ∪ activePlayers (players in the session are always "here").
+        S.checkedIn.clear();
+        if(Array.isArray(remote.checkedIn))remote.checkedIn.forEach(id=>S.checkedIn.add(id));
+        if(S.session.activePlayers)S.session.activePlayers.forEach(id=>S.checkedIn.add(id));
         if(S.session.status==='active'&&S.session.cfMode)startCFTick();
-      }else{S.checkedIn.clear();}
+      }else{
+        // No session: checkedIn is purely the synced node (setup check-in window), not wiped.
+        S.checkedIn.clear();
+        if(Array.isArray(remote.checkedIn))remote.checkedIn.forEach(id=>S.checkedIn.add(id));
+      }
 
       _invalidateMatchmakingCaches();
       updateHeader();updatePinStatus();updatePvSelect();updatePvSessFilter();
@@ -2607,26 +2616,64 @@ function toggleCheckIn(id){
   if(S.session?.status==='active'){toast('Use "Players ±" during session','warn');return;}
   if(S.session?.status==='lobby'){
     // In lobby: sync checkedIn with session.activePlayers live
-    if(S.checkedIn.has(id)){
-      S.checkedIn.delete(id);
-      S.session.activePlayers=S.session.activePlayers.filter(x=>x!==id);
-      S.session.players=S.session.players.filter(x=>x.id!==id);
-    }else{
-      S.checkedIn.add(id);
-      if(!S.session.activePlayers.includes(id)){
-        S.session.activePlayers.push(id);
-        const p=gp(id);
-        if(p&&!S.session.players.find(x=>x.id===id)){
-          const startR=p.isNR?(p.nrLevelHint||1000):(p.rating||1000);
-          S.session.players.push({id,name:p.name,tag:p.tag||'',isNR:p.isNR||false,isSeeding:false,
-            sRating:startR,startRating:startR,baseRating:p.baseRating??p.rating??startR,wins:0,losses:0,ties:0,
-            matchesPlayed:0,ptsFor:0,ptsAgainst:0,timeOnCourtMs:0,timeInQueueMs:0,status:'active'});
-        }
-      }
-    }
+    if(S.checkedIn.has(id)){S.checkedIn.delete(id);_unenrollFromLobby(id);}
+    else{S.checkedIn.add(id);_enrollInLobby(id);}
     STORE.save('session');renderDB();renderLive();renderRoster();return;
   }
-  S.checkedIn.has(id)?S.checkedIn.delete(id):S.checkedIn.add(id);renderDB();renderRoster();
+  // No session yet (setup check-in window): checkedIn is a synced node, so persist the toggle.
+  S.checkedIn.has(id)?S.checkedIn.delete(id):S.checkedIn.add(id);
+  STORE.save('checkin');renderDB();renderRoster();
+}
+
+// ── Self check-in helpers (shared by the ?view=checkin page and the organiser board) ──
+// _enrollInLobby/_unenrollFromLobby carry the lobby roster-sync that toggleCheckIn used inline,
+// so a self check-in during an open lobby joins the forming session exactly as a manual tap would.
+function _enrollInLobby(id){
+  if(S.session?.status!=='lobby')return;
+  if(!S.session.activePlayers.includes(id)){
+    S.session.activePlayers.push(id);
+    const p=gp(id);
+    if(p&&!S.session.players.find(x=>x.id===id)){
+      const startR=p.isNR?(p.nrLevelHint||1000):(p.rating||1000);
+      S.session.players.push({id,name:p.name,tag:p.tag||'',isNR:p.isNR||false,isSeeding:false,
+        sRating:startR,startRating:startR,baseRating:p.baseRating??p.rating??startR,wins:0,losses:0,ties:0,
+        matchesPlayed:0,ptsFor:0,ptsAgainst:0,timeOnCourtMs:0,timeInQueueMs:0,status:'active'});
+    }
+  }
+}
+function _unenrollFromLobby(id){
+  if(S.session?.status!=='lobby')return;
+  S.session.activePlayers=S.session.activePlayers.filter(x=>x!==id);
+  S.session.players=S.session.players.filter(x=>x.id!==id);
+}
+function _presentPlayers(){
+  return (S.db||[]).filter(p=>S.checkedIn.has(p.id))
+    .sort((a,b)=>(a.name||'').toLowerCase().localeCompare((b.name||'').toLowerCase()));
+}
+function _absentPlayers(){
+  return (S.db||[]).filter(p=>!S.checkedIn.has(p.id))
+    .sort((a,b)=>(a.name||'').toLowerCase().localeCompare((b.name||'').toLowerCase()));
+}
+function _persistCheckin(){
+  // Lobby self check-in also touched the session roster, so save that; otherwise just the checkedIn node.
+  if(S.session?.status==='lobby')STORE.save('session');
+  else STORE.save('checkin');
+}
+function selfCheckIn(id){
+  const p=gp(id);if(!p)return null;
+  if(!S.checkedIn.has(id)){
+    S.checkedIn.add(id);
+    _enrollInLobby(id); // no-op unless a lobby session is open
+    _persistCheckin();
+  }
+  return p.name;
+}
+function selfCheckOut(id){
+  if(S.checkedIn.has(id)){
+    S.checkedIn.delete(id);
+    _unenrollFromLobby(id);
+    _persistCheckin();
+  }
 }
 
 function selectAll(){
