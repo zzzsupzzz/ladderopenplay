@@ -744,7 +744,7 @@ body.observer-mode .qs-row{display:none!important}
 // ================================================================
 
 /* § STATE */
-const S={db:[],checkedIn:new Set(),session:null,archive:[],adminPin:'',courts:1,extendedMin:16,timerSec:0,timerRunning:false,timerInterval:null,editId:null,_sessionEndedId:''};
+const S={db:[],checkedIn:new Set(),registered:new Set(),session:null,archive:[],adminPin:'',courts:1,extendedMin:16,timerSec:0,timerRunning:false,timerInterval:null,editId:null,_sessionEndedId:''};
 let _pageFirstLoad=true; // true only once — blocks reconnection from forcing tab switch
 let HAS_REMOTE_HYDRATED=false; // true after first successful _applyRemote — guards DB writes
 let _otherWriterTs=0; // last time a WRITE arrived from another device — drives the multi-scorer warning
@@ -2713,8 +2713,23 @@ function _presentPlayers(){
     .sort((a,b)=>(a.name||'').toLowerCase().localeCompare((b.name||'').toLowerCase()));
 }
 function _absentPlayers(){
-  return (S.db||[]).filter(p=>!S.checkedIn.has(p.id))
+  // Waiting list scopes to the registered set when a registration is in progress; otherwise the
+  // whole database (today's walk-up behaviour). Always excludes anyone already here.
+  const scoped=S.registered&&S.registered.size>0;
+  return (S.db||[]).filter(p=>(scoped?S.registered.has(p.id):true)&&!S.checkedIn.has(p.id))
     .sort((a,b)=>(a.name||'').toLowerCase().localeCompare((b.name||'').toLowerCase()));
+}
+// Per-event registered list (who's expected, set from Reclub). _presentPlayers is deliberately
+// NOT scoped, so a checked-in player is never hidden by registration.
+function isRegistered(id){return S.registered.has(id);}
+function _registerPlayer(id){
+  if(!S.registered.has(id)){S.registered.add(id);_persistCheckin();}
+}
+function _unregisterPlayer(id){
+  let changed=false;
+  if(S.registered.has(id)){S.registered.delete(id);changed=true;}
+  if(S.checkedIn.has(id)){S.checkedIn.delete(id);_unenrollFromLobby(id);changed=true;} // drop-out leaves the event
+  if(changed)_persistCheckin();
 }
 function _persistCheckin(){
   // Lobby self check-in also touched the session roster, so save that; otherwise just the checkedIn node.

@@ -82,6 +82,9 @@ const exportSnippet = `;var __APP={S:S,CF:CF,MM:MM,ELO:ELO,SYNC:typeof SYNC!=='u
   _getAdminUnlocked:()=>{try{return ADMIN_UNLOCKED}catch(e){return undefined}},
   _absentPlayers:typeof _absentPlayers!=='undefined'?_absentPlayers:null,
   _presentPlayers:typeof _presentPlayers!=='undefined'?_presentPlayers:null,
+  isRegistered:typeof isRegistered!=='undefined'?isRegistered:null,
+  _registerPlayer:typeof _registerPlayer!=='undefined'?_registerPlayer:null,
+  _unregisterPlayer:typeof _unregisterPlayer!=='undefined'?_unregisterPlayer:null,
   selfCheckIn:typeof selfCheckIn!=='undefined'?selfCheckIn:null,
   selfCheckOut:typeof selfCheckOut!=='undefined'?selfCheckOut:null,
   _seasonLadderHtml:typeof _seasonLadderHtml!=='undefined'?_seasonLadderHtml:null,
@@ -1012,6 +1015,35 @@ try {
   S.session = null;
 } catch (e) {
   fail++; console.error('  ❌ board +Here test threw: ' + (e && e.message));
+}
+
+// ── Tests: REGISTERED — per-event scoping + register/unregister ──────────────
+// The waiting list (_absentPlayers) scopes to S.registered when non-empty; _presentPlayers
+// (who's here) is never scoped, so a checked-in player is never hidden. Unregister also checks out.
+section('registered — scoping + register/unregister');
+try {
+  S.session = null;
+  S.db = [{ id: 'a', name: 'Al' }, { id: 'b', name: 'Bo' }, { id: 'c', name: 'Cy' }];
+  S.checkedIn = new Set();
+  S.registered = new Set();
+  eq(APP._absentPlayers().length, 3, 'empty registered → whole db in the waiting list');
+  APP._registerPlayer('a'); APP._registerPlayer('b');
+  eq(JSON.stringify(APP._absentPlayers().map(p => p.id)), JSON.stringify(['a', 'b']), 'waiting list scoped to registered (Cy excluded)');
+  S.checkedIn.add('a');
+  eq(JSON.stringify(APP._absentPlayers().map(p => p.id)), JSON.stringify(['b']), 'a checked-in registered player leaves the waiting list');
+  eq(JSON.stringify(APP._presentPlayers().map(p => p.id)), JSON.stringify(['a']), 'present = checked-in');
+  // register AFTER someone already checked in: present must stay unscoped
+  S.registered = new Set(); S.checkedIn = new Set(['c']);
+  eq(JSON.stringify(APP._presentPlayers().map(p => p.id)), JSON.stringify(['c']), 'present before registering anyone');
+  APP._registerPlayer('a');
+  eq(JSON.stringify(APP._presentPlayers().map(p => p.id)), JSON.stringify(['c']), 'present never scoped — checked-in-before stays visible');
+  // unregister also checks out
+  S.checkedIn.add('a');
+  APP._unregisterPlayer('a');
+  ok(!APP.isRegistered('a') && !S.checkedIn.has('a'), 'unregister removes from registered AND checkedIn');
+  ok(APP.isRegistered('c') === false, 'isRegistered false for a non-registered id');
+} catch (e) {
+  fail++; console.error('  ❌ registered scoping test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
 
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
