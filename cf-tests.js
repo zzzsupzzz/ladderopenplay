@@ -1350,5 +1350,39 @@ try {
   ok(/at least 4/.test(html), 'shows a "need 4 active" message, not a misleading Start Game 1');
 } catch (e) { fail++; console.error('  ❌ LL recover test threw: ' + (e && e.message)); }
 
+// ── Tests: Ladder Live — roster: swap rotation bookkeeping (review minors) ───
+// A swap converts the sub from resting→playing and the pulled player from playing→resting, so the
+// rotation counters must follow: the sub gets a streak + is marked playing; the pulled player is
+// marked resting (so back-to-back-sit protection applies) and any pending pause clears.
+section('Ladder Live — roster: swap rotation bookkeeping');
+try {
+  makeSession(10, 2); S.session.players.forEach((sp,i)=>sp.sRating=1200-i*10); APP.LL.init(2);
+  const P = S.session.ll.players; APP.LL.buildGame();
+  const g = S.session.ll.current.games[0];
+  const outId = g.t1[0], inId = S.session.ll.current.resting[0];
+  APP.LL.pause(outId); // seated → pausePending
+  ok(P[outId].pausePending === true, 'precondition: seated pause is pending');
+  APP.LL.swap(g.court, outId, inId);
+  ok(P[inId].streak === 1, 'swapped-in player gets streak 1 (now playing)');
+  ok(P[inId].satLast === false, 'swapped-in player marked playing (satLast false)');
+  ok(P[outId].satLast === true, 'swapped-out player marked resting (satLast true → back-to-back protection)');
+  ok(P[outId].pausePending === false, 'swapped-out player pausePending cleared (no double-listing)');
+} catch (e) { fail++; console.error('  ❌ LL swap bookkeeping test threw: ' + (e && e.message)); }
+
+// ── Tests: Ladder Live — roster: left players in the live view (review minors) ─
+// A player who left the session is frozen on the ladder but must NOT show a Resume button (resuming
+// them just re-pauses next round → a dead button), and the header player count excludes them.
+section('Ladder Live — roster: left players in the live view');
+try {
+  makeSession(8, 2); S.session.players.forEach((sp,i)=>sp.sRating=1200-i*10); APP.LL.init(2);
+  APP.LL.buildGame();
+  const lid = Object.keys(S.session.ll.players)[0];
+  S.session.players.find(sp => sp.id === lid).status = 'left';
+  APP.LL.syncRoster();
+  const html = APP.LL.renderLive();
+  ok(!(new RegExp("llResume\\('" + lid + "'").test(html)), 'a left player has no Resume button');
+  ok(/7 players/.test(html) && !/8 players/.test(html), 'header player count excludes left players (7 of 8)');
+} catch (e) { fail++; console.error('  ❌ LL left-player render test threw: ' + (e && e.message)); }
+
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

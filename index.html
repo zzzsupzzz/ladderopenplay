@@ -3048,6 +3048,7 @@ function beginPlay(format){
 function llPause(id){ if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;} LL.pause(id); LL._syncToSession(); try{STORE.save('session');}catch(e){} LL._paint(); }
 function llResume(id){ if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;} LL.resume(id); LL._syncToSession(); try{STORE.save('session');}catch(e){} LL._paint(); }
 function llOpenSwap(court, outId){
+  if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
   const ll=LL._ll(); if(!ll?.current){return;}
   const nm=id=>esc(gp(id)?.name||gsp(id)?.name||'?');
   const pool=(ll.current.resting||[]).filter(id=>ll.players[id]&&!ll.players[id].paused&&!ll.players[id].pausePending);
@@ -11641,8 +11642,10 @@ const LL={
     if(!P[inId]||P[inId].paused||this._isSeated(inId))return false;
     const repl=arr=>{const i=arr.indexOf(outId); if(i>=0){arr[i]=inId; return true;} return false;};
     if(!repl(g.t1)&&!repl(g.t2))return false;
-    P[outId].games=Math.max(0,P[outId].games-1); P[outId].streak=Math.max(0,P[outId].streak-1); P[outId].satLast=false;
-    P[inId].games++; P[inId].satLast=false;
+    // Pulled player is now resting this round → satLast true (back-to-back-sit protection), clear any
+    // pending pause so they don't double-list. Sub is now playing → give them a streak, mark seated.
+    P[outId].games=Math.max(0,P[outId].games-1); P[outId].streak=Math.max(0,P[outId].streak-1); P[outId].satLast=true; P[outId].pausePending=false;
+    P[inId].games++; P[inId].streak=(P[inId].streak||0)+1; P[inId].satLast=false;
     ll.players[g.t1[0]].lastPartner=g.t1[1]; ll.players[g.t1[1]].lastPartner=g.t1[0];
     ll.players[g.t2[0]].lastPartner=g.t2[1]; ll.players[g.t2[1]].lastPartner=g.t2[0];
     ll.current.resting=(ll.current.resting||[]).filter(id=>id!==inId);
@@ -11708,12 +11711,12 @@ const LL={
     const tag=id=>`<span style="color:var(--cy);font-size:.66rem">#${pos[id]||'–'}·${rtg(id)}</span>`;
     let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:7px">
       <div><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--go)">🏆 LADDER LIVE</div>
-      <div style="font-size:.71rem;color:var(--mu)">Game ${ll.gameNum} · ${this._ids().length} players · ${ll.courts} court${ll.courts>1?'s':''}</div></div>
+      <div style="font-size:.71rem;color:var(--mu)">Game ${ll.gameNum} · ${this._ids().filter(id=>gsp(id)?.status!=='left').length} players · ${ll.courts} court${ll.courts>1?'s':''}</div></div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <div style="text-align:center"><div id="ll-timer" class="ct-timer" style="font-size:1.5rem;min-width:62px">${this._fmtClock(this.roundRemaining(Date.now()))}</div><div style="font-size:.55rem;color:var(--mu);letter-spacing:1px">ROUND</div></div>
       <button class="btn bs sm" onclick="openRosterModal()">👤 Players ±</button>
       <button class="btn bd2" onclick="doEndSession()" title="End this session and save">🏁 End</button></div></div></div>`;
-    const pausedHtml=()=>{ const ps=Object.values(ll.players).filter(p=>p.paused||p.pausePending); if(!ps.length)return '';
+    const pausedHtml=()=>{ const ps=Object.values(ll.players).filter(p=>(p.paused||p.pausePending)&&gsp(p.id)?.status!=='left'); if(!ps.length)return '';
       return `<div class="card"><div class="ct">⏸ Paused (${ps.length})</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${ps.map(p=>`<span style="font-size:.78rem;border:1px solid var(--bd);border-radius:6px;padding:2px 7px">${nm(p.id)}${p.pausePending?' <span style="color:var(--or);font-size:.58rem">finishing</span>':''}<button class="btn bp sm" style="font-size:.58rem;padding:1px 5px;margin-left:4px" onclick="llResume('${p.id}')" title="Return to rotation">▶</button></span>`).join('')}</div></div>`; };
     const cur=ll.current;
