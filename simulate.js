@@ -1859,6 +1859,7 @@ const SIM = (() => {
         <option value="normal" selected>Normal (1.5s)</option>
         <option value="slow">Slow (3s) — multi-device demo</option>
       </select>
+      <div class="sim-chk"><input type="checkbox" id="sim-log-rounds"/><label for="sim-log-rounds">Log each round's matchups (verbose)</label></div>
       <button class="sim-go" id="sim-ll-btn" style="background:#fbbf24;color:#1c0f00;font-weight:700" onclick="SIM._uiRunLadder()">🏆 Run Ladder Live — timed rounds (uses Players / Courts / Rounds above)</button>
       <div style="font-size:10px;color:#64748b;margin:4px 0 2px">Offline only — never writes to Firebase.</div>
       <button class="sim-stop" id="sim-stop-btn" onclick="SIM.stop()" disabled>Stop</button>
@@ -1910,8 +1911,9 @@ const SIM = (() => {
     const courts = parseInt(document.getElementById('sim-courts')?.value) || 3;
     const rounds = parseInt(document.getElementById('sim-rounds')?.value) || 12;
     const speed = document.getElementById('sim-speed')?.value || 'normal';
+    const logRounds = document.getElementById('sim-log-rounds')?.checked ?? false;
     try {
-      await runLadder({ players, courts, rounds, speed });
+      await runLadder({ players, courts, rounds, speed, logRounds });
     } finally {
       if (btn) btn.disabled = false;
       if (stopBtn) stopBtn.disabled = true;
@@ -1978,10 +1980,31 @@ const SIM = (() => {
       try { switchTab('live'); } catch (e) {}
       try { renderLive(); } catch (e) {}
       const seedRank = {}; LL.standings().forEach((p, i) => seedRank[p.id] = i + 1);
+      // ── matchmaking-quality trackers ──
+      const ids0 = Object.keys(S.session.ll.players);
+      const partners = {}, opps = {}, sits = {};
+      ids0.forEach(id => { partners[id] = new Set(); opps[id] = new Set(); sits[id] = []; });
+      const teamGaps = [], bandOrdered = [];
       await delay(ms);
       for (let r = 0; r < rounds && !_aborted; r++) {
         const ll = S.session.ll;
         if (!ll.current) { err(`round ${r + 1}: no current game (field too small for the courts?)`); break; }
+        // collect matchmaking quality from this round's assignment (ratings are pre-score here)
+        { const P = ll.players, restSet = new Set(ll.current.resting || []);
+          ids0.forEach(id => { if (P[id]) sits[id].push(restSet.has(id)); });
+          const avg = t => t.reduce((s, id) => s + P[id].rating, 0) / t.length;
+          let prevCourtAvg = Infinity;
+          const parts = ll.current.games.map(g => {
+            const a1 = avg(g.t1), a2 = avg(g.t2), ca = (a1 + a2) / 2;
+            teamGaps.push(Math.abs(a1 - a2));
+            bandOrdered.push(ca <= prevCourtAvg + 1e-6 ? 1 : 0); prevCourtAvg = ca;
+            g.t1.forEach(id => { partners[id].add(g.t1.find(x => x !== id)); g.t2.forEach(o => opps[id].add(o)); });
+            g.t2.forEach(id => { partners[id].add(g.t2.find(x => x !== id)); g.t1.forEach(o => opps[id].add(o)); });
+            const nm = id => gp(id)?.name || id;
+            return `C${g.court} [${g.t1.map(id => `${nm(id)} ${Math.round(P[id].rating)}`).join(' + ')} vs ${g.t2.map(id => `${nm(id)} ${Math.round(P[id].rating)}`).join(' + ')} · gap ${Math.round(Math.abs(a1 - a2))}]`;
+          });
+          if (opts.logRounds) log(`R${ll.gameNum}: ${parts.join('  |  ')}${restSet.size ? '  ·  resting: ' + [...restSet].map(id => gp(id)?.name || id).join(', ') : ''}`);
+        }
         const scores = {};
         ll.current.games.forEach(g => { scores[g.court] = _llScore(g, ll); });
         LL.recordGame(scores);
@@ -1998,7 +2021,31 @@ const SIM = (() => {
         const mv = typeof seed === 'number' ? seed - (i + 1) : 0;
         log(`#${i + 1} ${nm} — diff ${p.diff >= 0 ? '+' : ''}${p.diff} · rtg ${p.rating} · ${p.games}g${mv !== 0 ? ` (${mv > 0 ? '▲' + mv : '▼' + (-mv)} from #${seed})` : ''}`);
       });
-      log(_errs.length ? `❌ ${_errs.length} issue(s) — see above` : `✅ ran clean — no crashes, invariants held across ${rounds} rounds`);
+      // ── MATCHMAKING QUALITY ──
+      const mean = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0;
+      const bandPct = bandOrdered.length ? Math.round(100 * bandOrdered.reduce((s, x) => s + x, 0) / bandOrdered.length) : 0;
+      const partnerCounts = ids0.map(id => partners[id].size), oppCounts = ids0.map(id => opps[id].size);
+      const rests = ids0.map(id => S.session.ll.players[id]?.rests || 0);
+      const restSpread = rests.length ? Math.max(...rests) - Math.min(...rests) : 0;
+      let b2b = 0; ids0.forEach(id => { const s = sits[id]; for (let i = 1; i < s.length; i++) if (s[i] && s[i - 1]) b2b++; });
+      let dirMatch = 0, dirTot = 0;
+      ids0.forEach(id => { const sp = S.session.players.find(p => p.id === id); if (!sp) return; const pd = (sp.ptsFor || 0) - (sp.ptsAgainst || 0), dr = (sp.sRating || 0) - (sp.startRating || 0); if (pd !== 0) { dirTot++; if (Math.sign(pd) === Math.sign(dr)) dirMatch++; } });
+      const worstGap = teamGaps.length ? Math.round(Math.max(...teamGaps)) : 0;
+      log(`=== MATCHMAKING QUALITY ===`);
+      log(`• Court banding: ${bandPct}% of games correctly rating-ordered (Court 1 = strongest)`);
+      log(`• Team balance: avg gap ${Math.round(mean(teamGaps))} · worst ${worstGap} (lower = closer games)`);
+      log(`• Partner variety: ${mean(partnerCounts).toFixed(1)} unique partners/player over ${rounds} games`);
+      log(`• Opponent variety: ${mean(oppCounts).toFixed(1)} unique opponents/player`);
+      log(`• Rest fairness: spread ${restSpread} (most−fewest rests) · back-to-back sits ${b2b}`);
+      log(`• Rating tracks results: ${dirTot ? Math.round(100 * dirMatch / dirTot) : 0}% of players' rating moved the same way as their point diff (not 100% is correct — rating is opponent-aware)`);
+      const issues = [];
+      if (b2b > 0) issues.push(`${b2b} back-to-back sit(s) — rest-rotation fault`);
+      if (restSpread > 2) issues.push(`rest spread ${restSpread} (>2) — uneven sitting`);
+      if (bandPct < 90) issues.push(`banding only ${bandPct}% ordered — courts not cleanly by skill`);
+      if (worstGap > 200) issues.push(`worst team gap ${worstGap} — a lopsided game`);
+      if (issues.length) { log(`⚠ MATCHMAKING ISSUES:`); issues.forEach(i => log(`   - ${i}`)); }
+      else log(`✅ matchmaking looks healthy — banding, team balance, variety, and rest all within bounds`);
+      log(_errs.length ? `❌ ${_errs.length} crash/invariant issue(s) — see above` : `✅ ran clean — no crashes, invariants held across ${rounds} rounds`);
     } catch (e) {
       err('LADDER SIM THREW: ' + (e && e.message) + '\n' + (e && e.stack || ''));
     } finally {
