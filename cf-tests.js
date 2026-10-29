@@ -1295,5 +1295,36 @@ try {
   ok(APP.LL.buildGame() === null, 'buildGame returns null when fewer than 4 are eligible');
 } catch (e) { fail++; console.error('  ❌ LL roster pause/resume test threw: ' + (e && e.message)); }
 
+// ── Tests: Ladder Live — roster: swap ───────────────────────────────────────
+section('Ladder Live — roster: swap');
+try {
+  makeSession(10, 2); S.session.players.forEach((sp,i)=>sp.sRating=1200-i*10); APP.LL.init(2);
+  const P = S.session.ll.players; const ids = Object.keys(P);
+  APP.LL.buildGame();
+  const g = S.session.ll.current.games[0];
+  const outId = g.t1[0];
+  const inId = S.session.ll.current.resting[0];
+  const inGames0 = P[inId].games, outGames0 = P[outId].games;
+  ok(APP.LL.swap(g.court, outId, inId) === true, 'swap succeeds for a pooled replacement');
+  const g2 = S.session.ll.current.games.find(x=>x.court===g.court);
+  const lineup = [...g2.t1, ...g2.t2];
+  ok(lineup.includes(inId) && !lineup.includes(outId), 'lineup now has the replacement, not the pulled player');
+  ok(P[inId].games === inGames0 + 1 && P[outId].games === outGames0 - 1, 'games credit moves from pulled to replacement');
+  ok(S.session.ll.current.resting.includes(outId) && !S.session.ll.current.resting.includes(inId), 'pulled player returns to the pool');
+  // result follows the replacement, not the pulled player
+  const inR0 = P[inId].rating, outR0 = P[outId].rating;
+  const scores = {}; S.session.ll.current.games.forEach(x => scores[x.court] = g2.t1.includes(inId) ? [11,2] : [2,11]);
+  APP.LL.recordGame(scores);
+  ok(P[inId].rating !== inR0, 'recordGame moves the replacement rating');
+  ok(P[outId].rating === outR0, 'pulled player rating untouched for the reset game');
+  // invalid swaps rejected
+  APP.LL.buildGame();
+  const g3 = S.session.ll.current.games[0]; const seatedOther = S.session.ll.current.games[1].t1[0];
+  ok(APP.LL.swap(g3.court, g3.t1[0], seatedOther) === false, 'cannot swap in a player already seated on another court');
+  const restId = S.session.ll.current.resting[0]; P[restId].paused = true;
+  ok(APP.LL.swap(g3.court, g3.t1[0], restId) === false, 'cannot swap in a paused player');
+  ok(APP.LL.swap(g3.court, g3.t1[0], 'nope') === false, 'cannot swap in an unknown id');
+} catch (e) { fail++; console.error('  ❌ LL swap test threw: ' + (e && e.message)); }
+
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

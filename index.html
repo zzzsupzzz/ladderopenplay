@@ -11600,6 +11600,27 @@ const LL={
   pause(id){ const p=this._ll()?.players[id]; if(!p)return; if(this._isSeated(id)){p.pausePending=true;} else {p.paused=true;p.pausePending=false;} },
   resume(id){ const p=this._ll()?.players[id]; if(!p)return; p.paused=false; p.pausePending=false; },
 
+  // Swap a seated player (outId) for someone in the resting pool (inId), immediately. The court's
+  // game resets (the UI clears that court's score inputs), so the result counts for inId, not outId:
+  // revert outId's round credit and return them to the pool, give inId the credit, fix partner links.
+  // Returns false (no change) for an invalid swap: no current game / court, or inId unknown / paused /
+  // already seated anywhere, or outId not on that court.
+  swap(court, outId, inId){
+    const ll=this._ll(); if(!ll?.current)return false;
+    const g=ll.current.games.find(x=>x.court===court); if(!g)return false;
+    const P=ll.players;
+    if(!P[inId]||P[inId].paused||this._isSeated(inId))return false;
+    const repl=arr=>{const i=arr.indexOf(outId); if(i>=0){arr[i]=inId; return true;} return false;};
+    if(!repl(g.t1)&&!repl(g.t2))return false;
+    P[outId].games=Math.max(0,P[outId].games-1); P[outId].streak=Math.max(0,P[outId].streak-1); P[outId].satLast=false;
+    P[inId].games++; P[inId].satLast=false;
+    ll.players[g.t1[0]].lastPartner=g.t1[1]; ll.players[g.t1[1]].lastPartner=g.t1[0];
+    ll.players[g.t2[0]].lastPartner=g.t2[1]; ll.players[g.t2[1]].lastPartner=g.t2[0];
+    ll.current.resting=(ll.current.resting||[]).filter(id=>id!==inId);
+    if(!ll.current.resting.includes(outId))ll.current.resting.push(outId);
+    return true;
+  },
+
   // Warm-up ramp: a player's 1st game moves at 40% strength, 2nd at 70%, then full. `games` already
   // includes the game being scored (buildGame incremented it), so games===1 is their first game.
   _warmupFactor(games){ return games<=1?0.4:games===2?0.7:1; },
