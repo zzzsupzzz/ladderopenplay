@@ -1253,5 +1253,47 @@ try {
   fail++; console.error('  ❌ LL warm-up test threw: ' + (e && e.message));
 }
 
+// ── Tests: Ladder Live — roster: pause / resume / reconcile ─────────────────
+section('Ladder Live — roster: pause / resume / reconcile');
+try {
+  makeSession(10, 2); S.session.players.forEach((sp,i)=>sp.sRating=1200-i*10); APP.LL.init(2);
+  const P = S.session.ll.players; const ids = Object.keys(P);
+  APP.LL.buildGame();
+  const seated = () => S.session.ll.current.games.flatMap(g=>[...g.t1,...g.t2]);
+  // pooled player paused → excluded immediately next build
+  const pooled = ids.find(id => !seated().includes(id));
+  APP.LL.pause(pooled);
+  ok(P[pooled].paused === true, 'pause on a resting/pooled player is immediate');
+  APP.LL.buildGame();
+  ok(!seated().includes(pooled), 'paused pooled player is not scheduled');
+  // seated player paused → pending, finishes this game, excluded the one after
+  const onCourt = seated()[0];
+  APP.LL.pause(onCourt);
+  ok(P[onCourt].pausePending === true && P[onCourt].paused === false, 'pause on a seated player is pending (finishes current game)');
+  APP.LL.buildGame();
+  ok(P[onCourt].paused === true && !seated().includes(onCourt), 'pending pause activates next build');
+  // eligibility math: N counts only non-paused (here both pooled + onCourt are paused)
+  const elig = ids.filter(id => !P[id].paused).length;
+  ok(elig === 8, `two paused of ten → eight eligible (got ${elig})`);
+  // resume → back in next build
+  APP.LL.resume(pooled);
+  ok(P[pooled].paused === false, 'resume clears paused');
+  // left player stays on ladder (frozen), not rescheduled
+  const leaver = ids.find(id => id !== onCourt && id !== pooled);
+  const lg = P[leaver].games;
+  const spv = S.session.players.find(s => s.id === leaver); spv.status = 'left';
+  APP.LL.syncRoster();
+  ok(P[leaver].paused === true, 'a left player is paused by reconcile');
+  ok(P[leaver].games === lg, 'left player keeps their games (stays on the ladder)');
+  // late arrival reconcile: a newly checked-in player enters the pool games:0
+  const nid = 'late1'; S.session.players.push({ id:nid, name:'Late', status:'active', sRating:1150 });
+  APP.LL.syncRoster();
+  ok(P[nid] && P[nid].games === 0 && Math.round(P[nid].rating) === 1150, 'late arrival reconciled into pool at games:0 seeded by sRating');
+  // can't fill a court → buildGame returns null
+  makeSession(6, 2); APP.LL.init(2); const P2 = S.session.ll.players; const i2 = Object.keys(P2);
+  i2.slice(0,3).forEach(id => P2[id].paused = true); // 3 eligible < 4
+  ok(APP.LL.buildGame() === null, 'buildGame returns null when fewer than 4 are eligible');
+} catch (e) { fail++; console.error('  ❌ LL roster pause/resume test threw: ' + (e && e.message)); }
+
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

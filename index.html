@@ -11485,7 +11485,7 @@ const LL={
     const players={};
     active.forEach(sp=>{
       players[sp.id]={id:sp.id, rating:(sp.sRating??gp(sp.id)?.rating??1000),
-        streak:0, satLast:false, rests:0, games:0, pf:0, pa:0, wins:0, losses:0, ties:0, lastPartner:null};
+        streak:0, satLast:false, rests:0, games:0, pf:0, pa:0, wins:0, losses:0, ties:0, lastPartner:null, paused:false, pausePending:false};
     });
     S.session.ll={courts:Math.max(1,courts||1), roundMin:(S.session.llRoundMin)||10, gameNum:0, players, current:null, log:[]};
     return S.session.ll;
@@ -11508,10 +11508,11 @@ const LL={
   // "play 2–3 then sit"), ties broken by fewest total rests (even spread), then id
   // (deterministic). "≥2 before a rest" emerges: low-streak players only sit when the
   // higher-streak pool can't fill W (i.e. the first game) — a start transient, by design.
-  _pickSitters(W){
+  _pickSitters(W, pool){
     const P=this._ll().players;
     if(W<=0)return [];
-    const cands=Object.values(P).filter(p=>!p.satLast);
+    const ids=pool||Object.keys(P);
+    const cands=ids.map(id=>P[id]).filter(p=>!p.satLast);
     cands.sort((a,b)=>(b.streak-a.streak)||(a.rests-b.rests)||(a.id<b.id?-1:1));
     return cands.slice(0,W).map(p=>p.id);
   },
@@ -11544,10 +11545,14 @@ const LL={
   // later via recordGame(). Returns null if the field can't fill a single court.
   buildGame(){
     const ll=this._ll();if(!ll)return null;
-    const N=this._ids().length, C=ll.courts, W=N-4*C;
+    this.syncRoster();
+    // A pause requested mid-game takes effect now (they finished that game).
+    this._ids().forEach(id=>{ const p=ll.players[id]; if(p.pausePending){p.paused=true;p.pausePending=false;} });
+    const eligible=this._ids().filter(id=>!ll.players[id].paused);
+    const N=eligible.length, C=ll.courts, W=N-4*C;
     if(N<4)return null;
-    const sitters=new Set(this._pickSitters(Math.max(0,W)));
-    const playing=this._ids().filter(id=>!sitters.has(id));
+    const sitters=new Set(this._pickSitters(Math.max(0,W), eligible));
+    const playing=eligible.filter(id=>!sitters.has(id));
     // If W<0 (more courts than needed) some courts just go unused — band what we have.
     const bands=this._band(playing);
     const seated=new Set();
@@ -11559,10 +11564,11 @@ const LL={
       ll.players[t2[0]].lastPartner=t2[1]; ll.players[t2[1]].lastPartner=t2[0];
       return {court:i+1, t1, t2};
     });
-    // Anyone not seated (overflow when N not a clean multiple) rests this game too.
-    const reallyResting=this._ids().filter(id=>!seated.has(id));
+    // Anyone eligible but not seated (overflow when N not a clean multiple) rests this game too.
+    // Paused players are excluded entirely — not seated, not rested, counters frozen.
+    const reallyResting=eligible.filter(id=>!seated.has(id));
     // Commit bookkeeping: seated play (streak++, games++), resters sit (streak 0, rest++).
-    this._ids().forEach(id=>{
+    eligible.forEach(id=>{
       const p=ll.players[id];
       if(seated.has(id)){p.streak++;p.satLast=false;p.games++;}
       else{p.streak=0;p.satLast=true;p.rests++;}
@@ -11572,6 +11578,27 @@ const LL={
     ll.current={games, resting:reallyResting};
     return ll.current;
   },
+
+  // ── Mid-session roster: reconcile, pause/resume ─────────────────────────────
+  // Keep ll.players in step with the live roster: add newly checked-in players as fresh pooled
+  // entries (games:0 → warm-up ramp, banded by rating next round), and pause anyone who has left
+  // (frozen counters — they stay on the night ladder for what they played).
+  syncRoster(){
+    const ll=this._ll(); if(!ll)return;
+    const active=(S.session?.players||[]).filter(sp=>sp&&sp.status!=='left');
+    const activeIds=new Set(active.map(sp=>sp.id));
+    active.forEach(sp=>{
+      if(!ll.players[sp.id]){
+        ll.players[sp.id]={id:sp.id, rating:(sp.sRating??gp(sp.id)?.rating??1000),
+          streak:0, satLast:false, rests:0, games:0, pf:0, pa:0, wins:0, losses:0, ties:0, lastPartner:null, paused:false, pausePending:false};
+      }
+    });
+    Object.values(ll.players).forEach(p=>{ if(!activeIds.has(p.id)){ p.paused=true; p.pausePending=false; } });
+  },
+  _isSeated(id){ const cur=this._ll()?.current; return !!cur&&cur.games.some(g=>g.t1.includes(id)||g.t2.includes(id)); },
+  // Pause: on a court now → finish the current game (pending); pooled/resting → out immediately.
+  pause(id){ const p=this._ll()?.players[id]; if(!p)return; if(this._isSeated(id)){p.pausePending=true;} else {p.paused=true;p.pausePending=false;} },
+  resume(id){ const p=this._ll()?.players[id]; if(!p)return; p.paused=false; p.pausePending=false; },
 
   // Warm-up ramp: a player's 1st game moves at 40% strength, 2nd at 70%, then full. `games` already
   // includes the game being scored (buildGame incremented it), so games===1 is their first game.
