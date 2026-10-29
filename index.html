@@ -3044,6 +3044,32 @@ function beginPlay(format){
 
 /* ── MID-MATCH PLAYER SWAP ───────────────────────── */
 /* ── MID-SESSION ROSTER ──────────────────────────── */
+// ── Ladder Live live-view roster handlers (organizer screen) ────────────────
+function llPause(id){ if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;} LL.pause(id); LL._syncToSession(); try{STORE.save('session');}catch(e){} LL._paint(); }
+function llResume(id){ if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;} LL.resume(id); LL._syncToSession(); try{STORE.save('session');}catch(e){} LL._paint(); }
+function llOpenSwap(court, outId){
+  const ll=LL._ll(); if(!ll?.current){return;}
+  const nm=id=>esc(gp(id)?.name||gsp(id)?.name||'?');
+  const pool=(ll.current.resting||[]).filter(id=>ll.players[id]&&!ll.players[id].paused&&!ll.players[id].pausePending);
+  const body = pool.length
+    ? pool.map(id=>`<button class="btn bg2" style="width:100%;text-align:left;margin-bottom:5px" onclick="llDoSwap(${court},'${outId}','${id}')">${nm(id)} <span style="color:var(--mu);font-size:.7rem">rtg ${Math.round(ll.players[id].rating)}</span></button>`).join('')
+    : '<div style="color:var(--mu);font-size:.8rem">No one in the resting pool to swap in.</div>';
+  openModal(`<div class="modal-title">⇄ Swap out ${nm(outId)}</div>
+    <p style="font-size:.74rem;color:var(--mu);margin-bottom:8px">Pick who comes in from the pool. The court's game resets — the new player gets the result.</p>
+    ${body}
+    <button class="btn bg2 sm" style="width:100%;margin-top:6px" onclick="closeModal()">Cancel</button>`);
+}
+function llDoSwap(court, outId, inId){
+  if(OBSERVER_MODE){toast('Observer mode — view only','warn');return;}
+  const ll=LL._ll(); if(!ll?.current){return;}
+  // Capture every court's typed score so the repaint only clears the court we're resetting.
+  const saved={}; ll.current.games.forEach(g=>{const a=document.getElementById('ll-s1-'+g.court),b=document.getElementById('ll-s2-'+g.court);saved[g.court]=[a?a.value:'',b?b.value:''];});
+  if(!LL.swap(court, outId, inId)){ toast('Can\'t swap that player','err'); return; }
+  LL._syncToSession(); try{STORE.save('session');}catch(e){}
+  closeModal(); LL._paint();
+  ll.current.games.forEach(g=>{ if(g.court===court)return; const a=document.getElementById('ll-s1-'+g.court),b=document.getElementById('ll-s2-'+g.court); if(a)a.value=saved[g.court][0]; if(b)b.value=saved[g.court][1]; });
+  toast('Swapped — court reset','ok');
+}
 function openRosterModal(){if(!S.session){toast('No active session','err');return;}renderRosterModal();}
 
 function renderRosterModal(){
@@ -3211,6 +3237,9 @@ function midAdd(id){
     S.session.plStreak[id]=0;
     toast(`${p.name} joined — credited ${missed} sit-out round${missed!==1?'s':''}, plays immediately 🏓`,'ok');
   }
+  // Ladder Live: reconcile the new arrival into the engine so they appear in the pool now and get
+  // banded (games:0 → warm-up ramp) from the next round.
+  if(S.session.format==='ll'&&S.session.ll){ LL.syncRoster(); LL._syncToSession(); }
   STORE.save('session');renderLive();renderRosterModal();
 }
 
@@ -11689,7 +11718,8 @@ const LL={
     cur.games.forEach(g=>{
       const court=(S.session?.courtOffset||0)+g.court;
       const band=g.court===1?'🏆 TOP':g.court===ll.courts?'🌱 RISING':'🥈 MID';
-      const team=ids=>`<div style="text-align:center">${ids.map(id=>`<div style="font-weight:600;font-size:.82rem">${nm(id)} ${tag(id)}</div>`).join('')}</div>`;
+      const sc=id=>`<button class="btn bg2 sm" style="font-size:.58rem;padding:1px 5px;margin-left:3px" onclick="llPause('${id}')" title="Pause / send home">⏸</button><button class="btn bg2 sm" style="font-size:.58rem;padding:1px 5px" onclick="llOpenSwap(${g.court},'${id}')" title="Swap for someone in the pool">⇄</button>`;
+      const team=ids=>`<div style="text-align:center">${ids.map(id=>`<div style="font-weight:600;font-size:.82rem">${nm(id)} ${tag(id)}${sc(id)}</div>`).join('')}</div>`;
       h+=`<div class="court-card"><div class="chead"><span class="clbl">COURT ${court} <span style="font-size:.6rem;color:var(--go)">${band}</span></span></div>
         <div class="cbody"><div class="teams"><div class="team">${team(g.t1)}</div><div class="vs-lbl">VS</div><div class="team">${team(g.t2)}</div></div>
         <div class="srow" style="margin-top:10px"><input class="sinp inp" id="ll-s1-${g.court}" type="number" inputmode="numeric" min="0" max="99" placeholder="0"/><span class="sdash">–</span><input class="sinp inp" id="ll-s2-${g.court}" type="number" inputmode="numeric" min="0" max="99" placeholder="0"/></div>
@@ -11697,7 +11727,12 @@ const LL={
     });
     if(cur.resting&&cur.resting.length){
       h+=`<div class="card"><div class="ct">😴 Resting this game (${cur.resting.length})</div>
-        <div style="font-size:.78rem;color:var(--mu);margin-top:5px">${cur.resting.map(nm).join(' · ')}</div></div>`;
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${cur.resting.map(id=>`<span style="font-size:.78rem;color:var(--mu);border:1px solid var(--bd);border-radius:6px;padding:2px 7px">${nm(id)}<button class="btn bg2 sm" style="font-size:.58rem;padding:1px 5px;margin-left:4px" onclick="llPause('${id}')" title="Pause / send home">⏸</button></span>`).join('')}</div></div>`;
+    }
+    const paused=Object.values(ll.players).filter(p=>p.paused||p.pausePending);
+    if(paused.length){
+      h+=`<div class="card"><div class="ct">⏸ Paused (${paused.length})</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${paused.map(p=>`<span style="font-size:.78rem;border:1px solid var(--bd);border-radius:6px;padding:2px 7px">${nm(p.id)}${p.pausePending?' <span style="color:var(--or);font-size:.58rem">finishing</span>':''}<button class="btn bp sm" style="font-size:.58rem;padding:1px 5px;margin-left:4px" onclick="llResume('${p.id}')" title="Return to rotation">▶</button></span>`).join('')}</div></div>`;
     }
     h+=`<div id="ll-round-over" style="display:${this.roundRemaining(Date.now())===0?'block':'none'};background:rgba(248,113,113,.12);border:1px solid var(--re);border-radius:var(--ra);padding:9px 12px;margin-bottom:10px;text-align:center;color:var(--re);font-weight:700;font-size:.82rem">⏰ TIME — enter every court's score, then submit</div>`;
     h+=`<div class="card"><button class="btn bp" style="width:100%;font-size:.95rem" onclick="LL.submitAndAdvance()">✓ Submit scores → next round</button></div>`;

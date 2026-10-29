@@ -944,6 +944,14 @@ try {
   ok(/Resting this game \(8\)/.test(html), '8 of 16 resting shown (W = 16 − 4×2)');
   ok(/Submit scores/.test(html), 'submit-and-advance button present');
   ok(/Live Ladder/.test(html) && /avg pt diff/.test(html), 'live ladder standings embedded (avg pt diff/game label)');
+  // roster controls present on the live view
+  ok(/llPause\(/.test(html), 'each player has a pause control');
+  ok(/llOpenSwap\(/.test(html), 'each court exposes a swap control');
+  // Paused section appears once someone is paused
+  APP.LL.pause(S.session.ll.current.games[0].t1[0]); // pending (seated) — build to activate
+  APP.LL.buildGame();
+  const html2 = APP.LL.renderLive();
+  ok(/Paused/.test(html2) && /llResume\(/.test(html2), 'a Paused section with resume controls shows when someone is paused');
 } catch (e) {
   fail++; console.error('  ❌ Ladder Live UI render test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
