@@ -1334,5 +1334,21 @@ try {
   ok(APP.LL.swap(g3.court, g3.t1[0], 'nope') === false, 'cannot swap in an unknown id');
 } catch (e) { fail++; console.error('  ❌ LL swap test threw: ' + (e && e.message)); }
 
+// ── Tests: Ladder Live — roster: recover when too few to continue ───────────
+// Pausing below 4 eligible means buildGame can't form a round. The no-current view must still
+// offer Resume (so the organizer can recover) and not falsely say "Start Game 1" mid-session.
+section('Ladder Live — roster: recover when too few to continue');
+try {
+  makeSession(5, 1); S.session.players.forEach((sp,i)=>sp.sRating=1200-i*10); APP.LL.init(1);
+  APP.LL.buildGame();               // game 1: 4 seated, 1 resting (gameNum = 1)
+  const P = S.session.ll.players; const ids = Object.keys(P);
+  ids.slice(0,2).forEach(id => { P[id].paused = true; P[id].pausePending = false; }); // 3 eligible
+  ok(APP.LL.buildGame() === null, 'cannot form a round with 3 eligible');
+  S.session.ll.current = null;      // what submitAndAdvance does when the next build is null
+  const html = APP.LL.renderLive();
+  ok(/Paused/.test(html) && /llResume\(/.test(html), 'the no-current view still offers Resume so the organizer can recover');
+  ok(/at least 4/.test(html), 'shows a "need 4 active" message, not a misleading Start Game 1');
+} catch (e) { fail++; console.error('  ❌ LL recover test threw: ' + (e && e.message)); }
+
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

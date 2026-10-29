@@ -11713,8 +11713,17 @@ const LL={
       <div style="text-align:center"><div id="ll-timer" class="ct-timer" style="font-size:1.5rem;min-width:62px">${this._fmtClock(this.roundRemaining(Date.now()))}</div><div style="font-size:.55rem;color:var(--mu);letter-spacing:1px">ROUND</div></div>
       <button class="btn bs sm" onclick="openRosterModal()">👤 Players ±</button>
       <button class="btn bd2" onclick="doEndSession()" title="End this session and save">🏁 End</button></div></div></div>`;
+    const pausedHtml=()=>{ const ps=Object.values(ll.players).filter(p=>p.paused||p.pausePending); if(!ps.length)return '';
+      return `<div class="card"><div class="ct">⏸ Paused (${ps.length})</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${ps.map(p=>`<span style="font-size:.78rem;border:1px solid var(--bd);border-radius:6px;padding:2px 7px">${nm(p.id)}${p.pausePending?' <span style="color:var(--or);font-size:.58rem">finishing</span>':''}<button class="btn bp sm" style="font-size:.58rem;padding:1px 5px;margin-left:4px" onclick="llResume('${p.id}')" title="Return to rotation">▶</button></span>`).join('')}</div></div>`; };
     const cur=ll.current;
-    if(!cur){ return h+`<div class="card"><button class="btn bp" style="width:100%" onclick="LL.advance()">▶ Start Game 1</button></div>`; }
+    if(!cur){
+      const eligN=this._ids().filter(id=>!ll.players[id].paused).length;
+      const btn = ll.gameNum===0 ? `<button class="btn bp" style="width:100%" onclick="LL.advance()">▶ Start Game 1</button>`
+        : eligN<4 ? `<div style="color:var(--re);font-weight:600;text-align:center;font-size:.85rem">Need at least 4 active players to continue — resume someone below.</div>`
+        : `<button class="btn bp" style="width:100%" onclick="LL.advance()">▶ Next round</button>`;
+      return h+`<div class="card">${btn}</div>`+pausedHtml();
+    }
     cur.games.forEach(g=>{
       const court=(S.session?.courtOffset||0)+g.court;
       const band=g.court===1?'🏆 TOP':g.court===ll.courts?'🌱 RISING':'🥈 MID';
@@ -11729,11 +11738,7 @@ const LL={
       h+=`<div class="card"><div class="ct">😴 Resting this game (${cur.resting.length})</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${cur.resting.map(id=>`<span style="font-size:.78rem;color:var(--mu);border:1px solid var(--bd);border-radius:6px;padding:2px 7px">${nm(id)}<button class="btn bg2 sm" style="font-size:.58rem;padding:1px 5px;margin-left:4px" onclick="llPause('${id}')" title="Pause / send home">⏸</button></span>`).join('')}</div></div>`;
     }
-    const paused=Object.values(ll.players).filter(p=>p.paused||p.pausePending);
-    if(paused.length){
-      h+=`<div class="card"><div class="ct">⏸ Paused (${paused.length})</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${paused.map(p=>`<span style="font-size:.78rem;border:1px solid var(--bd);border-radius:6px;padding:2px 7px">${nm(p.id)}${p.pausePending?' <span style="color:var(--or);font-size:.58rem">finishing</span>':''}<button class="btn bp sm" style="font-size:.58rem;padding:1px 5px;margin-left:4px" onclick="llResume('${p.id}')" title="Return to rotation">▶</button></span>`).join('')}</div></div>`;
-    }
+    h+=pausedHtml();
     h+=`<div id="ll-round-over" style="display:${this.roundRemaining(Date.now())===0?'block':'none'};background:rgba(248,113,113,.12);border:1px solid var(--re);border-radius:var(--ra);padding:9px 12px;margin-bottom:10px;text-align:center;color:var(--re);font-weight:700;font-size:.82rem">⏰ TIME — enter every court's score, then submit</div>`;
     h+=`<div class="card"><button class="btn bp" style="width:100%;font-size:.95rem" onclick="LL.submitAndAdvance()">✓ Submit scores → next round</button></div>`;
     h+=this.standingsHTML();
@@ -11792,7 +11797,7 @@ const LL={
     if(bad){ try{toast('Enter every court’s score first','err');}catch(e){} return; }
     this.recordGame(scores);
     this._syncToSession(); // keep session.players current (archive/all-time/History + robust to abnormal end)
-    this.buildGame();
+    if(!this.buildGame()){ ll.current=null; } // too few eligible to form a round — don't leave the scored game re-submittable
     this._paint();
     try{STORE.save('session');}catch(e){}
     try{renderStandings();}catch(e){}
