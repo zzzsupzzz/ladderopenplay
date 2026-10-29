@@ -1867,7 +1867,9 @@ const SIM = (() => {
         <input type="checkbox" id="sim-step"/>
         <label for="sim-step">Step mode (pause after each action)</label>
       </div>
-      <button class="sim-go" id="sim-run-btn" onclick="SIM._uiRun()">▶ Run Custom — uses Players / Courts / Rounds above</button>
+      <button class="sim-go" id="sim-ll-btn" style="background:#fbbf24;color:#1c0f00;font-weight:700" onclick="SIM._uiRunLadder()">🏆 Run Ladder Live — timed rounds (uses Players / Courts / Rounds above)</button>
+      <div style="font-size:10px;color:#64748b;margin:9px 0 2px;letter-spacing:.5px">CONTINUOUS FLOW — legacy (dormant engine)</div>
+      <button class="sim-go" id="sim-run-btn" onclick="SIM._uiRun()">▶ Run Custom (CF)</button>
       <button class="sim-go" style="background:#34d399;color:#052e16" onclick="SIM.run14({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">14p / 2c</button>
       <button class="sim-go" style="background:#2dd4bf;color:#04201c" onclick="SIM.run15({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">15p / 2c</button>
       <button class="sim-go" style="background:#14b8a6;color:#04201c" onclick="SIM.run16({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">16p / 2c</button>
@@ -1909,6 +1911,24 @@ const SIM = (() => {
     const live = document.getElementById('sim-live')?.checked ?? false;
     try {
       await run({ players, courts, rounds, speed, live });
+    } finally {
+      if (btn) btn.disabled = false;
+      if (stopBtn) stopBtn.disabled = true;
+    }
+  }
+
+  // Timed Ladder Live run from the panel inputs (always offline — never writes to Firebase).
+  async function _uiRunLadder() {
+    const btn = document.getElementById('sim-ll-btn');
+    const stopBtn = document.getElementById('sim-stop-btn');
+    if (btn) btn.disabled = true;
+    if (stopBtn) stopBtn.disabled = false;
+    const players = parseInt(document.getElementById('sim-players')?.value) || 18;
+    const courts = parseInt(document.getElementById('sim-courts')?.value) || 3;
+    const rounds = parseInt(document.getElementById('sim-rounds')?.value) || 12;
+    const speed = document.getElementById('sim-speed')?.value || 'normal';
+    try {
+      await runLadder({ players, courts, rounds, speed });
     } finally {
       if (btn) btn.disabled = false;
       if (stopBtn) stopBtn.disabled = true;
@@ -2010,6 +2030,6 @@ const SIM = (() => {
     else window.addEventListener('load', buildPanel);
   }
 
-  return { run, run14, run15, run16, run20, run26, runBugChecks, runOrganizer12, runPermPairCheck, runLadder, stop, _uiRun, _continue, log: () => _log, errors: () => _errs };
+  return { run, run14, run15, run16, run20, run26, runBugChecks, runOrganizer12, runPermPairCheck, runLadder, stop, _uiRun, _uiRunLadder, _continue, log: () => _log, errors: () => _errs };
 
 })();
