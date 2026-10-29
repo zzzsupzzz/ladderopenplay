@@ -471,7 +471,7 @@ body.observer-mode .qs-row{display:none!important}
       <button class="btn bg2 sm" style="margin-left:auto" onclick="openShareModal()" title="Share read-only player view link">📱 Player Link</button>
     </div>
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:12px;background:rgba(34,211,238,.07);border:1px solid rgba(34,211,238,.25);border-radius:8px;padding:5px 11px">
-      <span style="font-size:.8rem;color:var(--cy);font-weight:700">⚡ Continuous Flow</span>
+      <span style="font-size:.8rem;color:var(--cy);font-weight:700">⚡ Open Play</span>
       <span style="font-size:.72rem;color:var(--mu)">each court finishes independently</span>
     </div>
     <div id="flow-mode-opts">
@@ -594,7 +594,7 @@ body.observer-mode .qs-row{display:none!important}
   <div id="cf-live-wrap">
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:7px">
-        <div><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--tx)" id="cf-sess-lbl">CONTINUOUS FLOW</div><div style="font-size:.71rem;color:var(--mu)" id="cf-sess-sub">—</div>
+        <div><div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--tx)" id="cf-sess-lbl">OPEN PLAY</div><div style="font-size:.71rem;color:var(--mu)" id="cf-sess-sub">—</div>
           <span id="live-last-saved" style="display:none;font-size:.64rem;color:var(--gr);margin-top:3px;font-weight:600"></span>
         </div>
         <div style="display:flex;gap:5px;flex-wrap:wrap">
@@ -4545,7 +4545,7 @@ function renderArchive(){
     const metaLabel=isLL
       ?`${d} · 🏆 Ladder Live · ${sess.llRounds||0} round${(sess.llRounds||0)===1?'':'s'} · ${sess.players.length} players`
       :isCF
-      ?`${d} · ⚡ CF · ${mCount} matches · ${sess.players.length} players`
+      ?`${d} · ⚡ Open Play · ${mCount} matches · ${sess.players.length} players`
       :`${d} · Legacy · ${mCount} matches · ${sess.players.length} players`;
 
     const stdRows=[...sess.players].sort((a,b)=>{if(b.wins!==a.wins)return b.wins-a.wins;const pda=a.ptsFor-a.ptsAgainst,pdb=b.ptsFor-b.ptsAgainst;if(pdb!==pda)return pdb-pda;return b.sRating-a.sRating;}).map((sp,i)=>{
@@ -4571,7 +4571,7 @@ function renderArchive(){
     const matchHistory=isLL
       ?`<div class="empty" style="font-size:.72rem">🏆 Timed Ladder Live — ${sess.llRounds||0} round${(sess.llRounds||0)===1?'':'s'}. Per-game log isn't kept for this format.</div>`
       :matchRows
-      ?`<div class="hr"><div class="hrhd" onclick="this.nextElementSibling.classList.toggle('open')"><span>${isCF?`ALL MATCHES (${mCount})`:'LEGACY MATCHES (read-only)'} ▸</span><span style="font-size:.69rem">${isCF?'⚡ CF':'📦 Legacy'}</span></div><div class="hr-body open">${matchRows}</div></div>`
+      ?`<div class="hr"><div class="hrhd" onclick="this.nextElementSibling.classList.toggle('open')"><span>${isCF?`ALL MATCHES (${mCount})`:'LEGACY MATCHES (read-only)'} ▸</span><span style="font-size:.69rem">${isCF?'⚡ Open Play':'📦 Legacy'}</span></div><div class="hr-body open">${matchRows}</div></div>`
       :'<div class="empty">No matches recorded</div>';
 
     return `<div class="arch-sess">
@@ -5414,7 +5414,7 @@ function buildSessionReport(){
     const hr='-'.repeat(width);
     const lines=[sess.name,`${'='.repeat(sess.name.length)}`,
       new Date(sess.date).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'}),
-      '⚡ Continuous Flow Mode',hr,''];
+      '⚡ Open Play Mode',hr,''];
     // CF session: flat match log grouped by court
     const cfLog=sess.cfLog||[];
     lines.push(`${cfLog.length} matches played`,'');
@@ -5590,7 +5590,7 @@ function doEndSession(){
     const pb=document.getElementById('prog-bar');if(pb)pb.style.width='0%';
     updateHeader();renderDB();renderRoster();renderHistory();renderArchive();renderStandings();updatePvSessFilter();
     const totalM=(arch.cfLog||[]).length;
-    const modeLabel=`${totalM} matches · Continuous Flow`;
+    const modeLabel=`${totalM} matches · Open Play`;
     // Rank by WINS → point diff (same order as the Standings tab + player leaderboard), NOT rating —
     // so "who won the night" is consistent across every surface. Show point-diff (the tiebreaker).
     const _finalRows=_sessionLbRows(arch).map((sp,i)=>{
@@ -9518,7 +9518,7 @@ try{this.batchGenerateSuggestions([courtNum],{[courtNum]:m});}
     if(!S.session)return;
     const isLobby=S.session.status==='lobby';
     const el=document.getElementById('cf-sess-lbl');
-    if(el)el.textContent=isLobby?'CHECK-IN LOBBY':(S.session.name||'CONTINUOUS FLOW');
+    if(el)el.textContent=isLobby?'CHECK-IN LOBBY':(S.session.name||'OPEN PLAY');
     const sub=document.getElementById('cf-sess-sub');
     if(sub){
       if(isLobby){
