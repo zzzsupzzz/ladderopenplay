@@ -4082,6 +4082,26 @@ function _waitGapStats(games,joinMc,absences,resumeMc){
   }
   return {maxWait:maxW,avgWait:n?parseFloat((sumW/n).toFixed(1)):0};
 }
+// Ladder Live standings: the point-differential ladder (the CF matchmaking columns — OPP Δ / P.GAP /
+// P/G / WAIT — don't apply to the timed format). Built from the synced session.players.
+function _llStandingsTableHtml(sess,isFinal){
+  const rows=[...(sess.players||[])].map(sp=>({sp,diff:(sp.ptsFor||0)-(sp.ptsAgainst||0)}))
+    .sort((a,b)=>(b.diff-a.diff)||((b.sp.sRating||0)-(a.sp.sRating||0)));
+  const date=new Date(sess.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+  const header=isFinal
+    ?`<div style="font-size:.68rem;font-weight:700;color:var(--go);letter-spacing:.05em;margin-bottom:8px">🏁 FINAL LADDER — ${esc(sess.name)} <span style="font-weight:400;color:var(--mu)">&nbsp;·&nbsp;${date}</span></div>`
+    :`<div style="font-size:.68rem;font-weight:700;color:var(--gr);letter-spacing:.05em;margin-bottom:8px"><span class="pulse" style="display:inline-block;margin-right:4px"></span>LIVE LADDER <span style="font-weight:400;color:var(--mu)">· ranked by point differential</span></div>`;
+  const body=rows.map(({sp,diff},i)=>{
+    const d2=(sp.sRating||0)-(sp.startRating||0);
+    return `<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td>`+
+      `<td style="font-weight:600;font-size:.79rem">${esc(sp.name||'?')}${sp.tag?`<span class="ptag">${esc(sp.tag)}</span>`:''}</td>`+
+      `<td style="font-size:.72rem;color:var(--mu)">${sp.wins||0}W/${sp.losses||0}L${sp.ties?'/'+sp.ties+'T':''}</td>`+
+      `<td><span class="dl ${diff>0?'du':diff<0?'dd':'dz'}">${diff>=0?'+':''}${diff}</span></td>`+
+      `<td><span class="dl ${d2>0?'du':d2<0?'dd':'dz'}">${d2>=0?'+':''}${d2}</span></td>`+
+      `<td><span class="rv">${Math.round(sp.sRating||0)}</span></td></tr>`;
+  }).join('');
+  return header+`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Ranked matches W-L">W-L</th><th title="Point differential — the ladder order">+/−</th><th title="Rating change tonight">ΔRTG</th><th title="Current rating">RTG</th></tr></thead><tbody>${body}</tbody></table>`;
+}
 function renderSessStd(){
   const el=document.getElementById('sess-std');
   if(!el)return;
@@ -4109,6 +4129,9 @@ function renderSessStd(){
   const isFinal=!S.session&&S.archive.length>0;
 
   if(!sess){el.innerHTML=`<div class="empty">No session yet — start one from Setup.</div>`;return;}
+
+  // Ladder Live → point-differential ladder (not the CF matchmaking columns)
+  if(sess.format==='ll'){ el.innerHTML=_llStandingsTableHtml(sess,isFinal); return; }
 
   // Header label
   const labelHtml=isFinal

@@ -1849,7 +1849,7 @@ const SIM = (() => {
       <div class="row">
         <div><label>Players</label><input type="number" id="sim-players" value="26" min="4" max="48"/></div>
         <div><label>Courts</label><input type="number" id="sim-courts" value="4" min="1" max="6"/></div>
-        <div><label>Rounds</label><input type="number" id="sim-rounds" value="20" min="5" max="100"/></div>
+        <div><label>Rounds</label><input type="number" id="sim-rounds" value="12" min="5" max="100"/></div>
       </div>
       <label>Speed</label>
       <select id="sim-speed">
@@ -1859,25 +1859,8 @@ const SIM = (() => {
         <option value="normal" selected>Normal (1.5s)</option>
         <option value="slow">Slow (3s) — multi-device demo</option>
       </select>
-      <div class="sim-chk">
-        <input type="checkbox" id="sim-live" checked/>
-        <label for="sim-live">Live sync to Firebase</label>
-      </div>
-      <div class="sim-chk">
-        <input type="checkbox" id="sim-step"/>
-        <label for="sim-step">Step mode (pause after each action)</label>
-      </div>
       <button class="sim-go" id="sim-ll-btn" style="background:#fbbf24;color:#1c0f00;font-weight:700" onclick="SIM._uiRunLadder()">🏆 Run Ladder Live — timed rounds (uses Players / Courts / Rounds above)</button>
-      <div style="font-size:10px;color:#64748b;margin:9px 0 2px;letter-spacing:.5px">CONTINUOUS FLOW — legacy (dormant engine)</div>
-      <button class="sim-go" id="sim-run-btn" onclick="SIM._uiRun()">▶ Run Custom (CF)</button>
-      <button class="sim-go" style="background:#34d399;color:#052e16" onclick="SIM.run14({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">14p / 2c</button>
-      <button class="sim-go" style="background:#2dd4bf;color:#04201c" onclick="SIM.run15({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">15p / 2c</button>
-      <button class="sim-go" style="background:#14b8a6;color:#04201c" onclick="SIM.run16({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">16p / 2c</button>
-      <button class="sim-go" style="background:#38bdf8;color:#0c1a2e" onclick="SIM.run20({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">20p / 3c</button>
-      <button class="sim-go" style="background:#f59e0b;color:#1c0f00" onclick="SIM.run26({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">26p / 4c</button>
-      <button class="sim-go" style="background:#a78bfa;color:#1a0540" onclick="SIM.runOrganizer12({speed:document.getElementById('sim-speed')?.value||'fast',live:document.getElementById('sim-live')?.checked??false})">⛓️ Organizer 14p/2c</button>
-      <button class="sim-bug" onclick="SIM.runPermPairCheck()">🔒 Perm Pair Stress Test</button>
-      <button class="sim-continue" id="sim-continue-btn" onclick="SIM._continue()" style="display:none;background:#fb923c;color:#111">Continue</button>
+      <div style="font-size:10px;color:#64748b;margin:4px 0 2px">Offline only — never writes to Firebase.</div>
       <button class="sim-stop" id="sim-stop-btn" onclick="SIM.stop()" disabled>Stop</button>
       <div id="sim-log"></div>`;
     document.body.appendChild(panel);
