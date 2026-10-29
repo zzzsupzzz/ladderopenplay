@@ -471,8 +471,8 @@ body.observer-mode .qs-row{display:none!important}
       <button class="btn bg2 sm" style="margin-left:auto" onclick="openShareModal()" title="Share read-only player view link">📱 Player Link</button>
     </div>
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:12px;background:rgba(34,211,238,.07);border:1px solid rgba(34,211,238,.25);border-radius:8px;padding:5px 11px">
-      <span style="font-size:.8rem;color:var(--cy);font-weight:700">⚡ Open Play</span>
-      <span style="font-size:.72rem;color:var(--mu)">each court finishes independently</span>
+      <span style="font-size:.8rem;color:var(--go);font-weight:700">🏆 Ladder Live</span>
+      <span style="font-size:.72rem;color:var(--mu)">timed rounds — all courts finish together, then re-sort</span>
     </div>
     <div id="flow-mode-opts">
       <div style="margin-bottom:8px"><label>SESSION NAME</label><input id="sess-name-flow" class="inp" placeholder="Saturday Open Play…"/></div>
@@ -481,10 +481,10 @@ body.observer-mode .qs-row{display:none!important}
         <div><label>SCORE TARGET</label><input id="target-score" class="inp" type="number" value="11" min="1" max="99" title="Games are played to this score. Ties and scores below target will be flagged."/></div>
       </div>
       <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--ra);padding:9px 12px;font-size:.74rem;color:var(--mu);line-height:1.7">
-        <span style="color:var(--cy);font-weight:700">Skill-based queue</span> — best match pulled when a court opens.<br/>
+        <span style="color:var(--cy);font-weight:700">Timed rounds</span> — every court plays on one clock; at the buzzer all courts stop and you enter the scores.<br/>
         <span style="color:var(--gr);font-weight:700">NR players</span> — rated after 5 games; set level (NR-B/M/A) when adding.<br/>
-        <span style="color:var(--or);font-weight:700">Fair play</span> — everyone plays once before anyone plays twice; missed 3 rounds = guaranteed next spot.<br/>
-        <span style="color:var(--go);font-weight:700">Partner split</span> — winning pair splits after 2 consecutive wins together.
+        <span style="color:var(--or);font-weight:700">Rest rotation</span> — with more players than court slots, everyone takes fair turns sitting out (never twice in a row).<br/>
+        <span style="color:var(--go);font-weight:700">Climb</span> — courts re-sort by performance each round; win to rise toward the top court.
       </div>
     </div>
     <label style="margin-top:10px;display:block">NUMBER OF COURTS</label>
@@ -3005,7 +3005,7 @@ function beginPlay(format){
   }
   if(S.session.activePlayers.length<4){toast('Need at least 4 players to begin','err');return;}
   S.session.status='active';
-  S.session.format=(format==='ll')?'ll':'cf'; // 'll' = Ladder Live (timed), else Continuous Flow
+  S.session.format=(format==='cf')?'cf':'ll'; // default = Ladder Live (timed); only explicit 'cf' starts Continuous Flow (dormant)
   S.session.sessionStart=Date.now();
   // Recompute NR start ratings now that full roster is known
   const ratedRatings=S.session.activePlayers
@@ -3842,11 +3842,8 @@ function _renderLobby(){
         </div>
         <div style="display:flex;gap:7px;flex-wrap:wrap">
           <button class="btn bd2 sm" onclick="discardLobby()">✕ Discard</button>
-          <button class="btn bp" style="${canBegin?'':'opacity:.5;pointer-events:none'}" onclick="beginPlay()" ${canBegin?'':'disabled'}>
-            ▶ Begin Play${canBegin?' ('+players.length+')':'  — need 4+'}
-          </button>
-          <button class="btn bc" style="${canBegin?'':'opacity:.5;pointer-events:none'}" onclick="beginPlay('ll')" ${canBegin?'':'disabled'} title="Timed synchronized ladder: everyone on one clock, re-sorted by performance each game, climb the board">
-            🏆 Ladder Live${canBegin?' ('+players.length+')':''}
+          <button class="btn bp" style="${canBegin?'':'opacity:.5;pointer-events:none'}" onclick="beginPlay('ll')" ${canBegin?'':'disabled'} title="Timed Ladder Live: everyone on one clock, all courts finish together each round, re-sorted by performance">
+            🏆 Begin Play${canBegin?' ('+players.length+')':'  — need 4+'}
           </button>
         </div>
       </div>
@@ -4096,7 +4093,7 @@ function renderSessStd(){
     const canBegin=players.length>=4;
     el.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:8px">
         <div style="font-size:.68rem;color:var(--mu)">Skill preview — ${players.length} players · begin play to start matching</div>
-        ${canBegin?`<button class="btn bp sm" onclick="beginPlay()">▶ Begin Play (${players.length})</button>`:''}
+        ${canBegin?`<button class="btn bp sm" onclick="beginPlay('ll')">🏆 Begin Play (${players.length})</button>`:''}
       </div>`+
       `<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Current rating">RTG</th></tr></thead><tbody>`+
       players.map((p,i)=>`<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.79rem">${esc(p.name)}${p.tag?`<span class="ptag">${esc(p.tag)}</span>`:''}${p.isNR?`<span class="nr-badge">NR</span>`:''}</td><td><span class="rv">${p.isNR?'NR':Math.round(p.rating)}</span></td></tr>`).join('')+
