@@ -3767,23 +3767,26 @@ function _renderLiveInternal(){
   const none=!S.session;
   document.getElementById('live-empty').style.display=none?'block':'none';
   const cfw=document.getElementById('cf-live-wrap');
+  const llw=document.getElementById('ll-live-wrap');
 
   if(!S.session){
     document.getElementById('live-empty').style.display='block';
     if(cfw)cfw.style.display='none';
+    if(llw){llw.style.display='none';llw.innerHTML='';} // clear the stale Ladder Live view when the session ends
+    if(LL._tickInt){clearInterval(LL._tickInt);LL._tickInt=null;}
     return;
   }
 
   if(status==='lobby'){
     document.getElementById('live-empty').style.display='none';
     if(cfw)cfw.style.display='block';
+    if(llw)llw.style.display='none';
     _renderLobby();
     return;
   }
 
   // Active session
   document.getElementById('live-empty').style.display='none';
-  const llw=document.getElementById('ll-live-wrap');
   if(S.session.format==='ll'){
     // Ladder Live (timed): render the synchronized-round view; hide the Continuous Flow view.
     if(cfw)cfw.style.display='none';
