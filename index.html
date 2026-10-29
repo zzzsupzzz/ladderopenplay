@@ -4085,22 +4085,25 @@ function _waitGapStats(games,joinMc,absences,resumeMc){
 // Ladder Live standings: the point-differential ladder (the CF matchmaking columns — OPP Δ / P.GAP /
 // P/G / WAIT — don't apply to the timed format). Built from the synced session.players.
 function _llStandingsTableHtml(sess,isFinal){
-  const rows=[...(sess.players||[])].map(sp=>({sp,diff:(sp.ptsFor||0)-(sp.ptsAgainst||0)}))
-    .sort((a,b)=>(b.diff-a.diff)||((b.sp.sRating||0)-(a.sp.sRating||0)));
+  // Ladder order = AVG point diff per game (pace-fair). Total diff kept in the cell tooltip.
+  const rows=[...(sess.players||[])].map(sp=>{const diff=(sp.ptsFor||0)-(sp.ptsAgainst||0), g=sp.matchesPlayed||0;
+      return {sp,diff,g,avg:g>0?diff/g:0};})
+    .sort((a,b)=>(b.avg-a.avg)||((b.sp.sRating||0)-(a.sp.sRating||0)));
   const date=new Date(sess.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
   const header=isFinal
     ?`<div style="font-size:.68rem;font-weight:700;color:var(--go);letter-spacing:.05em;margin-bottom:8px">🏁 FINAL LADDER — ${esc(sess.name)} <span style="font-weight:400;color:var(--mu)">&nbsp;·&nbsp;${date}</span></div>`
-    :`<div style="font-size:.68rem;font-weight:700;color:var(--gr);letter-spacing:.05em;margin-bottom:8px"><span class="pulse" style="display:inline-block;margin-right:4px"></span>LIVE LADDER <span style="font-weight:400;color:var(--mu)">· ranked by point differential</span></div>`;
-  const body=rows.map(({sp,diff},i)=>{
+    :`<div style="font-size:.68rem;font-weight:700;color:var(--gr);letter-spacing:.05em;margin-bottom:8px"><span class="pulse" style="display:inline-block;margin-right:4px"></span>LIVE LADDER <span style="font-weight:400;color:var(--mu)">· ranked by avg pt diff / game</span></div>`;
+  const av=x=>`${x>=0?'+':''}${x.toFixed(1)}`;
+  const body=rows.map(({sp,diff,g,avg},i)=>{
     const d2=(sp.sRating||0)-(sp.startRating||0);
     return `<tr class="r${i+1}"><td><span class="rnk">${i+1}</span></td>`+
       `<td style="font-weight:600;font-size:.79rem">${esc(sp.name||'?')}${sp.tag?`<span class="ptag">${esc(sp.tag)}</span>`:''}</td>`+
       `<td style="font-size:.72rem;color:var(--mu)">${sp.wins||0}W/${sp.losses||0}L${sp.ties?'/'+sp.ties+'T':''}</td>`+
-      `<td><span class="dl ${diff>0?'du':diff<0?'dd':'dz'}">${diff>=0?'+':''}${diff}</span></td>`+
+      `<td><span class="dl ${avg>0?'du':avg<0?'dd':'dz'}" title="total ${diff>=0?'+':''}${diff} over ${g}g">${av(avg)}</span></td>`+
       `<td><span class="dl ${d2>0?'du':d2<0?'dd':'dz'}">${d2>=0?'+':''}${d2}</span></td>`+
       `<td><span class="rv">${Math.round(sp.sRating||0)}</span></td></tr>`;
   }).join('');
-  return header+`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Ranked matches W-L">W-L</th><th title="Point differential — the ladder order">+/−</th><th title="Rating change tonight">ΔRTG</th><th title="Current rating">RTG</th></tr></thead><tbody>${body}</tbody></table>`;
+  return header+`<table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Ranked matches W-L">W-L</th><th title="Avg point differential per game — the ladder order">+/− /g</th><th title="Rating change tonight">ΔRTG</th><th title="Current rating">RTG</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 function renderSessStd(){
   const el=document.getElementById('sess-std');
@@ -11609,9 +11612,12 @@ const LL={
   // Night standings — cumulative point differential (pace-fair), then rating.
   standings(){
     const P=this._ll().players;
-    return Object.values(P).map(p=>({id:p.id, diff:p.pf-p.pa, pf:p.pf, pa:p.pa,
-      rating:Math.round(p.rating), games:p.games, rests:p.rests}))
-      .sort((a,b)=>(b.diff-a.diff)||(b.rating-a.rating));
+    // Rank by AVG point diff per game (pace-fair): resting more (forced rotation), arriving late, or
+    // leaving early doesn't drag you down vs someone who just played more rounds. `diff` (total) is
+    // kept for display/sim; avgDiff is the sort key. Guard games=0 → avgDiff 0 (no divide-by-zero).
+    return Object.values(P).map(p=>{const diff=p.pf-p.pa, g=p.games||0;
+      return {id:p.id, diff, avgDiff:g>0?diff/g:0, pf:p.pf, pa:p.pa, rating:Math.round(p.rating), games:g, rests:p.rests};})
+      .sort((a,b)=>(b.avgDiff-a.avgDiff)||(b.rating-a.rating));
   },
 
   // ── Phase 2: live UI ──────────────────────────────────────────────────────
@@ -11668,9 +11674,10 @@ const LL={
   standingsHTML(){
     const s=this.standings(); if(!s.length) return '';
     const nm=id=>esc(gp(id)?.name||gsp(id)?.name||'?');
-    return `<div class="card"><div class="ct">📊 Live Ladder <span style="font-size:.6rem;color:var(--mu)">by point differential</span></div>
-      <table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Cumulative point differential">+/−</th><th title="Live rating">RTG</th><th title="Games played">G</th></tr></thead><tbody>
-      ${s.map((p,i)=>`<tr><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.79rem">${nm(p.id)}</td><td><span class="dl ${p.diff>0?'du':p.diff<0?'dd':'dz'}">${p.diff>=0?'+':''}${p.diff}</span></td><td><span class="rv">${p.rating}</span></td><td style="font-size:.71rem;color:var(--mu)">${p.games}</td></tr>`).join('')}
+    const av=x=>`${x>=0?'+':''}${x.toFixed(1)}`;
+    return `<div class="card"><div class="ct">📊 Live Ladder <span style="font-size:.6rem;color:var(--mu)">avg pt diff / game</span></div>
+      <table class="stbl"><thead><tr><th>#</th><th>PLAYER</th><th title="Avg point differential per game — the ladder order">+/− /g</th><th title="Live rating">RTG</th><th title="Games played">G</th></tr></thead><tbody>
+      ${s.map((p,i)=>`<tr><td><span class="rnk">${i+1}</span></td><td style="font-weight:600;font-size:.79rem">${nm(p.id)}</td><td><span class="dl ${p.avgDiff>0?'du':p.avgDiff<0?'dd':'dz'}" title="total ${p.diff>=0?'+':''}${p.diff} over ${p.games}g">${av(p.avgDiff)}</span></td><td><span class="rv">${p.rating}</span></td><td style="font-size:.71rem;color:var(--mu)">${p.games}</td></tr>`).join('')}
       </tbody></table></div>`;
   },
   _paint(){ const el=document.getElementById('ll-live-wrap'); if(el) el.innerHTML=this.renderLive(); this._ensureTick(); },

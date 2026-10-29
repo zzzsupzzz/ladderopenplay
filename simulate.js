@@ -2019,7 +2019,7 @@ const SIM = (() => {
       st.forEach((p, i) => {
         const nm = gp(p.id)?.name || '?'; const seed = seedRank[p.id];
         const mv = typeof seed === 'number' ? seed - (i + 1) : 0;
-        log(`#${i + 1} ${nm} — diff ${p.diff >= 0 ? '+' : ''}${p.diff} · rtg ${p.rating} · ${p.games}g${mv !== 0 ? ` (${mv > 0 ? '▲' + mv : '▼' + (-mv)} from #${seed})` : ''}`);
+        log(`#${i + 1} ${nm} — ${p.avgDiff >= 0 ? '+' : ''}${p.avgDiff.toFixed(1)}/g (tot ${p.diff >= 0 ? '+' : ''}${p.diff}) · rtg ${p.rating} · ${p.games}g${mv !== 0 ? ` (${mv > 0 ? '▲' + mv : '▼' + (-mv)} from #${seed})` : ''}`);
       });
       // ── MATCHMAKING QUALITY ──
       const mean = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0;

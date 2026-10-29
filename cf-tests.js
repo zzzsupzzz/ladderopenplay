@@ -891,11 +891,39 @@ try {
   }
   ok(Pc()[target].rating > startRating + 50, `climb: a bottom player winning big rises (${startRating}→${Math.round(Pc()[target].rating)})`);
   ok(bestCourt < startCourt, `climb: that player moves UP courts — started court ${startCourt}, reached court ${bestCourt} (re-band isn't capped at ±1)`);
-  // standings sorted by point differential
+  // standings sorted by avg point differential per game (pace-fair)
   const st = APP.LL.standings();
-  ok(st.length === 18 && st[0].diff >= st[st.length - 1].diff, 'standings ranked by cumulative point differential');
+  ok(st.length === 18 && st[0].avgDiff >= st[st.length - 1].avgDiff, 'standings ranked by avg point differential per game');
 } catch (e) {
   fail++; console.error('  ❌ Ladder Live engine test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
+}
+
+// ── Tests: Ladder Live standings — avg point diff per game (pace-fair) ───────
+// The night ladder ranks by AVG point diff per game, not cumulative total — so resting more
+// (forced rotation), arriving late, or leaving early doesn't drag a player down vs someone who
+// simply played more rounds.
+section('Ladder Live — standings: avg point diff per game (pace-fair)');
+try {
+  makeSession(8, 2); APP.LL.init(2);
+  const P = S.session.ll.players; const ids = Object.keys(P);
+  // A: 2 games, +10 total → avg +5.0 (fewer games)
+  P[ids[0]].games = 2; P[ids[0]].pf = 22; P[ids[0]].pa = 12;
+  // B: 5 games, +15 total → avg +3.0 (bigger TOTAL, smaller per-game)
+  P[ids[1]].games = 5; P[ids[1]].pf = 55; P[ids[1]].pa = 40;
+  // everyone else flat
+  ids.slice(2).forEach(id => { P[id].games = 3; P[id].pf = 30; P[id].pa = 30; });
+  const st = APP.LL.standings();
+  const posA = st.findIndex(p => p.id === ids[0]);
+  const posB = st.findIndex(p => p.id === ids[1]);
+  ok(posA < posB, `fewer games + higher per-game diff ranks ABOVE a bigger total diff (A #${posA + 1} < B #${posB + 1})`);
+  ok(Math.abs(st[posA].avgDiff - 5) < 1e-9, `A avgDiff = total/games (+5.0, got ${st[posA].avgDiff})`);
+  ok(Math.abs(st[posB].avgDiff - 3) < 1e-9, `B avgDiff = total/games (+3.0, got ${st[posB].avgDiff})`);
+  // zero-games player must not divide-by-zero
+  P[ids[0]].games = 0; P[ids[0]].pf = 0; P[ids[0]].pa = 0;
+  const z = APP.LL.standings().find(p => p.id === ids[0]);
+  ok(z.avgDiff === 0 && !Number.isNaN(z.avgDiff), 'zero-games player has avgDiff 0 (no NaN)');
+} catch (e) {
+  fail++; console.error('  ❌ LL avg-diff standings test threw: ' + (e && e.message));
 }
 
 // ── Tests: Ladder Live UI render output (Phase 2) ───────────────────────────
@@ -915,7 +943,7 @@ try {
   ok(/VS/.test(html), 'matchups shown');
   ok(/Resting this game \(8\)/.test(html), '8 of 16 resting shown (W = 16 − 4×2)');
   ok(/Submit scores/.test(html), 'submit-and-advance button present');
-  ok(/Live Ladder/.test(html) && /point differential/.test(html), 'live ladder standings embedded');
+  ok(/Live Ladder/.test(html) && /avg pt diff/.test(html), 'live ladder standings embedded (avg pt diff/game label)');
 } catch (e) {
   fail++; console.error('  ❌ Ladder Live UI render test threw: ' + (e && e.message) + '\n' + (e && e.stack || ''));
 }
