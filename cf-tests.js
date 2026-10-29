@@ -1058,6 +1058,7 @@ try {
     makeSession(8, 2); APP.LL.init(2);
     const P = S.session.ll.players; const ids = Object.keys(P);
     P[ids[0]].rating = 1000; P[ids[1]].rating = 1000; P[ids[2]].rating = 1100; P[ids[3]].rating = 1100;
+    [ids[0], ids[1], ids[2], ids[3]].forEach(id => P[id].games = 3); // settled (past warm-up) → full K
     const r0 = P[ids[0]].rating;
     S.session.ll.current = { games: [{ court: 1, t1: [ids[0], ids[1]], t2: [ids[2], ids[3]] }], resting: [] };
     S.session.ll.gameNum = 1;
@@ -1199,6 +1200,29 @@ try {
   eq(P(0, 1, 0, 4, false), true, 'invalid remote version → preserve (can\'t trust it)');
 } catch (e) {
   fail++; console.error('  ❌ archive shrink-guard test threw: ' + (e && e.message));
+}
+
+// ── Tests: Ladder Live timed — warm-up K ramp ──────────────────────────────
+// Each player's first 1-2 games move the ladder gently (~40% then ~70% of full), then full strength,
+// so a cold start / fluke doesn't swing a stale seed hard. Games still count.
+section('Ladder Live — timed: warm-up K ramp');
+try {
+  const move = (xGames) => {
+    makeSession(8, 2); APP.LL.init(2);
+    const P = S.session.ll.players; const ids = Object.keys(P);
+    P[ids[0]].rating = 1000; P[ids[1]].rating = 1000; P[ids[2]].rating = 1100; P[ids[3]].rating = 1100;
+    [ids[0], ids[1], ids[2], ids[3]].forEach(id => P[id].games = xGames);
+    const r0 = P[ids[0]].rating;
+    S.session.ll.current = { games: [{ court: 1, t1: [ids[0], ids[1]], t2: [ids[2], ids[3]] }], resting: [] };
+    APP.LL.recordGame({ 1: [11, 0] });
+    return Math.abs(P[ids[0]].rating - r0);
+  };
+  const g1 = move(1), g2 = move(2), g3 = move(3);
+  ok(g1 < g3, `1st game moves less than a settled game (${g1} < ${g3})`);
+  ok(g2 > g1 && g2 < g3, `2nd game ramps between 1st and settled (${g1} < ${g2} < ${g3})`);
+  ok(Math.abs(g1 - g3 * 0.4) <= 1, `1st game ≈ 40% of full-strength (${g1} vs ${(g3 * 0.4).toFixed(1)})`);
+} catch (e) {
+  fail++; console.error('  ❌ LL warm-up test threw: ' + (e && e.message));
 }
 
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);

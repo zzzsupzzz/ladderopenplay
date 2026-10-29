@@ -11570,6 +11570,10 @@ const LL={
     return ll.current;
   },
 
+  // Warm-up ramp: a player's 1st game moves at 40% strength, 2nd at 70%, then full. `games` already
+  // includes the game being scored (buildGame incremented it), so games===1 is their first game.
+  _warmupFactor(games){ return games<=1?0.4:games===2?0.7:1; },
+
   // ── Step 6: apply scores → move ratings (margin-aware) + bank points ─────────
   // scoresByCourt: {courtNum: [s1, s2]}. Winners rise, losers fall; margin scales the move.
   recordGame(scoresByCourt){
@@ -11587,9 +11591,12 @@ const LL={
       // (winner = target) has evidence 1 (unchanged); a barely-played 2-0 moves almost nothing.
       const target=(S.session?.targetScore)||11;
       const evidence=Math.max(0,Math.min(1,Math.max(s1,s2)/target));
-      const delta=Math.round(this.K*mov*evidence*(act1-e1)); // + if t1 over-performed
-      g.t1.forEach(id=>{P[id].rating+=delta; P[id].pf+=s1; P[id].pa+=s2;});
-      g.t2.forEach(id=>{P[id].rating-=delta; P[id].pf+=s2; P[id].pa+=s1;});
+      const base=mov*evidence*(act1-e1); // signed move for t1, before K and the per-player warm-up ramp
+      // Warm-up: a player's first 1–2 games move the ladder gently (seed may be stale / K is aggressive),
+      // then full strength. Scored per player so rest rotation + late arrivals warm up on THEIR first games.
+      const mv=id=>Math.round(this.K*this._warmupFactor(P[id].games)*base);
+      g.t1.forEach(id=>{P[id].rating+=mv(id); P[id].pf+=s1; P[id].pa+=s2;});
+      g.t2.forEach(id=>{P[id].rating-=mv(id); P[id].pf+=s2; P[id].pa+=s1;});
       // Tally W/L/ties now — the log stores no teams, so it can't be reconstructed later.
       const bump=(id,k)=>{P[id][k]=(P[id][k]||0)+1;};
       if(s1>s2){ g.t1.forEach(id=>bump(id,'wins')); g.t2.forEach(id=>bump(id,'losses')); }
